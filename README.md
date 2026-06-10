@@ -98,6 +98,44 @@ database.
 
 ---
 
+## First live run
+
+Runs a real `deliver-intent` goal ("Ship a word-count CLI") against
+OpenRouter's Anthropic models.  The factory splits the goal, implements the
+artifact, judges it, and optionally repairs it — all via live LLM calls.
+
+**Setup**
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...      # required
+
+# Optional: pin specific model versions
+export CORELLIA_MODEL_HAIKU=anthropic/claude-haiku-latest
+export CORELLIA_MODEL_SONNET=anthropic/claude-sonnet-latest
+export CORELLIA_MODEL_OPUS=anthropic/claude-opus-4-5
+```
+
+**Run**
+
+```bash
+npm run live
+```
+
+Artifacts land in `out/live/`; the full event log at `out/live/events.jsonl`.
+The script also runs a smoke test of the produced CLI and prints a brain-call
+summary (decide / produce / judge / repair counts).
+
+**Expected cost** — a small tree like this typically issues ~10–20 LLM calls
+(a few decides, one or two produces, one or two judge calls at haiku/sonnet
+class).  At current OpenRouter haiku pricing that is well under $0.01.
+
+**Defaults chosen from `GET https://openrouter.ai/api/v1/models`** (checked
+2026-06-10): `anthropic/claude-haiku-latest` (haiku tier),
+`anthropic/claude-sonnet-latest` (sonnet tier), `anthropic/claude-opus-4-5`
+(opus tier).  Re-check that endpoint if you want newer versions.
+
+---
+
 ## Using LlmBrain with any OpenAI-compatible provider
 
 `LlmBrain` talks to any chat-completions endpoint. Supply a `baseUrl`, an
@@ -118,15 +156,10 @@ const brain = new LlmBrain({
 });
 
 // OpenRouter (access Anthropic, Mistral, Llama, etc. through one key)
-const brain = new LlmBrain({
-  baseUrl: 'https://openrouter.ai/api/v1',
-  apiKey: process.env.OPENROUTER_API_KEY ?? '',
-  modelByTier: {
-    haiku:  'anthropic/claude-haiku-4-5',
-    sonnet: 'anthropic/claude-sonnet-4-5',
-    opus:   'anthropic/claude-opus-4-5',
-  },
-});
+// openRouterConfig() reads OPENROUTER_API_KEY and optional CORELLIA_MODEL_*
+// overrides from process.env and returns a ready-to-use LlmBrainConfig.
+import { openRouterConfig } from './src/brains/openrouter.js';
+const brain = new LlmBrain(openRouterConfig());
 
 // Local (Ollama, LM Studio, etc.)
 const brain = new LlmBrain({
