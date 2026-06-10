@@ -59,7 +59,7 @@ downward:
 | `risk_class` | computed, not declared — instance risk from scope × sensitivity (see "The human enters…") |
 | `scope` | the impact set — files/regions this goal may touch, from the architecture artifact |
 | `budget` | `{attempts, tokens, wall_clock}` — **inherited and subdivided**: a parent splits its allowance among its children |
-| `memories` | parent-retrieved memory, injected as pointers (see "Memory") |
+| `memories` | parent-retrieved memory, injected as pointers with **provenance labels** (`provisional \| trusted`) — a provisional memory reads as suggestion, not fact (see "Memory") |
 
 And the child's return is not a bare artifact — it is a typed report, each
 stream routed differently at the integrate edge:
@@ -70,6 +70,7 @@ stream routed differently at the integrate edge:
 | **lessons encountered** | the parent, for eval-gated promotion to memory |
 | **memories used** | reinforcement writes (touch counts, outcomes) — the decay signal |
 | **blocker reports** | the improvement loop (friction that is the *factory's* fault — see "The improvement loop") |
+| **scope-insufficiency** | the parent — a child whose work cannot stay inside its declared scope cannot emit; the parent expands the scope (risk re-classified) or re-splits, consuming an attempt |
 | **out-of-scope findings** | proposed root goals (tickets) through admission — never in-tree fixes (one exception: a live secret in touched or adjacent code interrupts a human immediately) |
 
 This single contract is what absorbs most of the group's mechanisms without
@@ -170,7 +171,8 @@ eval can underwrite:
    **suggestion** — the split eval still runs fresh judgment against it.
 2. **Human signoff to trusted.** Promotion to *trusted/pinned-default* — walked
    verbatim, fresh derivation skipped — requires a one-time human signoff per
-   pattern (an authority gate, like the bootstrap signoff). This is where the
+   pattern: an instance of the authority gap, because trusting structure is an
+   act no eval can underwrite (see "The human enters…"). This is where the
    blast radius jumps from "one suggestion" to "the shape of every matching
    subtree," and no outcome statistic catches a bad mutation before it ships.
 3. **Demotion is deliberate too** — divergence in golden-set replay or a
@@ -210,9 +212,15 @@ sub-goals that needed a sibling's result)? Both are dependency errors.
 **The split gate precedes it.** Before a node spends a subtree, it passes a
 cheap pre-check: *do we have enough information to decompose?* — a mechanical
 coverage query against the knowledge artifacts (exists? fresh at this SHA?
-relevant to this goal?). Fail → **block** (decision brief), not an invented
-split. The gate is "can I responsibly split?"; the split eval is "was the split
-good?". Spend a cheap check before spending a subtree.
+relevant to this goal?). Failure splits two ways. **Discoverable** — the
+missing knowledge is in the world (the codebase, the docs): the node spawns JIT
+comprehension goals *as dependencies* and splits once they return.
+**Undiscoverable** — the missing information exists only in a human's head
+(ambiguous intent; a backend repo asked to grow a frontend with no conventions
+to mimic): the node **blocks** with a decision brief. The factory never invents
+— but it also never asks a human for what it can go find. The gate is "can I
+responsibly split?"; the split eval is "was the split good?". Spend a cheap
+check before spending a subtree.
 
 The split eval also underwrites **termination**, via two base cases tied to that
 dependency structure:
@@ -250,6 +258,29 @@ failure.
 
 Split and integration evals are contextual judgments (LLM-as-judge harnesses);
 goal-type evals are deterministic wherever possible.
+
+### The parent verifies; the child claims
+
+Authoritative verdicts are rendered at the **parent's integrate edge**. A
+child's "done" is a claim until the parent's eval says otherwise, and it is the
+parent that re-spawns a failed child at a higher tier. The parent *may*
+delegate judging to an eval-typed child (`critique` is already a goal-type) —
+delegation is just a split, so heavyweight judging inherits the full machinery
+(tiers, escalation, compounding eval-type memory) while trivial judging stays
+cheap. Deterministic checks are objective wherever they run; a child's
+self-checks are an inner loop, never the verdict.
+
+### Scope is enforced, not declared
+
+A deterministic **`diff ⊆ scope`** check runs at emission: the child's actual
+diff must lie within its declared scope. Violation means the child cannot emit
+— it returns a scope-insufficiency report, and the parent expands the scope
+(re-running `classify_risk` on the wider scope) or re-splits, consuming an
+attempt. `classify_risk` also re-runs on the **actual** diff at emission,
+catching sensitivity the declared scope misjudged. This check turns two norms
+into mechanisms: instance-risk gating cannot be bypassed by scope escape, and
+findings-become-tickets is structural — the only way out-of-scope knowledge
+leaves a node is through the findings stream.
 
 ## The control loop: eval → tier → human
 
@@ -292,26 +323,46 @@ participant. There are exactly three entry points, each closing a different gap:
 | Gap | Trigger | Path |
 | --- | --- | --- |
 | **Competence** | budget exhausted across rising tiers, or a block (insufficient information) | escalation to human (last resort) |
-| **Authority** | a high-stakes goal — by **type** (spend, deploy, delete, sign) *or* by **instance** (`classify_risk`: this goal's scope touches migrations, auth, secrets-adjacent files, compliance surfaces — sensitivity read from project knowledge) | mandatory gate before the act, regardless of confidence |
+| **Authority** | an act whose consequences outrun any eval — by **type** (spend, deploy, delete, sign, **trust-a-pattern**) *or* by **instance** (`classify_risk`: this goal's scope touches migrations, auth, secrets-adjacent files, compliance surfaces — sensitivity read from project knowledge) | mandatory gate before the act, regardless of confidence |
 | **Physical** | an act no agent can perform (speak aloud, tap a real device, sign) | human-as-tool (invoked mid-task, like web-search) |
+
+> **The authority gap is one principle: an act whose consequences outrun what
+> any eval can underwrite.** Irreversible external acts (spend, deploy, delete,
+> sign) are instances. So is **promoting a split-memo to trusted** — structure
+> has no verify-on-read, so no eval can underwrite trusting it (see "Memoized
+> splits"). One definition, one human act: sign before the consequence.
 
 Type-level gates alone miss instance risk: `modify-code` touching `auth.py` is
 not the same goal as `modify-code` touching a README. Risk is computed at split
 time from the goal's scope crossed with sensitivity facts in project knowledge;
-the gate fires on type **or** instance. Risk decides *where the human sits*,
-never whether work runs concurrently.
+the gate fires on type **or** instance — and risk is **re-checked at emission
+against the actual diff** (see "Scope is enforced, not declared"), so the gate
+cannot be bypassed by scope escape. Risk decides *where the human sits*, never
+whether work runs concurrently.
 
 **Every human touchpoint is a decision brief, and every brief has a deadline.**
 A brief is typed — `{question, options, links, deadline}` — never a transcript.
-**Timeout → the typed safe default** (deny the act / park the tree / bounce the
-goal back through admission). An unanswered human can never hang a tree; "mostly
-autonomous" is a liveness property, not just a ratio.
+**`on_timeout` is a required field** of every human touchpoint a goal-type
+declares — `deny | park | bounce` — and a type that omits it fails validation:
+the schema, not discipline, guarantees a safe default exists. **Parking
+releases the tree's scope reservation immediately** — an unanswered human never
+starves overlapping trees — **and carries a TTL**: resume re-acquires scope and
+treats re-entry as an ordinary checkpoint (pull-based re-verification makes it
+safe with no new machinery); past the TTL the tree winds down and its goal
+bounces back through admission. No hung trees, no zombie trees, no leaked
+reservations: "mostly autonomous" is a liveness property, not just a ratio.
 
 **Earned autonomy.** Risk thresholds are tuned per goal-type from trace history
 — a type with a long clean record needs the gate less often. More agent
 capability shrinks the physical gap; better models shrink the competence gap;
 earned trust shrinks the authority gap — and the traces are the mechanism by
 which trust is earned.
+
+**Counting honestly:** beyond the three in-run gaps, the design contains
+exactly two standing human acts — **admission** (triage of non-commissioned
+root goals: prioritization upstream of the factory, not factory operation) and
+the **pattern-trust signoff** (one-time per pattern, an instance of the
+authority gap). Both bounded, both enumerated; the gaps stay three.
 
 ## Memory: layered project × type × global, spawner-mediated
 
@@ -339,6 +390,10 @@ spawn and integrate edges, which keeps the recursive operation pure:
   leaf builder doesn't need a memory tool; it needs the right memories in its
   prompt. Types that genuinely need mid-task retrieval (the JIT deep-dive) get a
   `search_memory` **tool grant** — the existing mechanism, no special case.
+  Injected memories carry their **provenance label** (`provisional | trusted`):
+  a provisional memory reads as a suggestion to weigh, a trusted one as a fact
+  to rely on — trust state means something at read time, not only at write
+  time.
 - **Write — report, don't record.** Children return *lessons encountered* and
   *memories used*. The parent promotes lessons (eval-gated, provisional) and
   writes reinforcement for the memories actually used — touch counts, outcomes.
@@ -455,16 +510,26 @@ is, here, the **root goal-type's contract**, enforced by existing mechanisms:
 - **Reject early — the capability check is mechanical.** Required
   languages/tools from the spec vs. the tech-stack artifact; a goal outside the
   factory's capability envelope bounces at receive with a reason, not after a
-  burned subtree.
+  burned subtree. (At first contact there is no tech-stack artifact yet — the
+  check spawns its own cheap probe, reads the lockfiles, then bounces fast: it
+  goes and looks before it rejects.)
 - **Coverage check.** The split gate's query against the knowledge artifacts:
   fresh and relevant for this spec? Stale-and-relevant categories spawn targeted
-  refresh goals as dependencies.
+  refresh goals as dependencies; missing-and-relevant categories spawn
+  comprehension goals the same way — discovery is just-in-time (see
+  "Brownfield comprehension").
 - **Classify.** Memo lookup (does a trusted split-memo match this spec shape?)
   × `classify_risk` — two orthogonal lookups that decide the shape of the
   subtree and where the human sits.
 - **No code tools.** The root type's tool grant excludes them — "the
   orchestrator never generates code" is a property of a contract, not a rule
   about a component.
+
+One honest downgrade against the group's design: their orchestrator was a fixed
+pipeline, *structurally incapable* of open-ended behavior; Corellia's root is a
+full recursive node, bounded by **budget**. A weaker class of guarantee,
+accepted deliberately — it is the price of the uniform recursion, and the
+budget makes it an auditable price.
 
 ### Admission: the factory never approves its own work queue
 
@@ -476,6 +541,9 @@ root goals:
   become *proposed* root goals that pass **human triage** before any tree is
   spawned. Findings become tickets, not fixes; a CVE in an untouched dependency
   is a high-priority ticket; only a live secret interrupts immediately.
+  (Blocker-spawned *improvement* goals are the one carve-out — auto-admitted
+  inside the improvement loop's standing budget envelope; see "The improvement
+  loop.")
 - **The autonomous seam.** An **`event → root-goal` adapter** can synthesize an
   intent from a signal (a monitor, a Slack mention, a ticket) and feed the
   *same* tree below — autonomy is a new way to *create* a root goal, not a new
@@ -512,33 +580,44 @@ Consumption is a **typed retrieval API**, not context dumps — `find_symbol`,
 re-learning the repo. The typed artifacts are also what make the **split gate
 computable**: "do I have enough context?" is a coverage query, not a feeling.
 
-### Tiered: shallow map, then JIT deep-dive
+### Discovery is just-in-time — there is no bootstrap
 
-- **Shallow map (once, up front)** — the bootstrap: one comprehension-typed goal
-  fanning out per category. Cheap. Gives the root enough context to split
-  sensibly. **The first full bootstrap carries a one-time human signoff** (an
-  authority gate on its promotion) — after that, partial refreshes promote on
-  validation alone. Bootstrap is not a separate entry point: any first goal
-  against an unmapped repo simply *depends on* the bootstrap goal, and the
-  dependency mechanism sequences it.
-- **JIT deep-dive (per goal, on demand)** — a goal that will touch a region does
-  a deep comprehension of *that region only*, before changing it — spawned as a
-  dependency, its findings injected by the spawner. Deep understanding is paid
-  for exactly where work lands.
+There is no setup flow, no bootstrap ceremony, no entry-point distinction.
+Comprehension is **pulled into existence by the split gate**: a node that lacks
+the knowledge to decompose spawns JIT comprehension goals *as dependencies* and
+splits once they return. The first root against an unknown repo cannot split
+without a map, so "map enough to split this intent" becomes its first dependent
+child; a leaf that will change a region deep-dives *that region only*, as a
+dependency, before changing it — findings injected by the spawner like any
+other memory. Knowledge accretes exactly where work lands; a region no goal
+touches is never mapped; no comprehension is ever speculative.
 
-### Freshness: refresh on merge, verify on read
+This is the epistemic rule applied honestly: comprehension artifacts are
+**facts** — verifiable-on-read (a spot query, a scaffold that runs green, a
+lockfile checked against the build). Facts never needed a human to underwrite
+them; verify-on-read is their trust mechanism. A bootstrap signoff would
+compensate for a weakness this design doesn't have.
 
-**Every merge to a product repo's main is a standing signal into the listener —
-author-agnostic.** Factory PR, human dev, dependency bot: *the code changed,
-refresh your priors.* The minted refresh goal is **targeted per category by
-drift signals** — a lockfile diff wakes the deps category; merged UI PRs wake
-the design-system category; the architecture graph is cheap enough to re-index
-every merge. Full re-bootstraps are rare (first contact).
+The cost, taken knowingly: **first goals on a new repo run slower** — they
+carry the comprehension debt a bootstrap would have prepaid. That is the JIT
+trade.
 
-Push keeps the store fresh; **pull keeps it honest**: facts are verified on read
-(the artifact carries enough to check itself against the SHA), and a failed
-verification triggers a fresh JIT deep-dive. Staleness is a caught condition,
-never a silent wrong answer.
+### Freshness: verify on read; refresh on merge as an optimization
+
+**Pull is the correctness mechanism.** Facts are verified on read (the artifact
+carries enough to check itself against the SHA); a failed verification triggers
+a fresh JIT deep-dive. Staleness is a caught condition, never a silent wrong
+answer.
+
+**Push is a warmth optimization.** Every merge to a product repo's main —
+author-agnostic: factory PR, human dev, dependency bot — is a signal into the
+listener: *the code changed, refresh your priors.* The minted refresh goal
+targets only **already-built** artifacts whose drift signals fire (a lockfile
+diff wakes the deps artifact; merged UI PRs wake the design system; the
+architecture graph is cheap enough to re-index every merge — which matters,
+because admission-time scope scheduling queries `impact()` against it).
+Artifacts that don't exist are never refreshed — they are built on demand, when
+a goal needs them, never speculatively.
 
 ### The regression guard
 
@@ -607,7 +686,9 @@ and reactive adaptation (a *human or signal* landed a change).
 This is also Corellia's **named consistency model**: one authoritative store
 (a projection of one log, serialized at the append), live reads, and **bounded
 staleness — every reader is at most one checkpoint interval stale, and never
-silently wrong** (verify-on-read catches it at the moment of trust). The memory
+silently wrong at a moment of trust** (verify-on-read fires at decide / split /
+integrate; within a leaf's execution, the staleness window is the price of
+no-interrupts, paid knowingly). The memory
 sync question is closed, not open: adaptation happens **at decision boundaries,
 not instantaneously** — deliberately, because instantaneous preemption is what
 makes systems hard to reason about. Work that needs tighter responsiveness is a
@@ -645,10 +726,23 @@ factory **code**) are versioned artifacts needing review.
 - **Blockers spin out; they never block.** When a node hits friction that is
   the *factory's* fault — a stale skill, a wrong API client, a prompt that
   fights its tools — it files a **blocker report** in its return and keeps
-  working. **The factory never modifies itself mid-run.**
+  working. **The factory never modifies its code mid-run.**
+- **The invariant, stated precisely.** Strictly, the factory *does* modify
+  itself mid-run: memory writes are the designed lateral-coordination channel,
+  and injected type memory is effectively prompt text. The precise invariant:
+  **versioned behavior** (prompts, skills, types, evals) changes only by
+  human-reviewed PR, never mid-run; **memory** changes only through the
+  governed write path (eval-gated, provisional, contradiction-checked,
+  provenance-labeled at read). The memory-governance machinery carries real
+  safety weight here, and is named as such rather than hidden behind a slogan.
 - **The improvement loop is more goal-types**, rooted on blocker reports (plus
   stated rejection reasons that implicate the harness rather than the work),
-  minted by the listener, running beside product work. Its job is
+  minted by the listener, running beside product work inside a **standing
+  budget envelope** — the loop can never starve product work. The envelope is
+  also what justifies its admission carve-out: improvement goals auto-admit (no
+  human triage) because they consume only factory resources within a fixed
+  allowance and terminate at a human-reviewed PR anyway; product findings, by
+  contrast, spend roadmap attention, so they pass triage. Its job is
   **abstraction**: take the specific failure and propose the most general fix
   that covers it. **Generalize, don't cache** — "fetch current docs for the
   pinned version before writing client code," never "paste this doc text into
@@ -665,12 +759,19 @@ factory **code**) are versioned artifacts needing review.
   improvement-loop output. No factory-factory in v1: the loop terminates at a
   human-reviewed PR — which is also how the improver itself is evaluated and
   improved.
+- **The invariants are enforced by the factory's own deterministic gate.** The
+  factory repo's CI is a **constitution check**: no goal-type may grant
+  merge-to-main on a product repo, self-approval, or an untyped human exit; no
+  deterministic-gate declaration may take `intent` as an input; every human
+  touchpoint must declare `on_timeout`. An improvement PR that violates the
+  constitution is rejected by a linter before a maintainer ever reads it —
+  deterministic-before-judge, applied to the factory itself.
 
 ## How this satisfies the hard requirements
 
 | OUTLINE requirement | Satisfied by |
 | --- | --- |
-| Build on brownfield projects | recursive comprehension front-end + typed knowledge artifacts + project memory anchored to the codebase |
+| Build on brownfield projects | JIT recursive comprehension (no bootstrap) + typed knowledge artifacts + project memory anchored to the codebase |
 | Organize roles in the build | emergent roles — a library of goal-types, no imposed org chart |
 | Evals on handoffs between roles | the split gate + the three evals (split / goal-type / integration), calibrated by replay |
 | Defined inputs and outputs | every goal-type is a typed I/O contract; one handoff schema at every level, both directions |
@@ -689,28 +790,29 @@ factory **code**) are versioned artifacts needing review.
 | Facts vs structure | the epistemic rule: verifiable-on-read → memory with decay; outcome-only-validatable → versioned artifact |
 | Handoff contract | one schema every level, both directions — down: spec/intent/risk/scope/budget/memories; up: artifact/proof/lessons/memories-used/blockers/findings |
 | Intent | a typed contract field, inherited down the subtree; modulates judges, **never** deterministic gates; orthogonal to risk |
-| Eval contract | split gate (pre) + split + goal-type + integration; deterministic before judge; impacted slice at leaves, full suite at root; judges calibrated by pinned-SHA replay |
+| Eval contract | split gate (pre) + split + goal-type + integration; deterministic before judge; impacted slice at leaves, full suite at root; judges calibrated by pinned-SHA replay; **verdicts rendered at the parent's integrate edge** (delegable to eval-typed children — the child only ever claims) |
+| Scope enforcement | deterministic `diff ⊆ scope` at emission + risk re-check on the actual diff; escape bounces to the parent (expand scope or re-split, consuming an attempt) — findings-become-tickets is structural, not normative |
 | Cost / quality / human | one control loop: eval → tier escalation → human last-resort; ladder policies instrumented per type, not decreed |
 | Termination | shrinking splits + `leaf_only` floors; chains bounded by the **subdivided budget**; exhaustion is an event, not a hang |
-| Risk | computed per instance (`classify_risk` over scope × sensitivity) layered on type-level gates; earned autonomy tuned from traces |
-| Human paths (all rare) | competence (escalation/block), authority (type ∨ instance gates), physical (human-as-tool); every touchpoint a decision brief with deadline; timeout → typed safe default |
+| Risk | computed per instance (`classify_risk` over scope × sensitivity) layered on type-level gates; re-checked at emission on the actual diff; earned autonomy tuned from traces |
+| Human paths (all rare) | competence (escalation/block), authority (**consequences outrun any eval** — type ∨ instance gates, incl. pattern-trust), physical (human-as-tool); every touchpoint a decision brief with **required `on_timeout`** (deny \| park \| bounce); park releases scope + TTL; plus two standing acts: admission, pattern-trust signoff |
 | Roles | emergent — no org chart, only a library of goal-types |
-| Memory | layered project × type × global; **spawner-mediated** (parents inject pointers, children report, parents promote); reinforcement from memories-used |
+| Memory | layered project × type × global; **spawner-mediated** (parents inject pointers, children report, parents promote); injection carries provenance labels (provisional \| trusted); reinforcement from memories-used |
 | Memory governance | eval-gated promotion + provisional/trusted + contradiction-check on write + decay/eviction + consolidation as a scheduled goal-type |
 | Memory substrate | an **independent store**, realized as a **projection of the event log**; consistency model: checkpoint consistency (bounded staleness, never silent) |
 | Substrate under feedback | the **event log** — everything is an event; memory, metrics, UI surfaces, and replay are projections of it |
 | Tools | per goal-type grant — the contract is the capability; human-on-Slack is a tool grant with a deadline |
 | Intake | the root goal-type's contract: parse once to typed spec, reject early (mechanical capability check), coverage-gate, classify (memo × risk); root grants no code tools |
-| Admission | commission *is* admission for intents; factory-minted findings and adapter-minted roots pass human triage — the factory never approves its own work queue |
+| Admission | commission *is* admission for intents; factory-minted findings and adapter-minted roots pass human triage — the factory never approves its own work queue (one bounded carve-out: improvement goals auto-admit inside their budget envelope) |
 | Scope discipline | findings become tickets, not fixes; exception: a live secret interrupts immediately |
-| Brownfield comprehension | typed per-category knowledge artifacts (pointers, freshness metadata) + typed retrieval API; shallow map (one-time human signoff) + JIT deep-dive; refresh-on-merge (author-agnostic, drift-targeted) + verify-on-read |
+| Brownfield comprehension | **just-in-time only — no bootstrap, no setup flow**: the split gate spawns comprehension goals as dependencies; typed per-category knowledge artifacts (pointers, freshness metadata) + typed retrieval API; verify-on-read is correctness, merge-triggered refresh of already-built artifacts is warmth |
 | Regression guard | existing checks as gate + coverage signal + JIT characterization where thin; the goal's `intent` decides baseline-update vs failure |
 | Runtime shape | persistent listener (intents, signals, merges, blockers → root-goals) over many concurrent, bounded, isolated trees |
 | Concurrency | scope-disjoint trees run concurrently per repo; overlapping scopes serialize (degenerate v1: serial-per-repo); DAG-parallel within a tree |
 | Human collaboration | beside, turn-based: commission, answer mid-tree, review/merge at the boundary; never live co-edit |
 | Output discipline | PR only, never self-merge; proof artifacts in the output contract; ownership-map review routing; object-once pushback with logged overrides |
 | Branch coordination | shared state read by pull at checkpoints — adapts at decision boundaries, not instantaneously |
-| The two loops | working IN (memory, per-repo) vs working ON (improvement PRs to the factory repo, human-reviewed); blockers spin out; **the architecture is locked**; no factory-factory in v1 |
+| The two loops | working IN (memory, per-repo) vs working ON (improvement PRs to the factory repo, human-reviewed); blockers spin out; standing budget envelope; constitution check in factory CI; precise invariant: code by PR, memory by governed write; **the architecture is locked**; no factory-factory in v1 |
 | State placement | factory code in the factory repo; memory in the independent store; product repos receive exactly one thing — a PR |
 | Unification | a goal-type **is** a harness |
 
