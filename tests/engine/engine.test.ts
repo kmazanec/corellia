@@ -318,7 +318,7 @@ describe('split with dependency chain', () => {
       leafTypeDef({
         name: 'leaf',
         deterministic: [alwaysFailCheck()],
-        tier: { default: 'haiku', ladder: [] },  // no ladder → exhausts immediately
+        tier: { default: 'haiku', ladder: ['haiku'] },  // single-rung ladder → exhausts after one attempt
       }),
     ]);
 
@@ -368,7 +368,7 @@ describe('budget accounting', () => {
       leafTypeDef({
         deterministic: [],
         judgeType: 'judge-leaf',
-        tier: { default: 'haiku', ladder: [] },  // empty ladder → no escalation possible
+        tier: { default: 'haiku', ladder: ['haiku'] },  // single-rung ladder → no escalation possible
       }),
     ]);
 

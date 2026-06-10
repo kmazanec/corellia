@@ -11,7 +11,10 @@ import type { EventStore } from '../contract/events.js';
 import type { Brain, BrainContext } from '../contract/brain.js';
 import type { Registry } from '../contract/goal-type.js';
 import type { MemoryView } from '../contract/memory.js';
+import type { RiskClass, SensitivityFact } from '../contract/risk.js';
 import { subdivide, consume } from './budget.js';
+import { lintLibrary } from '../library/constitution.js';
+import { classifyRisk } from '../library/risk.js';
 
 export interface EngineOptions {
   registry: Registry;
@@ -27,6 +30,20 @@ export interface EngineOptions {
   onBrief?: (
     brief: import('../contract/decision.js').DecisionBrief,
   ) => Promise<'deny' | 'park' | 'bounce' | 'answered'>;
+  /**
+   * Project-specific sensitivity facts used to classify instance risk. Each
+   * SensitivityFact names a path pattern and the risk band touching it carries.
+   * Defaults to [] (no project-specific sensitivity; combine with
+   * DEFAULT_SENSITIVITY if desired).
+   */
+  sensitivity?: SensitivityFact[];
+  /**
+   * Called when the authority gate fires — the goal's type is gated or its
+   * instance risk is high. Must return 'granted' or 'denied'. When absent the
+   * gate defaults to 'denied': an act whose consequences outrun any eval cannot
+   * proceed without an authority that can underwrite it.
+   */
+  onGate?: (goal: Goal, risk: RiskClass) => Promise<'granted' | 'denied'>;
 }
 
 export class Engine {
@@ -40,14 +57,30 @@ export class Engine {
         brief: import('../contract/decision.js').DecisionBrief,
       ) => Promise<'deny' | 'park' | 'bounce' | 'answered'>)
     | undefined;
+  private readonly sensitivity: SensitivityFact[];
+  private readonly onGate:
+    | ((goal: Goal, risk: RiskClass) => Promise<'granted' | 'denied'>)
+    | undefined;
 
   constructor(opts: EngineOptions) {
+    // CONSTITUTION AT THE BOUNDARY: an engine cannot be constructed over an
+    // unconstitutional library — violations are caught here, not at runtime.
+    const defs = opts.registry.names().map((n) => opts.registry.get(n));
+    const violations = lintLibrary(defs);
+    if (violations.length > 0) {
+      throw new Error(
+        `Library fails constitution check:\n${violations.map((v) => `  • ${v}`).join('\n')}`,
+      );
+    }
+
     this.registry = opts.registry;
     this.brain = opts.brain;
     this.store = opts.store;
     this.memory = opts.memory;
     this.now = opts.now ?? (() => Date.now());
     this.onBrief = opts.onBrief;
+    this.sensitivity = opts.sensitivity ?? [];
+    this.onGate = opts.onGate;
   }
 
   async run(goal: Goal): Promise<Report> {
@@ -79,6 +112,35 @@ export class Engine {
     const tierLadder = typeDef.tier.ladder;
     let currentTierIndex = 0;
     let currentTier: Tier = typeDef.tier.default;
+
+    // ── INSTANCE RISK AT ENTRY ─────────────────────────────────────────────
+    // Classify scope against sensitivity facts before spending any subtree.
+    // Medium is recorded but not gated (prototype policy — instance evidence
+    // may accumulate to justify automatic medium gating in a future version).
+    const entryRisk = classifyRisk(goal.scope, this.sensitivity);
+    await this.store.append({ type: 'risk-classified', at: t(), goalId: goal.id, risk: entryRisk });
+
+    // AUTHORITY GATE: fires when the type carries a type-level authority grant
+    // requirement (gated: true) OR when instance risk is high. An act whose
+    // consequences outrun any eval must route through a human before the tree
+    // opens — fail-safe: no handler means denied.
+    const needsGate = typeDef.gated === true || entryRisk === 'high';
+    if (needsGate) {
+      const gateDecision = this.onGate
+        ? await this.onGate(goal, entryRisk)
+        : 'denied';
+      await this.store.append({ type: 'gate-decision', at: t(), goalId: goal.id, resolution: gateDecision });
+      if (gateDecision === 'denied') {
+        const brief = gateDeniedBrief(goal, entryRisk, typeDef.gated === true);
+        const report = blockedReport(
+          `Authority gate denied: ${brief.question}`,
+        );
+        const resolution = this.onBrief ? await this.onBrief(brief) : brief.onTimeout;
+        await this.store.append({ type: 'blocked', at: t(), goalId: goal.id, brief, resolution });
+        await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
+        return report;
+      }
+    }
 
     // ── DECIDE ─────────────────────────────────────────────────────────────
     // leafOnly types go straight to the attempt loop; non-leaf types decide.
@@ -272,7 +334,7 @@ export class Engine {
     // ── DISPATCH on decision kind ──────────────────────────────────────────
     switch (decision.kind) {
       case 'satisfy':
-        return this.runAttemptLoop(goal, currentTier, currentTierIndex, tierLadder, deadline);
+        return this.runAttemptLoop(goal, currentTier, currentTierIndex, tierLadder, deadline, entryRisk);
 
       case 'split':
         return this.runSplit(goal, decision.children);
@@ -289,6 +351,7 @@ export class Engine {
     initialTierIndex: number,
     tierLadder: Tier[],
     deadline: number,
+    entryRisk: RiskClass = 'low',
   ): Promise<Report> {
     const t = this.now;
     const typeDef = this.registry.get(goal.type);
@@ -445,6 +508,36 @@ export class Engine {
           } else {
             // blocked
             return resolution.report;
+          }
+        }
+      }
+
+      // ── EMISSION RISK RE-CHECK ────────────────────────────────────────────
+      // After deterministic checks pass, re-classify risk against the ACTUAL
+      // artifact file paths. If the artifact touches sensitive territory that
+      // the declared scope did not (scope escape into sensitive paths), the
+      // authority gate fires again before proceeding to the judge.
+      if (artifact.kind === 'files' && artifact.files && artifact.files.length > 0) {
+        const artifactPaths = artifact.files.map((f) => f.path);
+        const emitRisk = classifyRisk(artifactPaths, this.sensitivity);
+        await this.store.append({ type: 'risk-classified', at: t(), goalId: goal.id, risk: emitRisk });
+
+        // Gate fires when artifact risk is high and entry scope was not — the
+        // scope declaration did not cover the sensitive surface actually touched.
+        if (emitRisk === 'high' && entryRisk !== 'high') {
+          const gateDecision = this.onGate
+            ? await this.onGate(goal, emitRisk)
+            : 'denied';
+          await this.store.append({ type: 'gate-decision', at: t(), goalId: goal.id, resolution: gateDecision });
+          if (gateDecision === 'denied') {
+            const brief = gateDeniedBrief(goal, emitRisk, false);
+            const report = blockedReport(
+              `Authority gate denied at emission (artifact touched sensitive paths): ${brief.question}`,
+            );
+            const resolution = this.onBrief ? await this.onBrief(brief) : brief.onTimeout;
+            await this.store.append({ type: 'blocked', at: t(), goalId: goal.id, brief, resolution });
+            await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
+            return report;
           }
         }
       }
@@ -1068,6 +1161,29 @@ function buildReport(goal: Goal, artifact: Artifact): Report {
     blockers: [],
     findings: [],
     learned: '',
+  };
+}
+
+function gateDeniedBrief(
+  goal: Goal,
+  risk: RiskClass,
+  typeLevelGate: boolean,
+): import('../contract/decision.js').DecisionBrief {
+  const reason = typeLevelGate
+    ? `type "${goal.type}" carries a type-level authority gate`
+    : `instance risk is "${risk}" (scope touches a sensitive surface)`;
+  return {
+    question: `Goal "${goal.title}" requires authority grant: ${reason}. Grant or deny?`,
+    options: ['deny', 'park', 'bounce'],
+    links: [goal.id],
+    deadlineMs: 30_000,
+    onTimeout: 'deny',
+    teaching: {
+      finding: reason,
+      confidence: 'high',
+      costs: 'grant: goal proceeds; deny: goal is blocked; park: goal waits for human decision (TTL applies)',
+      recommendation: 'deny',
+    },
   };
 }
 
