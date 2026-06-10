@@ -1,18 +1,35 @@
 /**
  * Tests for Listener: scope-disjoint admission, parking + TTL, and resume.
  *
- * We use a ScriptedEngine that accepts a queue of (goalId → Report) overrides.
- * This avoids touching the Engine's constructor-level onBrief seam — the
- * Listener detects parks from the event store's 'blocked' events, so the
- * scripted engine just appends the events directly.
+ * Most tests use a ScriptedEngine that accepts a queue of (goalId → Report)
+ * overrides. The ScriptedEngine appends blocked events directly, which the
+ * Listener's fallback event-scan path detects for backward compatibility.
+ *
+ * The final describe block uses a real Engine to verify the brief-seam design:
+ * a scripted Brain that returns a block decision with onTimeout:'park' causes
+ * the Engine to fire the Listener's active brief handler synchronously, which
+ * records the park without any post-hoc event scanning.
  */
 
 import { describe, it, expect } from 'vitest';
 import { Listener } from '../../src/listener/listener.js';
+import { Engine } from '../../src/engine/engine.js';
 import type { EventStore, FactoryEvent } from '../../src/contract/events.js';
 import type { Goal, MemoryPointer } from '../../src/contract/goal.js';
 import type { Report } from '../../src/contract/report.js';
 import type { CommissionInput } from '../../src/listener/listener.js';
+import {
+  MemoryEventStore,
+  NoopMemoryView,
+  buildRegistry,
+  leafTypeDef,
+  nonLeafTypeDef,
+  textArtifact,
+  passVerdict,
+} from '../engine/stubs.js';
+import type { Brain, BrainContext } from '../../src/contract/brain.js';
+import type { Artifact } from '../../src/contract/report.js';
+import type { Verdict } from '../../src/contract/verdict.js';
 
 // ── In-memory async EventStore ─────────────────────────────────────────────
 
@@ -553,5 +570,112 @@ describe('answer queues when scope is contested on resume', () => {
     const resumeReport = await pResume;
     expect(resumeReport.blockers).toHaveLength(0);
     expect(resumeReport.artifact?.text).toBe('resumed-done');
+  });
+});
+
+// ── 8. Real Engine + Real Listener: brief-seam integration test ───────────
+
+describe('real Engine + Listener: brief-seam park and resume', () => {
+  it('park recorded synchronously via brief handler; scope released; answer() resumes and completes', async () => {
+    const store = new MemoryEventStore();
+    let tick = 700;
+    const now = () => ++tick;
+
+    // Track how many times the brain's decide was called and what memories
+    // were visible, so we can verify the answer pointer arrives on re-entry.
+    const decideCalls: { memoriesCount: number }[] = [];
+
+    // A brain that on its first decide returns block-with-park, then on the
+    // second decide (after answer()) returns satisfy so the leaf can produce.
+    const brain: Brain = {
+      async decide(_goal: Goal, _ctx: BrainContext) {
+        decideCalls.push({ memoriesCount: _goal.memories.length });
+        if (decideCalls.length === 1) {
+          // First run: block and request a park.
+          return {
+            kind: 'block' as const,
+            brief: {
+              question: 'Which output format?',
+              options: ['park'],
+              links: [_goal.id],
+              deadlineMs: 5_000,
+              onTimeout: 'park' as const,
+            },
+          };
+        }
+        // Re-entry after answer: satisfy the goal.
+        return { kind: 'satisfy' as const };
+      },
+      async produce(_goal: Goal, _ctx: BrainContext): Promise<Artifact> {
+        return textArtifact('real-output');
+      },
+      async judge(_goal: Goal, _subject: Artifact, _rubric: string, _ctx: BrainContext): Promise<Verdict> {
+        return passVerdict();
+      },
+      async repair(_goal: Goal, _artifact: Artifact, _prescriptions: string[], _ctx: BrainContext): Promise<Artifact> {
+        return textArtifact('repaired');
+      },
+    };
+
+    // Registry needs a 'deliver-intent' type (what Listener always commissions)
+    // and a leaf for satisfy path. deliver-intent is non-leaf so the brain's
+    // decide is consulted; on re-entry it returns satisfy and the attempt loop runs.
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'deliver-intent' }),
+      leafTypeDef({ name: 'leaf' }),
+    ]);
+
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      now,
+    });
+
+    const listener = new Listener({ engine, store, now, defaultTtlMs: 10_000 });
+
+    // First commission: the brain blocks with park; Listener should record park
+    // synchronously via the brief-seam handler (no event-scan needed).
+    const firstReport = await listener.commission({
+      id: 'intent-park',
+      title: 'Park test intent',
+      spec: { what: 'test' },
+      scope: ['src/park-test'],
+      budget: { attempts: 5, tokens: 10_000, toolCalls: 50, wallClockMs: 60_000 },
+      intent: 'production',
+    });
+
+    // First run returns a blocked report.
+    expect(firstReport.blockers).toHaveLength(1);
+
+    // Listener has parked the intent and released the scope reservation.
+    const s = listener.status();
+    expect(s.parked.map((p) => p.id)).toContain('intent-park');
+    expect(s.running).not.toContain('intent-park');
+
+    // Answer resumes the intent; second decide sees memories with the answer.
+    const resumeReport = await listener.answer('intent-park', 'JSON format');
+
+    expect(resumeReport.blockers).toHaveLength(0);
+    expect(resumeReport.artifact?.text).toBe('real-output');
+
+    // Brain was called twice: once to park, once to satisfy on resume.
+    expect(decideCalls).toHaveLength(2);
+
+    // On re-entry the answer pointer was injected as a memory.
+    expect(decideCalls[1]!.memoriesCount).toBeGreaterThan(0);
+
+    // The listener has no parked or running intents after completion.
+    expect(listener.status().parked).toHaveLength(0);
+    expect(listener.status().running).toHaveLength(0);
+
+    // A 'parked' event was written to the store.
+    const parkedEvents = await store.list({ type: 'parked' });
+    expect(parkedEvents).toHaveLength(1);
+
+    // A 'resumed' event was written when answer() was called.
+    const resumedEvents = await store.list({ type: 'resumed' });
+    expect(resumedEvents).toHaveLength(1);
   });
 });

@@ -359,11 +359,12 @@ describe('flywheel — terraced scan', () => {
     expect(judgeCallCount).toBeGreaterThanOrEqual(3);
   });
 
-  it('losing candidates are recorded as decided events in the log', async () => {
+  it('exactly one decided event for the goal; losing candidates are in report findings', async () => {
     const store = new MemoryEventStore();
     const patterns = new InMemoryPatternStore();
 
-    // All candidates pass — winner is first, other two are losers.
+    // All candidates pass — winner is first (all identical splits), other two are losers.
+    // judge returns passVerdict() so the first candidate wins; losers are the other two.
     const brain: Brain = {
       async decide(_goal: Goal, _ctx: BrainContext) {
         return { kind: 'split' as const, children: oneChildSplit() };
@@ -397,17 +398,21 @@ describe('flywheel — terraced scan', () => {
     });
 
     const goal = makeGoal({ type: 'splitter', id: 'root', title: 'test goal', spec: {} });
-    await engine.run(goal);
+    const report = await engine.run(goal);
 
-    // The 2 losing candidates generate decided events (the winner's decided
-    // comes from the normal DISPATCH path).
+    // Exactly one decided event for the root goal (the winner's).
+    // Losers do NOT get their own decided events.
     const decidedEvents = await store.list({ type: 'decided' });
-    // At least 2 losing-candidate decided events for the root goal
     const rootDecided = decidedEvents.filter(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (e) => (e as any).goalId === 'root',
     );
-    expect(rootDecided.length).toBeGreaterThanOrEqual(2);
+    expect(rootDecided).toHaveLength(1);
+
+    // The two losing candidates surface as findings in the report.
+    expect(report.findings.length).toBeGreaterThanOrEqual(2);
+    const altFindings = report.findings.filter((f) => f.startsWith('alternative considered'));
+    expect(altFindings.length).toBeGreaterThanOrEqual(2);
   });
 
   it('when no candidate passes, falls through to single-decide with best verdict as priorAttempt', async () => {

@@ -11,12 +11,25 @@
  *   - answer(): resume a parked intent by injecting the human's answer as a
  *     trusted memory pointer and re-running (re-entry is an ordinary checkpoint).
  *   - tick(): explicit TTL sweep — no internal timers; the caller owns the clock.
+ *
+ * Brief-seam design: the Listener is the single authority for park resolution.
+ * Before each engine.run() call, it wires itself as the Engine's active brief
+ * handler via engine._setActiveOnBrief(). Parks are recorded synchronously when
+ * the brief fires — no post-hoc event-scan inference. This guarantees one
+ * authority, eliminates the race between the Engine's own onBrief and the
+ * Listener's deferred scan, and makes the park contract explicit at the call site.
+ *
+ * Backward-compatible path: tests that use a ScriptedEngine mock (which ignores
+ * the _setActiveOnBrief call) can still drive parks by appending 'blocked' events
+ * directly, since the Listener's briefHandler() is the wiring point, not a
+ * runtime dependency of the park outcome.
  */
 
 import type { Engine } from '../engine/engine.js';
 import type { EventStore, FactoryEvent } from '../contract/events.js';
 import type { Budget, Intent, MemoryPointer } from '../contract/goal.js';
 import type { Report } from '../contract/report.js';
+import type { DecisionBrief } from '../contract/decision.js';
 
 // ── Public input types ────────────────────────────────────────────────────────
 
@@ -71,9 +84,12 @@ function scopesOverlap(a: string[], b: string[]): boolean {
 }
 
 /**
- * Return the last 'blocked' event emitted for a goal, or null. Used to detect
- * the park signal after a run returns: if the brief has onTimeout === 'park',
- * the Listener parks the intent and releases its reservation.
+ * Return the last 'blocked' event emitted for a goal, or null.
+ *
+ * Used as a backward-compat fallback when the Engine does not support the
+ * _setActiveOnBrief seam (e.g. tests that use a ScriptedEngine mock). When the
+ * Listener's per-run brief handler fires, it records parks synchronously and
+ * this function is never needed on the happy path.
  */
 async function lastBlockedEvent(
   store: EventStore,
@@ -103,6 +119,13 @@ export class Listener {
 
   /** Parked intents: brief delivered, reservation released, awaiting answer or TTL. */
   private readonly parked = new Map<string, Parked>();
+
+  /**
+   * Per-run park signal: when the Engine fires the brief handler with a 'park'
+   * brief for a running intent, this map records the brief so runIntent can park
+   * synchronously without scanning events. Keyed by intent id. Cleared on park.
+   */
+  private readonly pendingParks = new Map<string, { brief: DecisionBrief }>();
 
   constructor(opts: {
     engine: Engine;
@@ -234,6 +257,38 @@ export class Listener {
     };
   }
 
+  // ── briefHandler ──────────────────────────────────────────────────────────
+
+  /**
+   * Return a bound onBrief callback suitable for wiring as the Engine's
+   * constructor-level onBrief option.
+   *
+   * When the Engine fires this callback with a brief whose onTimeout is 'park',
+   * the Listener records the park synchronously (via pendingParks) so runIntent
+   * can detect it without scanning events. For non-park resolutions the callback
+   * defers to the brief's own onTimeout.
+   *
+   * Wire-up example:
+   *   const listener = new Listener({ engine, store });
+   *   // Pass listener.briefHandler() as engineOpts.onBrief at Engine construction.
+   *
+   * This method exists as a public seam for callers that construct the Engine
+   * separately and want to wire the Listener as the park authority without
+   * giving up control of Engine construction.
+   */
+  briefHandler(): (
+    brief: DecisionBrief,
+  ) => Promise<'deny' | 'park' | 'bounce' | 'answered'> {
+    return async (brief: DecisionBrief) => {
+      if (brief.onTimeout === 'park' && brief.links[0] !== undefined) {
+        // Record synchronously — runIntent will detect and park the intent.
+        this.pendingParks.set(brief.links[0], { brief });
+        return 'park';
+      }
+      return brief.onTimeout as 'deny' | 'park' | 'bounce' | 'answered';
+    };
+  }
+
   // ── internals ────────────────────────────────────────────────────────────
 
   /** True if any active reservation overlaps the given scope. */
@@ -245,13 +300,16 @@ export class Listener {
   }
 
   /**
-   * Acquire the reservation, run the engine, then release + drain the wait queue.
+   * Acquire the reservation, wire the Listener as the brief authority, run the
+   * engine, then detect parks (synchronously via pendingParks or, as a fallback,
+   * via the event store), then release + drain the wait queue.
    *
-   * Park detection: after the engine returns, inspect the last 'blocked' event
-   * for this goalId. If its brief has onTimeout === 'park', release the
-   * reservation immediately (the human may take arbitrarily long) and record the
-   * intent in the parked map with its TTL deadline. A native 'parked' event is
-   * also appended to the log.
+   * Park detection (authoritative path): before engine.run() starts, the Listener
+   * sets itself as the Engine's active brief handler via _setActiveOnBrief(). When
+   * the Engine fires the brief, the handler records the park synchronously in
+   * pendingParks. After run() returns, runIntent checks pendingParks before
+   * falling through to the event-scan fallback (which covers ScriptedEngine mocks
+   * used in tests that append blocked events directly without an onBrief seam).
    */
   private async runIntent(
     input: CommissionInput,
@@ -271,39 +329,45 @@ export class Listener {
       memories: extraMemories,
     };
 
+    // Wire ourselves as the brief authority for this run.
+    // _setActiveOnBrief is a non-contract seam on Engine; if the Engine mock
+    // does not expose it, the fallback event-scan path handles parks instead.
+    const engineWithSeam = this.engine as Engine & {
+      _setActiveOnBrief?: (
+        h: ((brief: DecisionBrief) => Promise<'deny' | 'park' | 'bounce' | 'answered'>) | undefined,
+      ) => void;
+    };
+    const hasSeam = typeof engineWithSeam._setActiveOnBrief === 'function';
+    if (hasSeam) {
+      engineWithSeam._setActiveOnBrief!(this.briefHandler());
+    }
+
     let report: Report;
     try {
       report = await this.engine.run(rootGoal);
     } catch (err) {
+      if (hasSeam) engineWithSeam._setActiveOnBrief!(undefined);
       this.reservations.delete(input.id);
       this.drainWaitQueue();
       throw err;
     }
 
-    // Park detection: the engine appends a 'blocked' event with the brief before
-    // returning a blocked report (non-empty blockers). If the brief asked for
-    // 'park', honour it: release scope immediately and record in parked map.
+    if (hasSeam) engineWithSeam._setActiveOnBrief!(undefined);
+
+    // Park detection — authoritative path: brief handler recorded synchronously.
+    const pendingPark = this.pendingParks.get(input.id);
+    if (pendingPark) {
+      this.pendingParks.delete(input.id);
+      await this._applyPark(input, pendingPark.brief);
+      return report;
+    }
+
+    // Park detection — fallback path (ScriptedEngine mocks that append blocked
+    // events without going through the brief handler seam).
     if (report.blockers.length > 0) {
       const ev = await lastBlockedEvent(this.store, input.id);
       if (ev && ev.brief.onTimeout === 'park') {
-        const ttl = ev.brief.deadlineMs > 0 ? ev.brief.deadlineMs : this.defaultTtlMs;
-        const deadline = this.now() + ttl;
-
-        await this.store.append({
-          type: 'parked',
-          at: this.now(),
-          goalId: input.id,
-          brief: ev.brief,
-          ttlMs: ttl,
-        });
-
-        this.reservations.delete(input.id);
-        this.parked.set(input.id, {
-          input,
-          question: ev.brief.question,
-          deadline,
-        });
-        this.drainWaitQueue();
+        await this._applyPark(input, ev.brief);
         return report;
       }
     }
@@ -311,6 +375,28 @@ export class Listener {
     this.reservations.delete(input.id);
     this.drainWaitQueue();
     return report;
+  }
+
+  /** Record the park: release reservation, write parked event, add to parked map. */
+  private async _applyPark(input: CommissionInput, brief: DecisionBrief): Promise<void> {
+    const ttl = brief.deadlineMs > 0 ? brief.deadlineMs : this.defaultTtlMs;
+    const deadline = this.now() + ttl;
+
+    await this.store.append({
+      type: 'parked',
+      at: this.now(),
+      goalId: input.id,
+      brief,
+      ttlMs: ttl,
+    });
+
+    this.reservations.delete(input.id);
+    this.parked.set(input.id, {
+      input,
+      question: brief.question,
+      deadline,
+    });
+    this.drainWaitQueue();
   }
 
   /**

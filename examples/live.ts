@@ -43,8 +43,8 @@ const brain = new LlmBrain(openRouterConfig(), types.map((t) => t.name));
 const store = new JsonlEventStore(`${OUT_DIR}/events.jsonl`);
 
 const memory = {
-  query: (topic: string, scope: string[]) =>
-    projectMemory(store.list()).query(topic, scope),
+  query: async (topic: string, scope: string[]) =>
+    projectMemory(await store.list()).query(topic, scope),
 };
 
 const registry = createRegistry(types);
@@ -106,7 +106,7 @@ try {
   console.error('');
 
   // Print whatever events we collected before the crash.
-  const events = store.list();
+  const events = await store.list();
   if (events.length > 0) {
     console.error('Partial goal tree at failure:');
     console.error(renderTree(events));
@@ -196,7 +196,7 @@ if (!smokePass) {
 
 console.log('');
 console.log('── goal tree ────────────────────────────────────────────────────');
-const allEvents = store.list();
+const allEvents = await store.list();
 console.log(renderTree(allEvents));
 
 // ---------------------------------------------------------------------------
@@ -223,14 +223,17 @@ for (const [type, s] of Object.entries(stats)) {
 console.log('');
 console.log('── brain call summary (from events) ─────────────────────────────');
 
-// Events emitted around each brain method:
-//   decide: goal-decided
-//   produce: artifact-produced (or artifact-repaired for repair)
-//   judge: verdict-rendered
-//   repair: artifact-repaired
-const decided = allEvents.filter((e) => e.type === 'goal-decided').length;
-const produced = allEvents.filter((e) => e.type === 'artifact-produced').length;
-const judged = allEvents.filter((e) => e.type === 'verdict-rendered').length;
+// Real event types emitted by the engine:
+//   decide:     'decided'       — one per goal after the brain picks satisfy/split/block
+//   produce:    'emitted'       — emitted events whose report carries a non-null artifact
+//   judge:      'judge-verdict' — one per judge call (split eval or attempt eval)
+//   repair:     'repair-applied'
+//   escalation: 'tier-escalated'
+const decided = allEvents.filter((e) => e.type === 'decided').length;
+const produced = allEvents.filter(
+  (e) => e.type === 'emitted' && e.report.artifact !== null,
+).length;
+const judged = allEvents.filter((e) => e.type === 'judge-verdict').length;
 const repaired = allEvents.filter((e) => e.type === 'repair-applied').length;
 const escalated = allEvents.filter((e) => e.type === 'tier-escalated').length;
 

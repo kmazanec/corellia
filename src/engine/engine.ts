@@ -82,6 +82,42 @@ export class Engine {
     | undefined;
   private readonly patterns: PatternStore | undefined;
 
+  /**
+   * Per-run brief handler override. When set (typically by the Listener), it
+   * takes precedence over the constructor-level onBrief for the duration of
+   * the run and all recursive child runs under the same tree. Reset to
+   * undefined by the Listener after engine.run() returns.
+   *
+   * This is the single seam the Listener uses to become the park authority
+   * without requiring a new Engine instance per intent.
+   */
+  private _activeOnBrief:
+    | ((
+        brief: import('../contract/decision.js').DecisionBrief,
+      ) => Promise<'deny' | 'park' | 'bounce' | 'answered'>)
+    | undefined = undefined;
+
+  /**
+   * Register a per-run brief handler that overrides the constructor-level one.
+   * Called by the Listener before engine.run() and cleared after. Not part of
+   * the public API contract — callers outside the Listener should use onBrief
+   * at construction time.
+   */
+  _setActiveOnBrief(
+    handler:
+      | ((
+          brief: import('../contract/decision.js').DecisionBrief,
+        ) => Promise<'deny' | 'park' | 'bounce' | 'answered'>)
+      | undefined,
+  ): void {
+    this._activeOnBrief = handler;
+  }
+
+  /** Resolve the effective brief handler: per-run override beats constructor-level. */
+  private get effectiveOnBrief() {
+    return this._activeOnBrief ?? this.onBrief;
+  }
+
   constructor(opts: EngineOptions) {
     // CONSTITUTION AT THE BOUNDARY: an engine cannot be constructed over an
     // unconstitutional library — violations are caught here, not at runtime.
@@ -114,8 +150,8 @@ export class Engine {
     // Unknown type → block immediately (no throw)
     if (!this.registry.has(goal.type)) {
       const brief = unknownTypeBrief(goal);
-      const resolution = this.onBrief
-        ? await this.onBrief(brief)
+      const resolution = this.effectiveOnBrief
+        ? await this.effectiveOnBrief(brief)
         : brief.onTimeout;
       await this.store.append({
         type: 'blocked',
@@ -156,7 +192,7 @@ export class Engine {
         const report = blockedReport(
           `Authority gate denied: ${brief.question}`,
         );
-        const resolution = this.onBrief ? await this.onBrief(brief) : brief.onTimeout;
+        const resolution = this.effectiveOnBrief ? await this.effectiveOnBrief(brief) : brief.onTimeout;
         await this.store.append({ type: 'blocked', at: t(), goalId: goal.id, brief, resolution });
         await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
         return report;
@@ -170,6 +206,8 @@ export class Engine {
     // novel shape with scan.k > 1, a terraced scan generates k lens-diverse
     // candidates and judge-split ranks them before committing.
     let decision: Decision;
+    // Findings from losing terraced-scan candidates; threaded into the split report.
+    let terracedLoserFindings: string[] = [];
 
     if (typeDef.leafOnly) {
       decision = { kind: 'satisfy' };
@@ -211,9 +249,11 @@ export class Engine {
           // ── TERRACED SCAN — novel shape, k > 1 ────────────────────────
           // Generate k lens-diverse candidates and rank them with judge-split.
           // The winning candidate (first pass, tie-broken by fewest findings)
-          // becomes the decision; losers are recorded in findings as
-          // "alternatives considered" — explored, not retrofitted.
-          decision = await this.runTerracedScan(goal, scan.k, scan.lenses, baseCtx, currentTier, shape);
+          // becomes the decision; losers are collected as low-severity findings
+          // ("alternatives considered") and surfaced in the split report.
+          const scanResult = await this.runTerracedScan(goal, scan.k, scan.lenses, baseCtx, currentTier, shape);
+          decision = scanResult.decision;
+          terracedLoserFindings = scanResult.loserFindings;
         } else {
           // Normal single-derive path: no memo, or scan not warranted.
           decision = await this.brain.decide(goal, baseCtx);
@@ -405,7 +445,7 @@ export class Engine {
         return this.runAttemptLoop(goal, currentTier, currentTierIndex, tierLadder, deadline, entryRisk);
 
       case 'split': {
-        const splitReport = await this.runSplit(goal, decision.children);
+        const splitReport = await this.runSplit(goal, decision.children, terracedLoserFindings);
 
         // ── PATTERN RECORD ────────────────────────────────────────────────
         // Record the outcome of the split against the shape so the flywheel
@@ -436,14 +476,18 @@ export class Engine {
   // ── TERRACED SCAN ─────────────────────────────────────────────────────────
   /**
    * Generate k lens-diverse candidate splits for a novel shape, rank them with
-   * judge-split, and return the winning decision.
+   * judge-split, and return the winning decision alongside low-severity findings
+   * that describe each losing candidate ("alternative considered").
    *
    * Candidates are lens-diverse, not k identical rolls of the same prompt — each
    * call uses a different lens (an architect's cut, a reuse-maximising cut, a
    * contrarian's cut) so that the tournament catches failure modes redundancy
    * cannot. The winner is the first candidate whose judge-split verdict passes,
-   * tie-broken by fewest findings. Losing candidates are recorded in the goal's
-   * findings stream as "alternatives considered" — explored, not retrofitted.
+   * tie-broken by fewest findings. Losing candidates are returned as low-severity,
+   * non-gating findings (dimension 'spec') so they surface in the split report as
+   * "alternatives considered" — explored, not retrofitted. No extra `decided`
+   * events are emitted for losers; only the winner's single `decided` (at the
+   * normal DISPATCH path) is the authority record.
    *
    * When no candidate passes, the scan falls through to a plain single-derive
    * call whose BrainContext carries the best candidate's verdict as priorAttempt,
@@ -456,9 +500,7 @@ export class Engine {
     baseCtx: BrainContext,
     currentTier: Tier,
     _shape: string,
-  ): Promise<Decision> {
-    const t = this.now;
-
+  ): Promise<{ decision: Decision; loserFindings: string[] }> {
     type Candidate = {
       decision: Extract<Decision, { kind: 'split' }>;
       verdict: Verdict;
@@ -477,7 +519,7 @@ export class Engine {
       if (candidate.kind !== 'split') {
         // A candidate that is not a split is itself a meaningful decision —
         // return it immediately (satisfy or block beats an uncertain tournament).
-        return candidate;
+        return { decision: candidate, loserFindings: [] };
       }
 
       const splitArtifact: Artifact = {
@@ -500,24 +542,22 @@ export class Engine {
       );
     }
 
-    // Record losing candidates in the event log as alternatives considered.
+    // Collect losing candidates as advisory findings — explored paths the
+    // tournament did not select. They surface in the split report without
+    // blocking it (gating: false, severity: low).
     const losers = winner
       ? candidates.filter((c) => c !== winner)
       : candidates;
 
-    for (const loser of losers) {
-      // Each loser gets a single decided event so the report's findings carry the
-      // "alternatives considered" trace required by the design.
-      await this.store.append({
-        type: 'decided',
-        at: t(),
-        goalId: goal.id,
-        decision: { kind: 'split', children: loser.decision.children },
-      });
-    }
+    const loserFindings: string[] = losers.map((loser) => {
+      const summary = loser.verdict.findings.length > 0
+        ? loser.verdict.findings[0]!.title
+        : (loser.verdict.pass ? 'passed' : 'failed judge');
+      return `alternative considered (lens=${loser.lens}): ${summary}`;
+    });
 
     if (winner !== undefined) {
-      return winner.decision;
+      return { decision: winner.decision, loserFindings };
     }
 
     // No candidate passed — fall through to a normal single-derive call
@@ -533,7 +573,8 @@ export class Engine {
       ...baseCtx,
       priorAttempt: { artifact: fallbackArtifact, verdict: bestLoser.verdict },
     };
-    return this.brain.decide(goal, fallbackCtx);
+    const fallbackDecision = await this.brain.decide(goal, fallbackCtx);
+    return { decision: fallbackDecision, loserFindings };
   }
 
   // ── ATTEMPT LOOP (the control loop) ──────────────────────────────────────
@@ -726,7 +767,7 @@ export class Engine {
             const report = blockedReport(
               `Authority gate denied at emission (artifact touched sensitive paths): ${brief.question}`,
             );
-            const resolution = this.onBrief ? await this.onBrief(brief) : brief.onTimeout;
+            const resolution = this.effectiveOnBrief ? await this.effectiveOnBrief(brief) : brief.onTimeout;
             await this.store.append({ type: 'blocked', at: t(), goalId: goal.id, brief, resolution });
             await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
             return report;
@@ -936,7 +977,7 @@ export class Engine {
         verdict.findings.map((f) => f.title),
       );
       const brief = escalatedBrief(goal, escalatedFinding);
-      const resolution = this.onBrief ? await this.onBrief(brief) : brief.onTimeout;
+      const resolution = this.effectiveOnBrief ? await this.effectiveOnBrief(brief) : brief.onTimeout;
       await this.store.append({
         type: 'blocked',
         at: t(),
@@ -959,7 +1000,7 @@ export class Engine {
         verdict.findings.map((f) => f.title),
       );
       const brief = isomorphicBrief(goal, verdict.failureSignature);
-      const resolution = this.onBrief ? await this.onBrief(brief) : brief.onTimeout;
+      const resolution = this.effectiveOnBrief ? await this.effectiveOnBrief(brief) : brief.onTimeout;
       await this.store.append({
         type: 'blocked',
         at: t(),
@@ -1034,7 +1075,11 @@ export class Engine {
   }
 
   // ── SPLIT PATH ────────────────────────────────────────────────────────────
-  private async runSplit(goal: Goal, children: ChildPlan[]): Promise<Report> {
+  private async runSplit(
+    goal: Goal,
+    children: ChildPlan[],
+    extraFindings: string[] = [],
+  ): Promise<Report> {
     const t = this.now;
 
     // Subdivide the budget by each child's share
@@ -1225,9 +1270,9 @@ export class Engine {
     const uniqueLessons = [...new Set(allLessons)];
     const uniqueLearnedLines = [...new Set(allLearnedLines)];
 
-    // Collect all blockers and child findings
+    // Collect all blockers and child findings, plus terraced-scan loser findings.
     const allBlockers: string[] = [...integrationBlockers];
-    const allFindings: string[] = [...integrationFindings];
+    const allFindings: string[] = [...extraFindings, ...integrationFindings];
     for (const r of childReports) {
       allBlockers.push(...r.blockers);
       allFindings.push(...r.findings);
@@ -1253,8 +1298,8 @@ export class Engine {
     brief: import('../contract/decision.js').DecisionBrief,
   ): Promise<Report> {
     const t = this.now;
-    const resolution = this.onBrief
-      ? await this.onBrief(brief)
+    const resolution = this.effectiveOnBrief
+      ? await this.effectiveOnBrief(brief)
       : brief.onTimeout;
     await this.store.append({
       type: 'blocked',
