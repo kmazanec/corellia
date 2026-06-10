@@ -1,6 +1,16 @@
 /**
  * The recursive engine — the single operation that is the factory.
  * receive → decide → (satisfy | split | block) → integrate → emit
+ *
+ * The DECIDE path integrates the structure flywheel: before deriving a fresh
+ * decomposition for a non-leaf goal, the engine consults the pattern store for
+ * a memoized split that matches the goal's structural shape. A trusted memo is
+ * walked verbatim (no brain call); a provisional memo is passed as a hint; no
+ * memo for a novel shape may trigger a terraced scan — k lens-diverse candidates
+ * ranked by judge-split — when the goal-type declares scan.k > 1. After the
+ * subtree completes, the engine records the outcome against the shape so the
+ * flywheel accumulates evidence autonomously. Promotion to trusted is a
+ * human-signoff step the engine never performs.
  */
 
 import type { Goal, Tier, MemoryPointer, Budget } from '../contract/goal.js';
@@ -12,9 +22,11 @@ import type { Brain, BrainContext } from '../contract/brain.js';
 import type { Registry } from '../contract/goal-type.js';
 import type { MemoryView } from '../contract/memory.js';
 import type { RiskClass, SensitivityFact } from '../contract/risk.js';
+import type { PatternStore } from '../contract/pattern.js';
 import { subdivide, consume } from './budget.js';
 import { lintLibrary } from '../library/constitution.js';
 import { classifyRisk } from '../library/risk.js';
+import { specShape } from '../flywheel/shape.js';
 
 export interface EngineOptions {
   registry: Registry;
@@ -44,6 +56,13 @@ export interface EngineOptions {
    * proceed without an authority that can underwrite it.
    */
   onGate?: (goal: Goal, risk: RiskClass) => Promise<'granted' | 'denied'>;
+  /**
+   * The split-memo pattern store. When present the DECIDE path consults it
+   * before deriving a fresh decomposition, and records the outcome after the
+   * subtree completes. When absent the flywheel is inactive and the engine
+   * derives every split from scratch.
+   */
+  patterns?: PatternStore;
 }
 
 export class Engine {
@@ -61,6 +80,7 @@ export class Engine {
   private readonly onGate:
     | ((goal: Goal, risk: RiskClass) => Promise<'granted' | 'denied'>)
     | undefined;
+  private readonly patterns: PatternStore | undefined;
 
   constructor(opts: EngineOptions) {
     // CONSTITUTION AT THE BOUNDARY: an engine cannot be constructed over an
@@ -81,6 +101,7 @@ export class Engine {
     this.onBrief = opts.onBrief;
     this.sensitivity = opts.sensitivity ?? [];
     this.onGate = opts.onGate;
+    this.patterns = opts.patterns;
   }
 
   async run(goal: Goal): Promise<Report> {
@@ -144,17 +165,64 @@ export class Engine {
 
     // ── DECIDE ─────────────────────────────────────────────────────────────
     // leafOnly types go straight to the attempt loop; non-leaf types decide.
+    // Non-leaf types consult the pattern store first: a trusted memo is walked
+    // verbatim; a provisional memo is passed as a hint to the brain; for a
+    // novel shape with scan.k > 1, a terraced scan generates k lens-diverse
+    // candidates and judge-split ranks them before committing.
     let decision: Decision;
 
     if (typeDef.leafOnly) {
       decision = { kind: 'satisfy' };
     } else {
-      const ctx: BrainContext = {
-        tier: currentTier,
-        memories: goal.memories,
-      };
-      decision = await this.brain.decide(goal, ctx);
+      const shape = specShape(goal);
+
+      // ── PATTERN STORE CONSULTATION ─────────────────────────────────────
+      const memo = this.patterns ? await this.patterns.match(shape) : null;
+      const memoStatus: 'none' | 'provisional' | 'trusted' =
+        memo === null ? 'none' : memo.status;
+
+      await this.store.append({
+        type: 'pattern-consulted',
+        at: t(),
+        goalId: goal.id,
+        shape,
+        status: memoStatus,
+      });
+
+      if (memoStatus === 'trusted' && memo !== null) {
+        // TRUSTED MEMO — walk verbatim, skip fresh derivation. The brain is
+        // never consulted for the decision itself: the structure was already
+        // underwritten by a human signoff. The split eval and all downstream
+        // evals still run — trust skips derivation, never judgment.
+        decision = memo.decision;
+      } else {
+        // Build the base BrainContext, carrying the provisional memo as a hint
+        // when one exists (the brain weighs it, never obeys it).
+        const baseCtx: BrainContext = {
+          tier: currentTier,
+          memories: goal.memories,
+          ...(memoStatus === 'provisional' && memo !== null
+            ? { patternHint: memo }
+            : {}),
+        };
+
+        const scan = typeDef.scan;
+        if (scan && scan.k > 1 && memoStatus === 'none' && this.registry.has('judge-split')) {
+          // ── TERRACED SCAN — novel shape, k > 1 ────────────────────────
+          // Generate k lens-diverse candidates and rank them with judge-split.
+          // The winning candidate (first pass, tie-broken by fewest findings)
+          // becomes the decision; losers are recorded in findings as
+          // "alternatives considered" — explored, not retrofitted.
+          decision = await this.runTerracedScan(goal, scan.k, scan.lenses, baseCtx, currentTier, shape);
+        } else {
+          // Normal single-derive path: no memo, or scan not warranted.
+          decision = await this.brain.decide(goal, baseCtx);
+        }
+      }
     }
+
+    // The shape is captured for the post-subtree record call.
+    const goalShape = typeDef.leafOnly ? null : specShape(goal);
 
     // ── SPLIT EVAL (before committing to a split) ──────────────────────────
     // When the decision is a split, validate it and optionally judge it.
@@ -336,12 +404,136 @@ export class Engine {
       case 'satisfy':
         return this.runAttemptLoop(goal, currentTier, currentTierIndex, tierLadder, deadline, entryRisk);
 
-      case 'split':
-        return this.runSplit(goal, decision.children);
+      case 'split': {
+        const splitReport = await this.runSplit(goal, decision.children);
+
+        // ── PATTERN RECORD ────────────────────────────────────────────────
+        // Record the outcome of the split against the shape so the flywheel
+        // accumulates evidence autonomously. Recording creates or updates a
+        // PROVISIONAL memo only — promotion to trusted is a human-signoff step
+        // the engine never performs (the authority gap).
+        if (this.patterns && goalShape !== null) {
+          const outcome: 'success' | 'failure' =
+            splitReport.blockers.length === 0 ? 'success' : 'failure';
+          await this.patterns.record(goalShape, decision, outcome);
+          await this.store.append({
+            type: 'pattern-recorded',
+            at: t(),
+            goalId: goal.id,
+            shape: goalShape,
+            outcome,
+          });
+        }
+
+        return splitReport;
+      }
 
       case 'block':
         return this.runBlock(goal, decision.brief);
     }
+  }
+
+  // ── TERRACED SCAN ─────────────────────────────────────────────────────────
+  /**
+   * Generate k lens-diverse candidate splits for a novel shape, rank them with
+   * judge-split, and return the winning decision.
+   *
+   * Candidates are lens-diverse, not k identical rolls of the same prompt — each
+   * call uses a different lens (an architect's cut, a reuse-maximising cut, a
+   * contrarian's cut) so that the tournament catches failure modes redundancy
+   * cannot. The winner is the first candidate whose judge-split verdict passes,
+   * tie-broken by fewest findings. Losing candidates are recorded in the goal's
+   * findings stream as "alternatives considered" — explored, not retrofitted.
+   *
+   * When no candidate passes, the scan falls through to a plain single-derive
+   * call whose BrainContext carries the best candidate's verdict as priorAttempt,
+   * so the brain can use what the tournament learned.
+   */
+  private async runTerracedScan(
+    goal: Goal,
+    k: number,
+    lenses: string[],
+    baseCtx: BrainContext,
+    currentTier: Tier,
+    _shape: string,
+  ): Promise<Decision> {
+    const t = this.now;
+
+    type Candidate = {
+      decision: Extract<Decision, { kind: 'split' }>;
+      verdict: Verdict;
+      lens: string;
+    };
+
+    const candidates: Candidate[] = [];
+    const rubric =
+      'Evaluate the split: is it sound and complete? Are dependencies correct and acyclic? Are budgetShares sensible?';
+
+    for (let i = 0; i < k; i++) {
+      const lens = lenses[i % lenses.length] ?? lenses[0]!;
+      const lensCtx: BrainContext = { ...baseCtx, lens };
+      const candidate = await this.brain.decide(goal, lensCtx);
+
+      if (candidate.kind !== 'split') {
+        // A candidate that is not a split is itself a meaningful decision —
+        // return it immediately (satisfy or block beats an uncertain tournament).
+        return candidate;
+      }
+
+      const splitArtifact: Artifact = {
+        kind: 'text',
+        text: JSON.stringify(candidate.children),
+      };
+      const judgeCtx: BrainContext = { tier: currentTier, memories: goal.memories };
+      const verdict = await this.brain.judge(goal, splitArtifact, rubric, judgeCtx);
+
+      candidates.push({ decision: candidate, verdict, lens });
+    }
+
+    // Rank: first passing verdict wins; tie-break by fewest findings.
+    const passing = candidates.filter((c) => c.verdict.pass);
+
+    let winner: Candidate | undefined;
+    if (passing.length > 0) {
+      winner = passing.reduce((best, c) =>
+        c.verdict.findings.length < best.verdict.findings.length ? c : best,
+      );
+    }
+
+    // Record losing candidates in the event log as alternatives considered.
+    const losers = winner
+      ? candidates.filter((c) => c !== winner)
+      : candidates;
+
+    for (const loser of losers) {
+      // Each loser gets a single decided event so the report's findings carry the
+      // "alternatives considered" trace required by the design.
+      await this.store.append({
+        type: 'decided',
+        at: t(),
+        goalId: goal.id,
+        decision: { kind: 'split', children: loser.decision.children },
+      });
+    }
+
+    if (winner !== undefined) {
+      return winner.decision;
+    }
+
+    // No candidate passed — fall through to a normal single-derive call
+    // carrying the best candidate's verdict so the brain learns from the scan.
+    const bestLoser = candidates.reduce((best, c) =>
+      c.verdict.findings.length < best.verdict.findings.length ? c : best,
+    );
+    const fallbackArtifact: Artifact = {
+      kind: 'text',
+      text: JSON.stringify(bestLoser.decision.children),
+    };
+    const fallbackCtx: BrainContext = {
+      ...baseCtx,
+      priorAttempt: { artifact: fallbackArtifact, verdict: bestLoser.verdict },
+    };
+    return this.brain.decide(goal, fallbackCtx);
   }
 
   // ── ATTEMPT LOOP (the control loop) ──────────────────────────────────────
