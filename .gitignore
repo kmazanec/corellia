@@ -10,5 +10,6 @@ media/video/tools/node_modules/
 
 node_modules/
 dist/
+out/
 *.log
 .claude/worktrees/

@@ -6,7 +6,8 @@
   "description": "A recursive software factory — walking-skeleton prototype.",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "demo": "tsx examples/greeting.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
