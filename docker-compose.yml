@@ -1,0 +1,15 @@
+# Start with: docker compose up -d postgres
+# Connect: DATABASE_URL=postgres://postgres:corellia@localhost:54329/postgres
+
+services:
+  postgres:
+    image: postgres:18
+    ports:
+      - "54329:5432"
+    environment:
+      POSTGRES_PASSWORD: corellia
+    volumes:
+      - corellia-postgres:/var/lib/postgresql/data
+
+volumes:
+  corellia-postgres:

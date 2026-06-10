@@ -44,6 +44,57 @@ summary.
 | `src/eventlog/` | The append-only event stores (`JsonlEventStore`, `InMemoryEventStore`) and pure projection functions (`renderTree`, `traceStats`, `projectMemory`). Every read-model is a fold over the log. |
 | `src/library/` | The starter set of goal-type definitions (`starterTypes()`), the deterministic check library (`checks.ts`), and `createRegistry()`. |
 | `src/brains/` | `ScriptedBrain` (deterministic, for tests and demos) and `LlmBrain` (any OpenAI-compatible endpoint). |
+| `src/substrate/` | Durable store implementations: `PgEventStore`, `PgPatternStore`, and `InMemoryPatternStore`. |
+
+---
+
+## Substrate
+
+The factory's event log and pattern store can be backed by PostgreSQL for
+durability across restarts. The SQL substrate provides one authoritative store
+per process: writes are serialized through pg's connection pool, and
+`bigserial` row order is the canonical append sequence.
+
+**Rationale.** A JSONL file is sufficient for single-process demos. Once the
+engine fans out across processes or restarts, you need a store that (a) gives
+every writer a stable ordering key without coordination and (b) lets the
+pattern flywheel accumulate across runs. PostgreSQL gives both: `INSERT`s are
+totally ordered by the WAL, and `ON CONFLICT DO UPDATE` makes pattern recording
+idempotent under retry.
+
+**JSONL and in-memory remain the default** for tests, demos, and offline use.
+`PgEventStore` and `PgPatternStore` are opt-in — wire them in when you deploy.
+
+### Starting Postgres with docker-compose
+
+```bash
+docker compose up -d postgres
+```
+
+This starts Postgres on port `54329` (non-standard to avoid colliding with any
+local Postgres on the default 5432).
+
+### DATABASE_URL convention
+
+```
+DATABASE_URL=postgres://postgres:corellia@localhost:54329/postgres
+```
+
+Pass this to any process that constructs a `PgEventStore` or `PgPatternStore`.
+Both accept either a connection string or a pre-configured `pg.Pool`.
+
+Call `ensureSchema()` once at startup before the first append or record.
+
+### Running the integration tests
+
+```bash
+docker compose up -d postgres
+DATABASE_URL=postgres://postgres:corellia@localhost:54329/postgres npx vitest run tests/substrate
+```
+
+Without `DATABASE_URL` the Pg test suites are skipped automatically via
+`describe.skipIf`, so `npm test` stays green for contributors without a
+database.
 
 ---
 
