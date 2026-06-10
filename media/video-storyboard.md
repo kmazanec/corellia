@@ -1,9 +1,9 @@
 # Corellia — Explainer Video Storyboard
 
 **Title:** *The Factory That Remembers Being Built*
-**Runtime target:** ~5:00 (4:45–5:15)
+**Runtime target:** ~5:00 (4:45–5:15) — current cut: 5:10.
 **Audience:** smart general-technical viewers; zero assumed GEB knowledge.
-**Narration total:** ~718 words (≈145 wpm).
+**Narration total:** ~770 words (≈149 wpm).
 
 ---
 
@@ -35,7 +35,7 @@ space of Scene 2. The tonal shift (dark → light-on-dark diagram space) marks
 
 ## Scene 2 — The factory in sixty seconds
 
-**Timecode:** 0:20–1:18
+**Timecode:** 0:20–1:12
 
 **Visual:** A single node labeled `goal` appears center frame. As the VO names
 the operation, the node animates through its life: **receive** (the node
@@ -54,15 +54,14 @@ appear at the three moments of the operation; a tier ladder
 > The design is called Corellia. Here's the whole machine in one breath.
 > Everything is a typed goal — a PRD, a diff, a critique — all goals, with
 > input and output contracts. And there's exactly one operation: receive a
-> goal; decide — satisfy it directly, or split it into sub-goals with
+> goal; decide — satisfy it directly, split it into sub-goals with
 > dependencies, or block; integrate the children's results; emit. That
 > operation, recursing, is the entire factory. Each goal-type is a harness:
-> its context, memory, tools, evals, and model tier. There are no roles, no
-> org chart — "the design phase" is just the part of the tree where
-> design-typed goals got spawned. Three evals guard the loop: was the split
-> sound; does the leaf meet its contract; does the assembled whole satisfy the
-> original goal. When an eval fails, a stronger model retries. Only when that
-> fails does a human appear.
+> its context, memory, tools, evals, and model tier. No roles, no org chart —
+> "the design phase" is just where design-typed goals got spawned. Three
+> evals guard the loop: was the split sound; does the leaf meet its contract;
+> does the whole satisfy the original goal. When an eval fails, a stronger
+> model retries. Only when that fails does a human appear.
 
 **On-screen text (sparse, timed to VO):**
 `everything is a typed goal` → `one operation: receive · decide · integrate ·
@@ -75,7 +74,7 @@ stillness leads into Scene 3.
 
 ## Scene 3 — The tame hierarchy
 
-**Timecode:** 1:18–1:52
+**Timecode:** 1:12–1:43
 
 **Visual:** A goal tree grows downward and — crucially — *resolves*: leaves
 turn solid green, results flow upward, branches collapse into their parents,
@@ -94,7 +93,7 @@ final chord-bar and stops.
 > fan-out bottoms out in atomic leaves. Chains are bounded by an attempts
 > budget. Parents verify children, never the reverse. And while a tree runs,
 > the factory never touches its own code. Every tree terminates. If you like
-> music: a goal tree is a fugue that resolves. It is deliberately not Bach's
+> music: a goal tree is a fugue that resolves — deliberately not Bach's
 > endlessly rising canon. There's no paradox here. Yet.
 
 **On-screen text:** `well-founded` · `every tree terminates` · then, alone on
@@ -107,7 +106,7 @@ in: we are leaving the machine for a book.
 
 ## Scene 4 — Hofstadter interlude: strange loops in forty seconds
 
-**Timecode:** 1:52–2:34
+**Timecode:** 1:43–2:17
 
 **Visual:** Style shift: engraving/woodcut texture, like plates in an old
 book. Three quick vignettes. (1) An Escher *Drawing Hands* homage — two
@@ -122,13 +121,13 @@ the ladder, to act on the top rung.
 
 **VO:**
 > In 1979, Douglas Hofstadter wrote *Gödel, Escher, Bach*, about what he
-> called strange loops: hierarchies where moving down through the levels
-> somehow lands you back at the top. Escher drew two hands, each drawing the
-> other. Bach wrote a canon that rises through keys and arrives back where it
-> began. And Gödel proved that arithmetic — plain statements about numbers —
-> can encode statements *about arithmetic itself*, including the sentence
-> "this statement is unprovable." A strange loop is a hierarchy whose bottom
-> acts on its own top. Hofstadter thought that loop is what a self is.
+> called strange loops: hierarchies where descending the levels somehow lands
+> you back on top. Escher drew two hands drawing each other. Bach wrote a
+> canon that climbs through keys back to where it began. And Gödel proved
+> that plain statements about numbers can encode statements *about arithmetic
+> itself* — including "this statement is unprovable." A strange loop is a
+> hierarchy whose bottom acts on its own top. Hofstadter thought that loop is
+> what a self is.
 
 **On-screen text:** `strange loop` · `the bottom acts on the top` · `Gödel ·
 Escher · Bach`.
@@ -141,7 +140,7 @@ persists across the style change, carrying the idea home.
 
 ## Scene 5 — The twist
 
-**Timecode:** 2:34–2:54
+**Timecode:** 2:17–2:35
 
 **Visual:** Back in the machine. A goal tree runs and resolves — tame, green,
 folding up, exactly as in Scene 3. Then a second tree spawns. Then a third.
@@ -167,7 +166,7 @@ fill them one by one, rapid-fire.
 
 ## Scene 6 — Crossing 1: the evolve kind
 
-**Timecode:** 2:54–3:11
+**Timecode:** 2:35–2:49
 
 **Visual:** Panel one. A leaf node deep in a tree hits a red wall labeled
 `friction`. It emits a chip: `blocker report`. The chip travels down out of
@@ -180,8 +179,7 @@ the harness box.
 **VO:**
 > One: the evolve kind. A leaf hits friction, files a blocker report, and that
 > becomes an improvement PR — a change to the very harness that produces
-> future leaves. The drawn hand picks up the pen. Drawing Hands, in
-> production.
+> future leaves. Drawing Hands, in production.
 
 **On-screen text:** `1 · evolve` · `leaf → blocker → PR → harness`.
 
@@ -189,7 +187,7 @@ the harness box.
 
 ## Scene 7 — Crossing 2: type memory
 
-**Timecode:** 3:11–3:27
+**Timecode:** 2:49–3:02
 
 **Visual:** Panel two. Dozens of small instances of the same goal-type
 (`critique`, stamped identically) run in different trees; each drips a droplet
@@ -201,9 +199,8 @@ figures sitting *in* its illustrations.
 
 **VO:**
 > Two: type memory. Lessons from individual goal runs are distilled and
-> injected as context into every future goal of that type. Instances
-> rewriting their own class. The students, collectively, revising the
-> textbook.
+> injected into every future goal of that type. Instances rewriting their own
+> class. The students, collectively, revising the textbook.
 
 **On-screen text:** `2 · type memory` · `instances rewrite the class`.
 
@@ -211,7 +208,7 @@ figures sitting *in* its illustrations.
 
 ## Scene 8 — Crossing 3: the pattern flywheel
 
-**Timecode:** 3:27–3:46
+**Timecode:** 3:02–3:17
 
 **Visual:** Panel three. A game board: a split happening at runtime is shown
 as a chess move (a piece sliding). The same move recurs across boards —
@@ -222,10 +219,10 @@ open with that move pre-printed on the board. Behind this, faintly, Scene 4's
 arithmetic-becoming-a-sentence replays: data that governs behavior.
 
 **VO:**
-> Three: the pattern flywheel. A runtime split is a move in the game. A
-> trusted pattern is a rule of the game. When recurring splits get promoted
-> into patterns, moves become rules — behavior encoded as data that then
-> governs behavior. That is exactly Gödel's trick.
+> Three: the pattern flywheel. A runtime split is a move in the game; a
+> trusted pattern is a rule. Promote recurring splits into patterns and moves
+> become rules — behavior encoded as data that then governs behavior. Gödel's
+> trick, exactly.
 
 **On-screen text:** `3 · patterns` · `moves → rules`.
 
@@ -233,7 +230,7 @@ arithmetic-becoming-a-sentence replays: data that governs behavior.
 
 ## Scene 9 — Crossing 4: the event log as self-symbol
 
-**Timecode:** 3:46–4:03
+**Timecode:** 3:17–3:31
 
 **Visual:** Panel four. A scrolling append-only log — monospace lines ticking
 upward: `goal.emitted`, `eval.pass`, `eval.pass`, `escalation`, `eval.pass`…
@@ -244,9 +241,9 @@ factory looking at its own reflection, and the reflection moving the gate.
 
 **VO:**
 > Four: the event log. Hofstadter says an "I" is a system's causally active
-> symbol for itself. The factory keeps a record of its own track record — and
-> that record changes what it's permitted to do. Earned autonomy. A
-> self-symbol with consequences.
+> symbol for itself. The factory keeps its own track record — and that record
+> changes what it's permitted to do. Earned autonomy. A self-symbol with
+> consequences.
 
 **On-screen text:** `4 · the event log` · `a self-symbol that acts`.
 
@@ -259,7 +256,7 @@ crossing.
 
 ## Scene 10 — Domestication, and the hard hat
 
-**Timecode:** 4:03–4:38
+**Timecode:** 3:31–3:58
 
 **Visual:** The full four-crossing diagram, now with a human icon stationed at
 each arrow: a review stamp on the PR arrow, a padlock on the architecture
@@ -272,27 +269,75 @@ yellow hard hat drops from the top of frame and lands squarely on the
 formula with a soft clunk, settling at a slight tilt.
 
 **VO:**
-> Four loops — and a human sitting at every crossing. Improvement PRs are
-> reviewed. The architecture is locked. A pattern becomes trusted only with
-> human signoff. Memory writes are eval-gated and provisional. And there is no
-> factory-factory — the loop is never allowed to close unsupervised. Why?
-> Gödel again. His second incompleteness theorem says a system can't prove its
-> own consistency from inside. Corellia's authority gap is the same fact,
-> operationally: the object level cannot underwrite changes to its own meta
-> level. The authority gap is the incompleteness theorem wearing a hard hat.
+> Four loops — and a human at every crossing. Improvement PRs are reviewed.
+> The architecture is locked. A pattern becomes trusted only with human
+> signoff. Memory writes are eval-gated and provisional. And there is no
+> factory-factory — the loop never closes unsupervised. Why? Gödel again: his
+> second incompleteness theorem says a system can't prove its own consistency
+> from inside. Corellia's authority gap is the same fact, operationally. The
+> authority gap is the incompleteness theorem wearing a hard hat.
 
 **On-screen text:** `a human at every crossing` → `no factory-factory` →
 (with the hard hat landing) `the authority gap`.
 
 **Transition:** The hard-hat-on-formula image shrinks into a corner badge as
-the camera drifts back to the substrate layer — quiet, slower pacing for the
+the four-crossing diagram returns — the loop is not done with us yet.
+
+---
+
+## Scene 11 — The loop fed back
+
+**Timecode:** 3:58–4:43
+
+**Visual:** The four-crossing diagram holds — and a new chip slides into frame
+from *outside* it, labeled `this analysis`, its border matching the film's own
+frame: the video handing itself in as evidence. The chip drops into the
+substrate, and four rapid beats fire — panel-style, but quicker than Scenes
+6–9. (1) **The wasp** — the engraving texture flickers back (Scene 4's
+idiom): a woodcut sphex wasp walks the same tight circuit, again and again,
+identical. Cut to a goal node on attempt N+1: attempt N's failed artifact and
+red verdict are pinned *inside* its frame; the re-split visibly warps away
+from the failed shape; when a new verdict lands isomorphic to the last, the
+node vaults sideways off the tier ladder instead of climbing the next rung.
+(2) **Quoted, never obeyed** — single shot: a memory chip rendered inside
+oversized quotation marks slots into a tray labeled `evidence`, visibly
+walled off from the `instructions` block of the harness card. (3) **The
+terraced scan** — the longest beat: a node meets a novel-shaped goal and
+sprays five faint ghost-trees, sketchy and cheap, side by side; a judge glyph
+sweeps across and ranks them; one brightens and deepens into full fidelity
+while the four losers fade — and slide, intact, into a document titled
+`ADR — alternatives considered`. (4) **The regress, cut** — judge glyphs
+stack on each other's shoulders, an eval evaluating an eval evaluating an
+eval, the tower rising — until an amber arrow stabs in from *outside* the
+dotted system boundary, labeled `merged PRs · production · human verdicts`,
+and the tower stops, grounded.
+
+**VO:**
+> One more turn. After the analysis, the designer mined Hofstadter for
+> mechanisms — four made it in. The sphex wasp repeats its routine, never
+> noticing; the factory isn't allowed to: retries carry the prior failure,
+> re-splits perturb the failed split, repeated failure signatures jump the
+> ladder early. Injected memories are quoted evidence — mentioned, never
+> obeyed. Novel shapes run Copycat's terraced scan: candidate splits compete
+> cheaply, a judge ranks them, only the winner is deepened. Architectures run
+> the same tournament — the losers become the ADR's "alternatives
+> considered," for free. And "what calibrates the calibration?" would regress
+> forever — so it's cut from outside: merged PRs, production, human verdicts.
+> Never another eval. The analysis crossed levels and changed the design it
+> described.
+
+**On-screen text:** `the loop fed back` → `not a sphex wasp` → `mentioned,
+never obeyed` → `k candidates · one winner` → `ground truth is exogenous`.
+
+**Transition:** The four beats settle into the substrate as four faint new
+seams in the strata. The camera drifts back and slows — quiet pacing for the
 final movement.
 
 ---
 
-## Scene 11 — The self
+## Scene 12 — The self
 
-**Timecode:** 4:38–4:56
+**Timecode:** 4:43–5:01
 
 **Visual:** Time-lapse, wide shot: trees bloom, resolve, and vanish above —
 dozens of them, ephemeral as breath. Below, the substrate strata glow steadily
@@ -314,9 +359,9 @@ a single glowing ring.
 
 ---
 
-## Scene 12 — Outro card
+## Scene 13 — Outro card
 
-**Timecode:** 4:56–5:05
+**Timecode:** 5:01–5:10
 
 **Visual:** Black. The ring resolves into a typed terminal line, cursor
 blinking: `$ CORELLIA`. Beneath it, three short lines type themselves, one per
@@ -344,7 +389,9 @@ VO phrase. The cursor blinks twice. Cut to black.
 - **The Hofstadter interlude (Scene 4) is the one sanctioned style break:**
   paper/engraving texture, woodcut hatching, serif captions — "we've opened a
   book." The ladder-with-escaping-arrow diagram is the object that survives
-  the transition back, stitching the two worlds.
+  the transition back, stitching the two worlds. **Scene 11's wasp beat is
+  the interlude's one echo** — the engraving texture flickers back for the
+  sphex vignette only, then snaps home to terminal.
 - Humans are always small, simple silhouettes — present, calm, stationed; the
   point is *placement*, not personality.
 
@@ -359,11 +406,17 @@ VO phrase. The cursor blinks twice. Cut to black.
 - **The loop arrow** is the film's signature motif: a thin amber arrow that
   exits the *bottom* of a hierarchy, travels outside it, and re-enters at the
   *top*. Introduced as a glitch in the cold open, explained in Scene 4,
-  multiplied into four in Scenes 6–9, revealed as a steady circulation in
-  Scene 11, contracted to a ring for the outro.
-- Scene-6-through-9 panels are rapid (15–19s each); reuse a fixed panel
+  multiplied into four in Scenes 6–9, turned back on the design itself in
+  Scene 11, revealed as a steady circulation in Scene 12, contracted to a
+  ring for the outro.
+- Scene-6-through-9 panels are rapid (13–15s each); reuse a fixed panel
   template (number stamp top-left, diagram center, caption bottom) so the four
   crossings read as a set.
+- Scene 11's four beats are faster still and deliberately *unequal*: the wasp
+  and the terraced scan carry the weight (~12–14s each); use/mention and the
+  regress-cut are single shots (~6–8s each) whose captions do the arguing.
+  Reuse the panel template with a smaller stamp so the beats read as kin to
+  Scenes 6–9 but quicker — a recap cadence, not four new chapters.
 
 ### Music
 
@@ -376,21 +429,23 @@ VO phrase. The cursor blinks twice. Cut to black.
   Let it cut off mid-rise at the transition out, unresolved.
 - **Scene 10:** silence for the formula; a single soft percussive clunk for
   the hard hat landing. Resist any comedy sting — the deadpan is the joke.
-- **Scenes 11–12:** the Scene 3 cadence returns, slower, warmer; final chord
+- **Scene 11:** the Scenes 5–9 pulse returns at a quicker subdivision, one
+  accent per beat; drop to near-silence under "The analysis crossed levels…"
+- **Scenes 12–13:** the Scene 3 cadence returns, slower, warmer; final chord
   sustains under the outro card and stops on the last cursor blink.
 
 ### Diagram assets needed
 
 1. **Goal tree, growing + resolving** (parameterized: node count, depth;
-   green-resolve animation) — used in Scenes 1, 3, 5, 11.
+   green-resolve animation) — used in Scenes 1, 3, 5, 12.
 2. **Single-node operation diagram** — receive / decide(satisfy·split·block) /
    integrate / emit, animatable per phase (Scene 2).
 3. **Harness card** — casing with five labeled slots: context · memory ·
-   tools · evals · tier (Scenes 2, 7).
+   tools · evals · tier (Scenes 2, 7, 11).
 4. **Three-evals gate icons** — split / goal-type / integration, placed at the
    operation's three moments (Scene 2).
 5. **Tier ladder** — haiku → sonnet → opus → (dimmed) human silhouette
-   (Scene 2).
+   (Scenes 2, 11 ladder-jump variant).
 6. **Well-foundedness annotations** — shrinking bracket, attempts countdown
    `3→2→1`, downward-only verify arrow, padlocked `factory code` box
    (Scene 3).
@@ -405,9 +460,10 @@ VO phrase. The cursor blinks twice. Cut to black.
     must survive the paper→terminal style transition (Scenes 4→5).
 11. **Substrate cross-section** — four strata (type memory · trusted
     patterns · harness code · event log) beneath ephemeral trees, with
-    circulating amber current; thickening variant for Scene 11.
+    circulating amber current; thickening variant for Scene 12; new-seams
+    variant for Scene 11's close.
 12. **Four-crossing panel template** — number stamp, diagram zone, caption
-    bar (Scenes 6–9).
+    bar (Scenes 6–9; small-stamp variant for Scene 11's beats).
 13. **Blocker-to-PR pipeline** — friction wall, blocker chip, PR icon,
     human-review stamp (Scene 6).
 14. **Type-memory vessel** — lesson droplets in, injected-context pipe back
@@ -421,5 +477,19 @@ VO phrase. The cursor blinks twice. Cut to black.
     (Scene 10).
 18. **Gödel formula + hard hat** — chalk-style `Con(F) ⊬_F` with droppable
     hard-hat asset and settle animation (Scene 10; corner-badge variant).
-19. **Outro terminal card** — `$ CORELLIA` + three typed lines + blinking
-    cursor (Scenes 1, 12 share the terminal frame).
+19. **Sphex wasp loop** — engraved woodcut wasp walking a repeating circuit;
+    companion retry-node diagram with pinned prior-failure ghost and
+    sideways ladder-vault animation (Scene 11).
+20. **Quoted-memory frame** — memory chip inside oversized quotation marks;
+    `evidence` tray structurally walled off from the harness card's
+    `instructions` block (Scene 11).
+21. **Terraced-scan tournament** — k faint ghost-trees side by side, judge
+    glyph ranking sweep, winner-deepens animation; losers sliding into an
+    `ADR — alternatives considered` document (Scene 11).
+22. **Eval-regress tower + exogenous arrow** — stacked judge glyphs, dotted
+    system-boundary box, amber arrow entering from outside labeled
+    `merged PRs · production · human verdicts` (Scene 11).
+23. **`this analysis` chip** — film-frame-bordered artifact chip that enters
+    from outside the diagram (Scene 11).
+24. **Outro terminal card** — `$ CORELLIA` + three typed lines + blinking
+    cursor (Scenes 1, 13 share the terminal frame).
