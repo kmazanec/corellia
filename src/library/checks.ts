@@ -4,6 +4,7 @@
  * of the goal and artifact alone.
  */
 
+import { normalize, isAbsolute } from 'node:path';
 import type { DeterministicCheck } from '../contract/goal-type.js';
 import type { Goal } from '../contract/goal.js';
 import type { Artifact } from '../contract/report.js';
@@ -48,9 +49,18 @@ export const filesWithinScope: DeterministicCheck = {
     if (files.length === 0) {
       return { ok: true, detail: 'No files to check against scope.' };
     }
-    const outOfScope = files.filter(
-      (f) => !goal.scope.some((prefix) => f.path.startsWith(prefix)),
-    );
+    const outOfScope = files.filter((f) => {
+      // Reject absolute paths outright
+      if (isAbsolute(f.path)) return true;
+      const np = normalize(f.path);
+      // Reject any path that escapes its directory via ..
+      if (np.startsWith('..')) return true;
+      return !goal.scope.some((prefix) => {
+        const ns = normalize(prefix);
+        const boundary = ns.endsWith('/') ? ns : ns + '/';
+        return np === ns || np.startsWith(boundary);
+      });
+    });
     if (outOfScope.length > 0) {
       const paths = outOfScope.map((f) => f.path).join(', ');
       return {

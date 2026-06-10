@@ -282,6 +282,52 @@ describe('renderTree', () => {
     expect(tree).toContain('Ship it');
   });
 
+  it('fix 10 — emitted report with non-empty blockers renders ✗', () => {
+    const events: FactoryEvent[] = [
+      baseGoal({ goalId: 'g1', goalType: 'feature', title: 'Failed goal' }),
+      {
+        type: 'emitted',
+        at: 5000,
+        goalId: 'g1',
+        report: {
+          artifact: null,
+          proof: [],
+          lessons: [],
+          memoriesUsed: [],
+          blockers: ['something went wrong'],
+          findings: [],
+          learned: '',
+        },
+      },
+    ];
+    const tree = renderTree(events);
+    expect(tree).toContain('✗');
+    expect(tree).not.toContain('✓');
+  });
+
+  it('fix 10 — clean emitted report renders ✓', () => {
+    const events: FactoryEvent[] = [
+      baseGoal({ goalId: 'g1', goalType: 'feature', title: 'Clean goal' }),
+      {
+        type: 'emitted',
+        at: 5000,
+        goalId: 'g1',
+        report: {
+          artifact: null,
+          proof: [],
+          lessons: [],
+          memoriesUsed: [],
+          blockers: [],
+          findings: [],
+          learned: '',
+        },
+      },
+    ];
+    const tree = renderTree(events);
+    expect(tree).toContain('✓');
+    expect(tree).not.toContain('✗');
+  });
+
   it('marks blocked goals with ✗', () => {
     const events: FactoryEvent[] = [
       baseGoal({ goalId: 'g1', goalType: 'feature', title: 'Risky change' }),

@@ -1,6 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import { subdivide, consume } from '../../src/engine/budget.js';
 import type { Budget } from '../../src/contract/goal.js';
+import { Engine } from '../../src/engine/engine.js';
+import {
+  MemoryEventStore,
+  NoopMemoryView,
+  buildRegistry,
+  nonLeafTypeDef,
+  leafTypeDef,
+  ScriptedBrain,
+  textArtifact,
+  makeGoal,
+} from '../engine/stubs.js';
+import type { ChildPlan } from '../../src/contract/decision.js';
 
 const base: Budget = {
   attempts: 10,
@@ -71,5 +83,58 @@ describe('consume', () => {
 
     const { budget: b3 } = consume(base, 'wallClockMs');
     expect(b3.wallClockMs).toBe(59_999);
+  });
+});
+
+// ── Fix 2: validateSplit fan-out guard ────────────────────────────────────
+
+describe('fix 2 — validateSplit fan-out guard via engine', () => {
+  it('rejects a split when children.length > budget.attempts', async () => {
+    const store = new MemoryEventStore();
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'splitter' }),
+      leafTypeDef({ name: 'leaf' }),
+    ]);
+
+    // 20 children, each with budgetShare 0.01
+    const twentyChildren: ChildPlan[] = Array.from({ length: 20 }, (_, i) => ({
+      localId: `c${i}`,
+      type: 'leaf',
+      title: `child ${i}`,
+      spec: {},
+      dependsOn: [],
+      scope: [],
+      budgetShare: 0.01,
+    }));
+
+    const brain = new ScriptedBrain()
+      .queueDecide({ kind: 'split', children: twentyChildren })
+      // After re-decide on structural failure, block
+      .queueDecide({ kind: 'block', brief: {
+        question: 'cannot split',
+        options: ['deny'],
+        links: [],
+        deadlineMs: 1000,
+        onTimeout: 'deny',
+      }});
+
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    // attempts: 10 < 20 children → fan-out rejected
+    const goal = makeGoal({
+      type: 'splitter',
+      budget: { attempts: 10, tokens: 1000, toolCalls: 50, wallClockMs: 60000 },
+    });
+    const report = await engine.run(goal);
+
+    expect(report.blockers.length).toBeGreaterThan(0);
+  });
+
+  it('accepts a split when children.length ≤ budget.attempts and summed child attempts ≤ parent', () => {
+    const parentBudget: Budget = { attempts: 10, tokens: 1000, toolCalls: 100, wallClockMs: 60000 };
+    const shares = [0.3, 0.3, 0.3];
+    const childBudgets = subdivide(parentBudget, shares);
+    const totalAttempts = childBudgets.reduce((s, b) => s + b.attempts, 0);
+    expect(childBudgets.length).toBeLessThanOrEqual(parentBudget.attempts);
+    expect(totalAttempts).toBeLessThanOrEqual(parentBudget.attempts);
   });
 });

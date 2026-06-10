@@ -110,6 +110,35 @@ describe('filesWithinScope', () => {
     );
     expect(r.ok).toBe(false);
   });
+
+  it('fix 4 — rejects path traversal: out/greeting/../../../etc/passwd', async () => {
+    const goal = { ...baseGoal, scope: ['out/greeting/'] };
+    const r = await filesWithinScope.run(
+      goal,
+      filesArtifact([{ path: 'out/greeting/../../../etc/passwd', content: '' }]),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('out/greeting/../../../etc/passwd');
+  });
+
+  it('fix 4 — rejects absolute paths: /etc/passwd', async () => {
+    const goal = { ...baseGoal, scope: ['out/greeting/'] };
+    const r = await filesWithinScope.run(
+      goal,
+      filesArtifact([{ path: '/etc/passwd', content: '' }]),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('/etc/passwd');
+  });
+
+  it('fix 4 — accepts a legitimate in-scope path: out/greeting/cli.mjs', async () => {
+    const goal = { ...baseGoal, scope: ['out/greeting/'] };
+    const r = await filesWithinScope.run(
+      goal,
+      filesArtifact([{ path: 'out/greeting/cli.mjs', content: '' }]),
+    );
+    expect(r.ok).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

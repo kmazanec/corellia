@@ -52,6 +52,7 @@ export class Engine {
 
   async run(goal: Goal): Promise<Report> {
     const t = this.now;
+    const deadline = t() + goal.budget.wallClockMs;
 
     // ── RECEIVE ────────────────────────────────────────────────────────────
     this.store.append({ type: 'goal-received', at: t(), goalId: goal.id, goal });
@@ -119,7 +120,7 @@ export class Engine {
       let splitAttempts = 0;
 
       while (true) {
-        const structErr = validateSplit(decision.children);
+        const structErr = validateSplit(decision.children, budget);
         if (structErr) {
           // Structural violation of the split → fail verdict, re-decide with
           // priorAttempt carrying the rejection
@@ -271,7 +272,7 @@ export class Engine {
     // ── DISPATCH on decision kind ──────────────────────────────────────────
     switch (decision.kind) {
       case 'satisfy':
-        return this.runAttemptLoop(goal, currentTier, currentTierIndex, tierLadder);
+        return this.runAttemptLoop(goal, currentTier, currentTierIndex, tierLadder, deadline);
 
       case 'split':
         return this.runSplit(goal, decision.children);
@@ -287,6 +288,7 @@ export class Engine {
     initialTier: Tier,
     initialTierIndex: number,
     tierLadder: Tier[],
+    deadline: number,
   ): Promise<Report> {
     const t = this.now;
     const typeDef = this.registry.get(goal.type);
@@ -296,6 +298,17 @@ export class Engine {
     let priorAttempt: { artifact: Artifact | null; verdict: Verdict } | undefined;
 
     while (true) {
+      // Check wall-clock budget before each attempt
+      if (t() >= deadline) {
+        this.store.append({
+          type: 'budget-exhausted',
+          at: t(),
+          goalId: goal.id,
+          dimension: 'wallClockMs',
+        });
+        return this.runBlock(goal, exhaustedBrief(goal, 'wallClockMs'));
+      }
+
       // Check attempts budget before producing
       if (budget.attempts <= 0) {
         this.store.append({
@@ -315,6 +328,17 @@ export class Engine {
         ? { tier, memories: goal.memories, priorAttempt }
         : { tier, memories: goal.memories };
       const artifact = await this.brain.produce(goal, ctx);
+
+      // Account for tokens used by this produce call
+      {
+        const tokensUsed = Math.ceil(JSON.stringify(artifact ?? '').length / 4);
+        const tkConsumed = consumeN(budget, 'tokens', tokensUsed);
+        budget = tkConsumed.budget;
+        if (tkConsumed.exhausted) {
+          this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'tokens' });
+          return this.runBlock(goal, exhaustedBrief(goal, 'tokens'));
+        }
+      }
 
       // ── DETERMINISTIC CHECKS ───────────────────────────────────────────
       let deterministicVerdict: Verdict | null = null;
@@ -343,6 +367,10 @@ export class Engine {
         // Track tool calls spent
         const tcConsumed = consumeN(budget, 'toolCalls', toolCallsUsed);
         budget = tcConsumed.budget;
+        if (tcConsumed.exhausted) {
+          this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'toolCalls' });
+          return this.runBlock(goal, exhaustedBrief(goal, 'toolCalls'));
+        }
 
         deterministicVerdict = {
           pass: allOk,
@@ -377,10 +405,8 @@ export class Engine {
               artifact: resolution.artifact,
               verdict: deterministicVerdict,
             };
-            // Consume the repair attempt
-            const ra = consume(budget, 'attempts');
-            budget = ra.budget;
-            // Re-run checks on the repaired artifact immediately
+            // Re-run checks on the repaired artifact immediately (repair is part of
+            // the same attempt that produced the flawed artifact — no extra consume)
             const recheck = await this.recheckAndJudge(
               goal,
               resolution.artifact,
@@ -429,6 +455,17 @@ export class Engine {
         const judgeCtx: BrainContext = { tier, memories: goal.memories };
         const verdict = await this.brain.judge(goal, artifact, rubric, judgeCtx);
 
+        // Account for tokens used by this judge call
+        {
+          const tokensUsed = Math.ceil(JSON.stringify(verdict ?? '').length / 4);
+          const tkConsumed = consumeN(budget, 'tokens', tokensUsed);
+          budget = tkConsumed.budget;
+          if (tkConsumed.exhausted) {
+            this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'tokens' });
+            return this.runBlock(goal, exhaustedBrief(goal, 'tokens'));
+          }
+        }
+
         this.store.append({
           type: 'judge-verdict',
           at: t(),
@@ -456,8 +493,7 @@ export class Engine {
               artifact: resolution.artifact,
               verdict,
             };
-            const ra = consume(budget, 'attempts');
-            budget = ra.budget;
+            // Repair is part of the same attempt — no extra consume
             const recheck = await this.recheckAndJudge(
               goal,
               resolution.artifact,
@@ -614,12 +650,14 @@ export class Engine {
         `Escalated finding requires human decision: ${escalatedFinding.title}`,
         verdict.findings.map((f) => f.title),
       );
+      const brief = escalatedBrief(goal, escalatedFinding);
+      const resolution = this.onBrief ? await this.onBrief(brief) : brief.onTimeout;
       this.store.append({
         type: 'blocked',
         at: t(),
         goalId: goal.id,
-        brief: escalatedBrief(goal, escalatedFinding),
-        resolution: 'deny',
+        brief,
+        resolution,
       });
       this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
       return { kind: 'blocked', report };
@@ -772,26 +810,33 @@ export class Engine {
 
       // This child's promise awaits its deps then runs
       const childPromise = (async () => {
-        // Await all dependencies
-        const depReports = await Promise.all(depPromises);
+        try {
+          // Await all dependencies
+          const depReports = await Promise.all(depPromises);
 
-        // If any dependency failed or blocked, this child is blocked too
-        const failedDep = depReports.find((r) => r.blockers.length > 0);
-        if (failedDep) {
-          const report = blockedReport(
-            `Blocked because a dependency failed: ${failedDep.blockers[0] ?? 'unknown'}`,
-          );
-          this.store.append({
-            type: 'emitted',
-            at: t(),
-            goalId: childGoal.id,
-            report,
-          });
+          // If any dependency failed or blocked, this child is blocked too
+          const failedDep = depReports.find((r) => r.blockers.length > 0);
+          if (failedDep) {
+            const report = blockedReport(
+              `Blocked because a dependency failed: ${failedDep.blockers[0] ?? 'unknown'}`,
+            );
+            this.store.append({
+              type: 'emitted',
+              at: t(),
+              goalId: childGoal.id,
+              report,
+            });
+            return report;
+          }
+
+          // Run the child through the engine
+          return await this.run(childGoal);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          const report = blockedReport(`child threw: ${msg}`);
+          this.store.append({ type: 'emitted', at: t(), goalId: childGoal.id, report });
           return report;
         }
-
-        // Run the child through the engine
-        return this.run(childGoal);
       })();
 
       reportMap.set(child.localId, childPromise);
@@ -829,10 +874,12 @@ export class Engine {
 
     // Integration eval: if registry has judge-integration, judge the assembly
     const integrationFindings: string[] = [];
+    const integrationBlockers: string[] = [];
     if (this.registry.has('judge-integration') && mergedArtifact) {
       const rubric = `Does the integrated artifact satisfy the original goal: "${goal.title}"?`;
+      const integTypeDef = this.registry.get(goal.type);
       const judgeCtx: BrainContext = {
-        tier: goal.budget.attempts > 0 ? 'haiku' : 'haiku',
+        tier: integTypeDef.tier.default,
         memories: goal.memories,
       };
       const intVerdict = await this.brain.judge(
@@ -842,10 +889,10 @@ export class Engine {
         judgeCtx,
       );
       if (!intVerdict.pass) {
-        // One re-integration is out of scope for the skeleton: record in findings
-        integrationFindings.push(
-          `Integration eval failed: ${intVerdict.findings.map((f) => f.title).join(', ')}`,
-        );
+        // Failing integration is a hard blocker — emit failure honestly
+        const msg = `Integration eval failed: ${intVerdict.findings.map((f) => f.title).join(', ')}`;
+        integrationBlockers.push(msg);
+        integrationFindings.push(msg);
       }
     }
 
@@ -894,7 +941,7 @@ export class Engine {
     const uniqueLearnedLines = [...new Set(allLearnedLines)];
 
     // Collect all blockers and child findings
-    const allBlockers: string[] = [];
+    const allBlockers: string[] = [...integrationBlockers];
     const allFindings: string[] = [...integrationFindings];
     for (const r of childReports) {
       allBlockers.push(...r.blockers);
@@ -943,8 +990,13 @@ export class Engine {
  * Validate structural constraints on a proposed split.
  * Returns an error message if invalid, or null if valid.
  */
-function validateSplit(children: ChildPlan[]): string | null {
+function validateSplit(children: ChildPlan[], budget: Budget): string | null {
   if (children.length === 0) return 'Split must have at least one child';
+
+  // Fan-out guard: child count must not exceed the parent attempt budget
+  if (children.length > budget.attempts) {
+    return `Fan-out of ${children.length} children exceeds parent attempt budget of ${budget.attempts}`;
+  }
 
   const localIds = new Set(children.map((c) => c.localId));
 

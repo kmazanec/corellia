@@ -18,6 +18,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
+import { resolve } from 'node:path';
 
 import { Engine } from '../src/engine/engine.js';
 import { JsonlEventStore } from '../src/eventlog/jsonl-store.js';
@@ -235,6 +236,10 @@ const report = await engine.run(rootGoal);
 
 if (report.artifact?.kind === 'files' && report.artifact.files) {
   for (const file of report.artifact.files) {
+    const resolved = resolve(file.path);
+    if (!resolved.startsWith(resolve('out/greeting'))) {
+      throw new Error(`Path traversal rejected: ${file.path}`);
+    }
     const dir = file.path.substring(0, file.path.lastIndexOf('/'));
     if (dir) mkdirSync(dir, { recursive: true });
     writeFileSync(file.path, file.content, 'utf8');
@@ -243,8 +248,12 @@ if (report.artifact?.kind === 'files' && report.artifact.files) {
 
 // Assemble the entry-point CLI that imports from both modules
 mkdirSync('out/greeting', { recursive: true });
+const cliPath = 'out/greeting/cli.mjs';
+if (!resolve(cliPath).startsWith(resolve('out/greeting'))) {
+  throw new Error(`Path traversal rejected: ${cliPath}`);
+}
 writeFileSync(
-  'out/greeting/cli.mjs',
+  cliPath,
   `import { GREETING_TEMPLATE, FAREWELL_TEMPLATE } from './format.mjs';
 const name = process.argv[2] ?? 'world';
 console.log(GREETING_TEMPLATE(name));

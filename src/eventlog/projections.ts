@@ -175,17 +175,11 @@ function statusGlyph(
   goalId: string,
   events: FactoryEvent[],
 ): string {
-  // Emitted with a passing deterministic-checked or judge-verdict → ✓
-  const emitted = events.some((e) => e.type === 'emitted' && e.goalId === goalId);
-  if (emitted) {
-    const hasPass =
-      events.some(
-        (e) =>
-          (e.type === 'deterministic-checked' || e.type === 'judge-verdict') &&
-          e.goalId === goalId &&
-          e.verdict.pass,
-      );
-    return hasPass ? '✓' : '✓';
+  // Find the emitted event for this goal
+  const emittedEvent = events.find((e) => e.type === 'emitted' && e.goalId === goalId);
+  if (emittedEvent && emittedEvent.type === 'emitted') {
+    // An emitted report with non-empty blockers is a failure
+    return emittedEvent.report.blockers.length > 0 ? '✗' : '✓';
   }
 
   const isBlocked = events.some((e) => e.type === 'blocked' && e.goalId === goalId);

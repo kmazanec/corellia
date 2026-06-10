@@ -698,6 +698,250 @@ describe('split with file artifacts', () => {
   });
 });
 
+// ── Fix 1: repair must not cost a second attempt ──────────────────────────
+
+describe('fix 1 — repair does not consume a second attempt', () => {
+  it('passes within a 1-attempt budget when repair succeeds on first try', async () => {
+    const store = new MemoryEventStore();
+
+    const brain = new ScriptedBrain()
+      .queueProduce(textArtifact('draft'))
+      .queueJudge(failVerdict('needs-work', 'fix the thing'))
+      .queueRepair(textArtifact('improved'))
+      .queueJudge(passVerdict());
+
+    const registry = buildRegistry([
+      leafTypeDef({
+        deterministic: [],
+        judgeType: 'judge-leaf',
+      }),
+    ]);
+
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    // Only 1 attempt budget — repair must not cost an extra attempt
+    const goal = makeGoal({ budget: { attempts: 1, tokens: 10000, toolCalls: 50, wallClockMs: 60000 } });
+    const report = await engine.run(goal);
+
+    expect(report.blockers).toHaveLength(0);
+    expect(report.artifact).toEqual(textArtifact('improved'));
+  });
+});
+
+// ── Fix 3: all four budget dimensions can terminate the loop ──────────────
+
+describe('fix 3 — toolCalls budget exhaustion', () => {
+  it('emits budget-exhausted(toolCalls) when toolCalls runs out', async () => {
+    const store = new MemoryEventStore();
+
+    const brain = new ScriptedBrain()
+      .queueProduce(textArtifact('a'));
+
+    const registry = buildRegistry([
+      leafTypeDef({
+        deterministic: [alwaysPassCheck()],  // 1 toolCall per check
+        judgeType: null,
+      }),
+    ]);
+
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    // toolCalls: 0 → exhausted after the first deterministic check
+    const goal = makeGoal({ budget: { attempts: 5, tokens: 100000, toolCalls: 0, wallClockMs: 60000 } });
+    const report = await engine.run(goal);
+
+    expect(report.blockers.length).toBeGreaterThan(0);
+    const exhausted = store.list({ type: 'budget-exhausted' });
+    expect(exhausted.length).toBeGreaterThan(0);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((exhausted[0] as any).dimension).toBe('toolCalls');
+  });
+});
+
+describe('fix 3 — wallClockMs budget exhaustion', () => {
+  it('emits budget-exhausted(wallClockMs) when deadline is already passed', async () => {
+    const store = new MemoryEventStore();
+
+    const brain = new ScriptedBrain()
+      .queueProduce(textArtifact('a'));
+
+    const registry = buildRegistry([leafTypeDef()]);
+
+    // Time starts at 1000, wallClockMs: 0 → deadline = 1000, first t() call returns 1001
+    let tick = 1000;
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      now: () => ++tick,
+    });
+    const goal = makeGoal({ budget: { attempts: 5, tokens: 100000, toolCalls: 50, wallClockMs: 0 } });
+    const report = await engine.run(goal);
+
+    expect(report.blockers.length).toBeGreaterThan(0);
+    const exhausted = store.list({ type: 'budget-exhausted' });
+    expect(exhausted.length).toBeGreaterThan(0);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((exhausted[0] as any).dimension).toBe('wallClockMs');
+  });
+});
+
+describe('fix 3 — tokens budget exhaustion', () => {
+  it('emits budget-exhausted(tokens) when tokens runs out after produce', async () => {
+    const store = new MemoryEventStore();
+
+    const brain = new ScriptedBrain()
+      .queueProduce(textArtifact('a very long artifact that will consume many tokens'));
+
+    const registry = buildRegistry([leafTypeDef({ deterministic: [], judgeType: null })]);
+
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    // tokens: 1 → produce output will exceed it
+    const goal = makeGoal({ budget: { attempts: 5, tokens: 1, toolCalls: 50, wallClockMs: 60000 } });
+    const report = await engine.run(goal);
+
+    expect(report.blockers.length).toBeGreaterThan(0);
+    const exhausted = store.list({ type: 'budget-exhausted' });
+    expect(exhausted.length).toBeGreaterThan(0);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((exhausted[0] as any).dimension).toBe('tokens');
+  });
+});
+
+// ── Fix 5: failing integration verdict must emit report with blockers ──────
+
+describe('fix 5 — failing integration verdict produces non-empty blockers', () => {
+  it('report.blockers is non-empty when judge-integration fails', async () => {
+    const store = new MemoryEventStore();
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'splitter', judgeType: 'judge-integration' }),
+      leafTypeDef({ name: 'leaf', judgeType: null }),
+      leafTypeDef({ name: 'judge-integration', leafOnly: true, judgeType: null }),
+    ]);
+
+    const childA: ChildPlan = {
+      localId: 'a',
+      type: 'leaf',
+      title: 'child A',
+      spec: {},
+      dependsOn: [],
+      scope: [],
+      budgetShare: 1.0,
+    };
+
+    const brain = new ScriptedBrain()
+      .queueDecide({ kind: 'split', children: [childA] })
+      .queueProduce(textArtifact('output'))
+      .queueJudge(failVerdict('integration-fail'));   // judge-integration fails
+
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const goal = makeGoal({ type: 'splitter', id: 'root' });
+    const report = await engine.run(goal);
+
+    expect(report.blockers.length).toBeGreaterThan(0);
+    expect(report.blockers[0]).toMatch(/integration eval failed/i);
+  });
+});
+
+// ── Fix 7: child throws become blocked reports, not unhandled rejections ───
+
+describe('fix 7 — child throws become blocked reports', () => {
+  it('run completes, throwing child has blockers, dependents are blocked', async () => {
+    const store = new MemoryEventStore();
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'splitter' }),
+      leafTypeDef({ name: 'leaf' }),
+    ]);
+
+    const childA: ChildPlan = {
+      localId: 'a',
+      type: 'leaf',
+      title: 'child A (throws)',
+      spec: {},
+      dependsOn: [],
+      scope: [],
+      budgetShare: 0.5,
+    };
+    const childB: ChildPlan = {
+      localId: 'b',
+      type: 'leaf',
+      title: 'child B (depends on A)',
+      spec: {},
+      dependsOn: ['a'],
+      scope: [],
+      budgetShare: 0.5,
+    };
+
+    const brain = {
+      async decide() {
+        return { kind: 'split' as const, children: [childA, childB] };
+      },
+      async produce(goal: import('../../src/contract/goal.js').Goal) {
+        throw new Error(`brain exploded for ${goal.title}`);
+      },
+      async judge() {
+        return passVerdict();
+      },
+      async repair() {
+        return textArtifact('');
+      },
+    };
+
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const goal = makeGoal({ type: 'splitter', id: 'root' });
+    // Should not throw
+    const report = await engine.run(goal);
+
+    // Parent report has blockers (from the thrown child)
+    expect(report.blockers.length).toBeGreaterThan(0);
+
+    // Find child A's emitted report — it should have blockers with "child threw"
+    const emittedEvents = store.list({ type: 'emitted' });
+    const childAEmit = emittedEvents.find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (e) => (e as any).goalId === 'root/a',
+    );
+    expect(childAEmit).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((childAEmit as any).report.blockers[0]).toMatch(/child threw/i);
+  });
+});
+
+// ── Fix 8: escalated findings consult onBrief ──────────────────────────────
+
+describe('fix 8 — escalated findings consult onBrief', () => {
+  it('onBrief returning "answered" is reflected in the blocked event resolution', async () => {
+    const store = new MemoryEventStore();
+
+    const brain = new ScriptedBrain()
+      .queueProduce(textArtifact('attempt1'))
+      .queueJudge(failVerdict('needs-rearch', undefined, true));  // escalated=true
+
+    const registry = buildRegistry([
+      leafTypeDef({
+        deterministic: [],
+        judgeType: 'judge-leaf',
+      }),
+    ]);
+
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      onBrief: async () => 'answered',
+    });
+    const goal = makeGoal();
+    const report = await engine.run(goal);
+
+    expect(report.blockers.length).toBeGreaterThan(0);
+
+    const blockedEvents = store.list({ type: 'blocked' });
+    expect(blockedEvents).toHaveLength(1);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((blockedEvents[0] as any).resolution).toBe('answered');
+  });
+});
+
 // ── 11. Cyclic dependency detection ──────────────────────────────────────
 
 describe('cyclic dependency detection', () => {
