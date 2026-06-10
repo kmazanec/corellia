@@ -1,0 +1,61 @@
+# The Software Factory is a Strange Loop
+
+I've spent the past while designing an autonomous software factory. It's called Corellia, and I should say up front that it's a paper machine — a design exercise worked out in documents, not a system that runs. The design covers the whole product-development process, intent to PR, and it rests on one recursive operation: receive a goal, decide whether to satisfy it directly or split it into sub-goals with a dependency structure, integrate the children's results, emit. That operation, applied to itself all the way down, is the entire factory.
+
+Somewhere in the middle of writing the spec I noticed I kept reaching for the same defensive moves — splits must strictly shrink the goal, budgets must subdivide, the factory must never modify its own code mid-run — and I realized the thing I was defending against had a name. Hofstadter gave it one in 1979: the strange loop. What surprised me wasn't finding one in the design. It was finding exactly where it lives, and where I had — without quite knowing why — refused to let it live.
+
+If you haven't read *Gödel, Escher, Bach*, here is the idea in the three examples Hofstadter built the book around.
+
+Bach's *Canon per Tonos* modulates upward through the keys — each repetition a whole step higher — and after six repetitions arrives back in the key it started in. Played on a loop, it seems to rise forever while going nowhere. Escher's *Drawing Hands* is a lithograph of two hands, each drawing the other into existence — the content of the picture performs the creation of the picture. And Gödel's incompleteness proof turns on a trick of encoding: statements about numbers can themselves be encoded *as* numbers, so a statement of arithmetic can talk about statements of arithmetic — including itself. Gödel built one that says, in effect, "this statement is not provable," and the roof fell in on Hilbert's program.
+
+The common move is the same in all three: a hierarchy of levels that ought to be strictly stacked — melody above key, drawer above drawn, mathematics above meta-mathematics — turns out to be tangled. You move consistently upward (or downward) through the levels and find yourself back where you started. The bottom level reaches up and acts on the machinery above it. Hofstadter's larger claim was that this tangle is not a curiosity but the mechanism of selfhood — that the "I" is a strange loop, a symbol the brain builds of itself that becomes causally active in the very system it represents.
+
+Keep that last part in mind. It comes back.
+
+## The factory, in three paragraphs
+
+Everything Corellia passes around is a typed goal; there is no other primitive. A PRD, a diff, a renamed symbol are goals of different types, and a goal-type *is* a harness — it binds context, memory access, an exact tool grant, an eval, and a model tier. There are no roles, no org chart. What a human would call "the design phase" is just the region of the goal tree where design-typed goals were spawned. The library of goal-types comes in four locked kinds — make, learn, judge, evolve — and that frame is human-locked architecture; everything inside it can grow.
+
+Three evals guard the three moments of the operation: was the split sound, does the leaf's output meet its contract, does the assembled whole satisfy the original goal. Eval failure drives one control loop — retry at a higher model tier, and when attempts are exhausted, summon a human. Humans enter at exactly three gaps: competence (the escalation just described), physical (an act no agent can perform), and authority — defined in the design as an act whose consequences outrun what any eval can underwrite. Hold onto that phrasing too.
+
+Memory is layered — project, type, global — and spawner-mediated: parents inject relevant memories into children; children report lessons upward; parents decide what gets promoted. Everything the factory does is an event in one append-only log, and memory is a projection of that log. Recurring runtime decompositions get distilled into split-memos — provisional automatically, trusted only with human signoff. And the whole design splits into two strictly separated loops: working *in* the factory (product work) and working *on* the factory (improvement PRs against the factory's own repo, human-reviewed, with the architecture locked).
+
+## The recursion is not the strange loop
+
+The obvious place to look for the loop is the recursion — a system that feeds goals to itself, surely that's the tangle. It isn't, and the design works hard to make sure it isn't.
+
+A goal tree is a well-founded hierarchy by construction. Independent sub-goals strictly shrink the goal, so fan-out bottoms out at atomic leaves with no depth cap needed; dependent chains don't shrink, so they're bounded by an attempts budget instead — an auditable integer, not a vibe. Budgets subdivide downward and bound everything beneath them. Authority flows one direction: parents verify children, never the reverse — a child cannot judge its parent, and a judge cannot even split, because a judge that splits launders sub-verdicts nobody calibrated. And within a run, level-crossing is simply forbidden. The factory never modifies its own code mid-run. A leaf that discovers its harness is broken files a blocker report; it does not reach up and patch the harness that spawned it.
+
+Bach wrote both of the musical structures in Hofstadter's book, and the difference between them is the point. A goal tree is a fugue, not the endlessly rising canon: it states a subject, develops it through voices, and *resolves*. It begins, descends, returns, and is torn down. Nothing in a single run ever arrives back above where it started.
+
+## Four places the bottom touches the top
+
+Across runs, the story inverts. Watch the factory over weeks instead of hours and the levels tangle in four specific places.
+
+**The evolve kind.** A leaf hits friction — a prompt that misleads, an eval that's miscalibrated, a missing tool. That friction becomes a blocker report; the report becomes input to `improve-factory`; that goal emits a PR against the factory's own repo; the merged PR changes the harness that produces future leaves. The system's output modifies the system that produces output. This is *Drawing Hands* rendered as a deployment pipeline — the work drawing the hand that does the work.
+
+**Type memory tangles instance and class.** Lessons reported by individual goal instances are promoted — through an eval-gated curate type — into the type's memory, which is injected into every future instance's context. Injected context is, operationally, prompt text. So instances rewrite the behavior of their own class. In any ordinary programming language this is the kind of thing the type system exists to forbid; here it is the compounding asset, the layer where the factory gets better.
+
+**The pattern flywheel is the most Gödelian piece.** When the factory decomposes a goal at runtime, that split is a *move* in the game — one node's choice, judged by one eval, gone when the tree is torn down. But when the same shape of split recurs, it gets distilled into a split-memo, and a trusted split-memo is consulted *before* future decompositions. It has become a *rule* of the game. The flywheel promotes moves into rules — behavior, encoded as data, that then governs behavior. That is precisely Gödel's trick. Arithmetic could only talk about itself because statements were encoded as numbers, the very objects arithmetic manipulates. Splits can only govern splitting because they're encoded as memos, the very objects the splitter consults.
+
+**The event log is the self-symbol.** Hofstadter's "I" is not decoration — it's the system's symbol for itself that *does* something, that participates causally in the system it depicts. The factory's event log is its model of itself: every decision, every eval verdict, every escalation, queryable. And it's load-bearing. "Earned autonomy" in the design means the factory's representation of its own track record changes what the factory is permitted to do — deploy rights are deferred until the trace history exists to stand on; tier defaults are re-set by what the traces show. The self-model feeds back into the self. The dark factory needs no lights, but it needs instruments — and the instruments turn out to be the most loop-like thing in it.
+
+## Domestication, or: the incompleteness theorem in a hard hat
+
+So the factory across runs is a genuine strange loop — and the design's response is not to break the loop but to put a tollbooth at every level-crossing.
+
+Improvement PRs are human-reviewed, and the architecture — the four kinds, the core types, the constitution — is locked against them. A split-memo can reach *provisional* on its own, but *trusted* takes a human signature. Type-memory writes pass an eval, enter provisional, and decay if they correlate with downstream failures; a bad write is a caught condition, not silent poison. And v1 contains an explicit refusal I only understood after the fact: no factory-factory. The factory does not commission improvements to itself as ordinary product work. The loop is never allowed to close on itself unsupervised.
+
+Why a human, though? Why is the gate not just a better eval? Because of Gödel's *second* incompleteness theorem: a consistent formal system cannot prove its own consistency from inside. Any such proof would have to be underwritten by the very axioms in question. Now reread the design's definition of the authority gap — an act whose consequences outrun what any eval can underwrite. That is the same statement, operationally. The factory's evals are its axioms; a change to the harness is a change to the axioms; and no eval running *on* the current harness can certify a change *to* it, for exactly the reason arithmetic can't notarize arithmetic. The object level cannot underwrite its own meta level. That's not a policy preference — it's the theorem. The humans at the crossings aren't there because the models are weak this year. They're there because the math says somebody outside the system has to be.
+
+The authority gap is the incompleteness theorem wearing a hard hat.
+
+## Where the self lives
+
+One more thing falls out of this, and it's the part I find genuinely strange.
+
+Trees are ephemeral. Every run is bounded, isolated in its own worktree, evaluated, and torn down. Nothing that makes the factory *the factory* survives in them. The factory's identity lives entirely in the loop-carried substrate — type memory, trusted patterns, the harness code, the event log. Which is to say: the factory's self *is* the strange loop. The tame, well-founded, fugue-like part does all the work and has no continuity; the tangled part does no product work at all and is the only thing that persists. Its instruments are its self-awareness.
+
+Seen from that angle, the two-loop separation — working in the factory versus working on it — stops looking like an engineering convenience and starts looking like the central decision of the design: keep the hierarchy and the strange loop from touching. Let the fugue resolve. Let the canon rise — slowly, on paper, one human-signed rung at a time.
+
+Hofstadter spent eight hundred pages arguing that a self is what happens when a system's symbol for itself becomes causally active inside it. I set out to design a machine that builds software, and somewhere in the spec, without meaning to, I drew a small careful circle around exactly that mechanism and posted a guard at every place it crosses its own levels. Corellia doesn't run yet. But I already know what it would be, if it did: a stack of honest hierarchies, owned by a loop.

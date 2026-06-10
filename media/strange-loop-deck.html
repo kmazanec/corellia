@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Corellia — The Factory That Holds Its Own Blueprint</title>
+<style>
+  :root {
+    --bg: #faf8f4;
+    --ink: #1a1a18;
+    --muted: #8a857c;
+    --accent: #b03a2e;
+    --rule: #d8d3c8;
+    --diagram: #4a463f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #131311;
+      --ink: #e8e4da;
+      --muted: #7d786e;
+      --accent: #e8604f;
+      --rule: #33312c;
+      --diagram: #b3ada0;
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    overflow: hidden;
+  }
+  body { cursor: default; }
+
+  .slide {
+    display: none;
+    position: absolute;
+    inset: 0;
+    padding: 6vh 8vw 12vh;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .slide.active { display: flex; }
+
+  .kicker {
+    color: var(--accent);
+    font-size: clamp(0.8rem, 1.6vw, 1.05rem);
+    letter-spacing: 0.08em;
+    margin-bottom: 2.2rem;
+  }
+  .kicker::before { content: "$ "; }
+
+  h1 {
+    font-size: clamp(1.9rem, 5.2vw, 3.6rem);
+    font-weight: 700;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    max-width: 24ch;
+    margin-bottom: 2.4rem;
+  }
+  h1 .acc { color: var(--accent); }
+
+  .lines { max-width: 58ch; }
+  .lines p {
+    font-size: clamp(1.05rem, 2.3vw, 1.55rem);
+    line-height: 1.55;
+    margin-bottom: 1.1em;
+  }
+  .lines p:last-child { margin-bottom: 0; }
+  .lines .dim { color: var(--muted); }
+  .lines strong { font-weight: 700; color: var(--accent); }
+
+  .deflist { max-width: 64ch; }
+  .deflist p {
+    font-size: clamp(1rem, 2.1vw, 1.45rem);
+    line-height: 1.6;
+    margin-bottom: 0.9em;
+  }
+  .deflist .term { color: var(--accent); font-weight: 700; }
+  .deflist .dim { color: var(--muted); }
+
+  pre.diagram {
+    font-family: inherit;
+    font-size: clamp(0.72rem, 1.9vw, 1.25rem);
+    line-height: 1.45;
+    color: var(--diagram);
+    margin: 0.4rem 0 2rem;
+    overflow-x: auto;
+  }
+  pre.diagram .acc { color: var(--accent); font-weight: 700; }
+
+  .note {
+    position: absolute;
+    left: 8vw;
+    right: 8vw;
+    bottom: 6.5vh;
+    color: var(--muted);
+    font-size: clamp(0.72rem, 1.3vw, 0.92rem);
+    line-height: 1.5;
+    border-top: 1px solid var(--rule);
+    padding-top: 0.8rem;
+    max-width: 70ch;
+  }
+
+  #counter {
+    position: fixed;
+    right: 3vw;
+    bottom: 2.6vh;
+    color: var(--muted);
+    font-size: 0.85rem;
+    letter-spacing: 0.08em;
+    z-index: 10;
+    user-select: none;
+  }
+
+  .titlecard h1 {
+    font-size: clamp(2.3rem, 6.5vw, 4.4rem);
+    max-width: 20ch;
+  }
+  .subtitle {
+    font-size: clamp(1rem, 2.2vw, 1.5rem);
+    color: var(--muted);
+    max-width: 50ch;
+    line-height: 1.5;
+  }
+
+  .quote {
+    border-left: 3px solid var(--accent);
+    padding-left: 1.4rem;
+    max-width: 52ch;
+  }
+  .quote p {
+    font-size: clamp(1.1rem, 2.5vw, 1.7rem);
+    line-height: 1.55;
+  }
+  .quote .who {
+    margin-top: 1rem;
+    color: var(--muted);
+    font-size: clamp(0.85rem, 1.6vw, 1.1rem);
+  }
+</style>
+</head>
+<body>
+
+<!-- 1 · TITLE -->
+<section class="slide titlecard">
+  <p class="kicker">corellia</p>
+  <h1>The factory that holds its own <span class="acc">blueprint</span></h1>
+  <p class="subtitle">a software factory, and the strange loop inside it</p>
+  <p class="note">&larr; &rarr; / space / click to navigate</p>
+</section>
+
+<!-- 2 · WHAT IF -->
+<section class="slide">
+  <p class="kicker">the premise</p>
+  <h1>What if software built software?</h1>
+  <div class="lines">
+    <p>An order goes in: <strong>&ldquo;build this product.&rdquo;</strong></p>
+    <p>Research, specs, design, code, review &mdash; a finished PR comes out.</p>
+    <p class="dim">No org chart. No standups. Almost no humans.</p>
+  </div>
+  <p class="note">Corellia is a design for an autonomous AI software factory — the whole product process, not just the typing-code part.</p>
+</section>
+
+<!-- 3 · ONE MOVE -->
+<section class="slide">
+  <p class="kicker">the machinery</p>
+  <h1>One move, repeated</h1>
+  <div class="lines">
+    <p><strong>receive</strong> a goal &rarr; <strong>decide</strong> &rarr; <strong>emit</strong> the result</p>
+    <p class="dim">decide = do it yourself, or split it into smaller goals</p>
+  </div>
+  <pre class="diagram">
+                "build this product"
+                        │
+        ┌───────────────┼───────────────┐
+    research          write-prd       build
+                                        │
+                              ┌─────────┴─────────┐
+                          implement           implement</pre>
+  <p class="note">Everything is a typed goal — a PRD, a diff, a renamed variable. The same move runs at every depth of the tree.</p>
+</section>
+
+<!-- 4 · GOAL-TYPE = HARNESS -->
+<section class="slide">
+  <p class="kicker">the machinery</p>
+  <h1>A goal-type <span class="acc">is</span> a harness</h1>
+  <div class="lines">
+    <p>Every kind of goal comes pre-rigged:</p>
+    <p><strong>context &middot; memory &middot; tools &middot; checks &middot; model size</strong></p>
+    <p class="dim">A goal can only touch what its type grants.</p>
+  </div>
+  <p class="note">No job titles exist. "The design phase" is just the region of the tree where design-typed goals got spawned. Roles are emergent.</p>
+</section>
+
+<!-- 5 · THREE EVALS -->
+<section class="slide">
+  <p class="kicker">quality control</p>
+  <h1>Who checks the work?</h1>
+  <div class="deflist">
+    <p><span class="term">split</span> &mdash; was the plan sound and complete?</p>
+    <p><span class="term">output</span> &mdash; does each piece meet its contract?</p>
+    <p><span class="term">integration</span> &mdash; does the whole satisfy the original ask?</p>
+  </div>
+  <p class="note">Fail a check → retry on a bigger model. Keep failing → summon a human. One loop ties quality, cost, and people together.</p>
+</section>
+
+<!-- 6 · HUMANS ARE RARE -->
+<section class="slide">
+  <p class="kicker">the people</p>
+  <h1>Humans enter at exactly three gaps</h1>
+  <div class="deflist">
+    <p><span class="term">competence</span> &mdash; every model tier tried, and failed</p>
+    <p><span class="term">authority</span> &mdash; consequences outrun what any check can underwrite</p>
+    <p><span class="term">physical</span> &mdash; sign the contract, tap the real device</p>
+  </div>
+  <p class="note">The human is an exception handler, not a participant. All three gaps are rare by design — and designed to shrink.</p>
+</section>
+
+<!-- 7 · MEMORY -->
+<section class="slide">
+  <p class="kicker">the machinery</p>
+  <h1>The factory remembers</h1>
+  <div class="deflist">
+    <p><span class="term">project memory</span> &mdash; facts about <em>this</em> codebase</p>
+    <p><span class="term">type memory</span> &mdash; how <em>this operation</em> is done well, everywhere it ever ran</p>
+    <p><span class="term">the event log</span> &mdash; everything that ever happened, append-only</p>
+  </div>
+  <p class="note">Memory is a projection of the log. A critique-type that has run 10,000 times holds wisdom no single project could teach it.</p>
+</section>
+
+<!-- 8 · HOFSTADTER INTERLUDE -->
+<section class="slide">
+  <p class="kicker">interlude · hofstadter, 1979</p>
+  <h1>Strange loops, briefly</h1>
+  <div class="quote">
+    <p>Climb a hierarchy, level by level &mdash; and find yourself back where you started. The bottom reaches up and rewrites the top.</p>
+    <p class="who">&mdash; the idea at the heart of <em>G&ouml;del, Escher, Bach</em></p>
+  </div>
+  <p class="note">Escher's two hands drawing each other. Gödel's sentence that talks about itself. Hofstadter called it a tangled hierarchy.</p>
+</section>
+
+<!-- 9 · RECURSION IS NOT THE LOOP -->
+<section class="slide">
+  <p class="kicker">the thesis</p>
+  <h1>The recursion is <span class="acc">not</span> the loop</h1>
+  <div class="lines">
+    <p>Inside one run, the hierarchy is deliberately <strong>tame</strong>:</p>
+    <p class="dim">splits shrink &middot; budgets bound &middot; parents verify children &mdash; never the reverse</p>
+    <p>Every tree terminates. A fugue that resolves.</p>
+  </div>
+  <p class="note">No tangled levels inside a run: work flows down, verdicts flow up, and a leaf can never overrule its parent. The strange loop lives somewhere else — across runs.</p>
+</section>
+
+<!-- 10 · CROSSING 1: EVOLVE -->
+<section class="slide">
+  <p class="kicker">level-crossing 1 of 4</p>
+  <h1>Drawing hands</h1>
+  <pre class="diagram">
+   harness ──── spawns ────▶ goals ────▶ leaf hits friction
+      ▲                                          │
+      └─────────── improvement PR ◀──────────────┘</pre>
+  <div class="lines">
+    <p>A leaf's friction becomes a PR that <strong>rewires the harness</strong> producing future leaves.</p>
+    <p class="dim">The product of the machine edits the machine.</p>
+  </div>
+  <p class="note">This is the "evolve" kind of goal — the factory changing itself. Escher's hands: each one drawing the other.</p>
+</section>
+
+<!-- 11 · CROSSING 2: TYPE MEMORY -->
+<section class="slide">
+  <p class="kicker">level-crossing 2 of 4</p>
+  <h1>Instances edit their class</h1>
+  <div class="lines">
+    <p>Every run of <strong>critique</strong> leaves a lesson behind.</p>
+    <p>Those lessons rewrite how the <em>next</em> critique behaves.</p>
+    <p class="dim">The students, collectively, rewriting the course.</p>
+  </div>
+  <p class="note">Type memory: experience flows from the level of instances up to the level of their own kind — a crossing object-oriented programmers are taught never to allow.</p>
+</section>
+
+<!-- 12 · CROSSING 3: PATTERN FLYWHEEL -->
+<section class="slide">
+  <p class="kicker">level-crossing 3 of 4</p>
+  <h1>Moves become rules</h1>
+  <div class="lines">
+    <p>A split that keeps recurring gets <strong>promoted into a pattern</strong> &mdash; a standing rule for how to split.</p>
+    <p class="dim">Moves of the game, promoted into rules of the game.</p>
+  </div>
+  <p class="note">Gödel's trick, operationally: behavior encoded as data, and the data then governs behavior.</p>
+</section>
+
+<!-- 13 · CROSSING 4: SELF-SYMBOL -->
+<section class="slide">
+  <p class="kicker">level-crossing 4 of 4</p>
+  <h1>The log is a self-symbol</h1>
+  <div class="lines">
+    <p>The factory's record of itself is <strong>causally active</strong>.</p>
+    <p>Track record &rarr; earned trust &rarr; wider permissions.</p>
+    <p class="dim">What it knows about itself changes what it may do.</p>
+  </div>
+  <p class="note">Hofstadter argued a self is a self-model that feeds back into behavior. The event log is exactly that — and it decides which acts the factory is trusted with.</p>
+</section>
+
+<!-- 14 · DOMESTICATION -->
+<section class="slide">
+  <p class="kicker">the leash</p>
+  <h1>A human sits at every crossing</h1>
+  <div class="deflist">
+    <p><span class="term">improvement PRs</span> &mdash; human-reviewed, always</p>
+    <p><span class="term">patterns</span> &mdash; trusted only on human signoff</p>
+    <p><span class="term">memory</span> &mdash; eval-gated in, decays out</p>
+    <p><span class="term">no factory-factory</span> &mdash; the architecture itself is locked</p>
+  </div>
+  <p class="note">The loop is real, and leashed. Nothing crosses a level without passing a gate — and the deepest level only changes by human hand.</p>
+</section>
+
+<!-- 15 · GÖDEL'S HARD HAT -->
+<section class="slide">
+  <p class="kicker">the rhyme</p>
+  <h1>G&ouml;del&rsquo;s hard hat</h1>
+  <div class="lines">
+    <p class="dim">No system can prove its own consistency from inside. <br>&mdash; second incompleteness theorem, 1931</p>
+    <p>The factory's version: some acts&rsquo; consequences <strong>outrun every internal check</strong>. For those, it must summon a human.</p>
+  </div>
+  <p class="note">That's the authority gap — the incompleteness theorem wearing a hard hat. Not a missing feature; a mathematical posture.</p>
+</section>
+
+<!-- 16 · THE SELF -->
+<section class="slide">
+  <p class="kicker">the self</p>
+  <h1>Where does the factory live?</h1>
+  <div class="lines">
+    <p>Trees are ephemeral &mdash; spawned, finished, gone.</p>
+    <p>What persists: <strong>type memory, patterns, harness code, the log</strong> &mdash; the substrate the loop carries forward.</p>
+    <p class="dim">The strange loop is the factory&rsquo;s self.</p>
+  </div>
+  <p class="note">Like cells in a body: every worker is replaced, yet something with a character and a track record endures — the thing that loops.</p>
+</section>
+
+<!-- 17 · CLOSING -->
+<section class="slide titlecard">
+  <p class="kicker">corellia</p>
+  <h1>Tame inside. <span class="acc">Strange</span> across.</h1>
+  <p class="subtitle">every run a fugue that resolves &mdash; every loop crossed under a human eye</p>
+  <p class="note">After Hofstadter: "I am a strange loop." So, it turns out, is a good factory.</p>
+</section>
+
+<div id="counter"></div>
+
+<script>
+(function () {
+  var slides = document.querySelectorAll('.slide');
+  var counter = document.getElementById('counter');
+  var n = slides.length;
+  var cur = 0;
+
+  function clamp(i) { return Math.max(0, Math.min(n - 1, i)); }
+
+  function show(i, setHash) {
+    cur = clamp(i);
+    for (var k = 0; k < n; k++) slides[k].classList.toggle('active', k === cur);
+    counter.textContent = (cur + 1) + ' / ' + n;
+    if (setHash !== false) {
+      // replaceState keeps back-button sane and works on file:// URLs
+      try { history.replaceState(null, '', '#' + (cur + 1)); }
+      catch (e) { location.hash = '#' + (cur + 1); }
+    }
+  }
+
+  function fromHash() {
+    var m = location.hash.match(/^#(\d+)$/);
+    return m ? clamp(parseInt(m[1], 10) - 1) : 0;
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+      e.preventDefault(); show(cur + 1);
+    } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+      e.preventDefault(); show(cur - 1);
+    } else if (e.key === 'Home') {
+      e.preventDefault(); show(0);
+    } else if (e.key === 'End') {
+      e.preventDefault(); show(n - 1);
+    }
+  });
+
+  document.addEventListener('click', function () { show(cur + 1); });
+
+  window.addEventListener('hashchange', function () { show(fromHash(), false); });
+
+  show(fromHash(), false);
+})();
+</script>
+
+</body>
+</html>
