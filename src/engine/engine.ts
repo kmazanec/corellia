@@ -55,7 +55,7 @@ export class Engine {
     const deadline = t() + goal.budget.wallClockMs;
 
     // ── RECEIVE ────────────────────────────────────────────────────────────
-    this.store.append({ type: 'goal-received', at: t(), goalId: goal.id, goal });
+    await this.store.append({ type: 'goal-received', at: t(), goalId: goal.id, goal });
 
     // Unknown type → block immediately (no throw)
     if (!this.registry.has(goal.type)) {
@@ -63,7 +63,7 @@ export class Engine {
       const resolution = this.onBrief
         ? await this.onBrief(brief)
         : brief.onTimeout;
-      this.store.append({
+      await this.store.append({
         type: 'blocked',
         at: t(),
         goalId: goal.id,
@@ -71,7 +71,7 @@ export class Engine {
         resolution,
       });
       const report = blockedReport(`Unknown goal type: ${goal.type}`);
-      this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
+      await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
       return report;
     }
 
@@ -102,13 +102,13 @@ export class Engine {
         const report = blockedReport(
           `Type "${goal.type}" is leafOnly but brain returned a split decision`,
         );
-        this.store.append({
+        await this.store.append({
           type: 'decided',
           at: t(),
           goalId: goal.id,
           decision,
         });
-        this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
+        await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
         return report;
       }
 
@@ -143,7 +143,7 @@ export class Engine {
           priorVerdict = failVerdict;
 
           if (consumed.exhausted || splitAttempts >= maxSplitAttempts) {
-            this.store.append({
+            await this.store.append({
               type: 'budget-exhausted',
               at: t(),
               goalId: goal.id,
@@ -152,7 +152,7 @@ export class Engine {
             const report = blockedReport(
               `Split structural validation failed: ${structErr}`,
             );
-            this.store.append({
+            await this.store.append({
               type: 'emitted',
               at: t(),
               goalId: goal.id,
@@ -209,13 +209,13 @@ export class Engine {
               const report = blockedReport(
                 `Isomorphic split failure (signature: ${splitVerdict.failureSignature})`,
               );
-              this.store.append({
+              await this.store.append({
                 type: 'decided',
                 at: t(),
                 goalId: goal.id,
                 decision,
               });
-              this.store.append({
+              await this.store.append({
                 type: 'emitted',
                 at: t(),
                 goalId: goal.id,
@@ -227,14 +227,14 @@ export class Engine {
             priorVerdict = splitVerdict;
 
             if (consumed.exhausted || splitAttempts >= maxSplitAttempts) {
-              this.store.append({
+              await this.store.append({
                 type: 'budget-exhausted',
                 at: t(),
                 goalId: goal.id,
                 dimension: 'attempts',
               });
               const report = blockedReport('Split eval failed, budget exhausted');
-              this.store.append({
+              await this.store.append({
                 type: 'emitted',
                 at: t(),
                 goalId: goal.id,
@@ -267,7 +267,7 @@ export class Engine {
       }
     }
 
-    this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision });
+    await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision });
 
     // ── DISPATCH on decision kind ──────────────────────────────────────────
     switch (decision.kind) {
@@ -300,7 +300,7 @@ export class Engine {
     while (true) {
       // Check wall-clock budget before each attempt
       if (t() >= deadline) {
-        this.store.append({
+        await this.store.append({
           type: 'budget-exhausted',
           at: t(),
           goalId: goal.id,
@@ -311,7 +311,7 @@ export class Engine {
 
       // Check attempts budget before producing
       if (budget.attempts <= 0) {
-        this.store.append({
+        await this.store.append({
           type: 'budget-exhausted',
           at: t(),
           goalId: goal.id,
@@ -335,7 +335,7 @@ export class Engine {
         const tkConsumed = consumeN(budget, 'tokens', tokensUsed);
         budget = tkConsumed.budget;
         if (tkConsumed.exhausted) {
-          this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'tokens' });
+          await this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'tokens' });
           return this.runBlock(goal, exhaustedBrief(goal, 'tokens'));
         }
       }
@@ -368,7 +368,7 @@ export class Engine {
         const tcConsumed = consumeN(budget, 'toolCalls', toolCallsUsed);
         budget = tcConsumed.budget;
         if (tcConsumed.exhausted) {
-          this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'toolCalls' });
+          await this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'toolCalls' });
           return this.runBlock(goal, exhaustedBrief(goal, 'toolCalls'));
         }
 
@@ -378,7 +378,7 @@ export class Engine {
           ...(allOk ? {} : { failureSignature: `deterministic:${findings.map((f) => f.title).join(',')}` }),
         };
 
-        this.store.append({
+        await this.store.append({
           type: 'deterministic-checked',
           at: t(),
           goalId: goal.id,
@@ -417,7 +417,7 @@ export class Engine {
 
             if (recheck.passed) {
               const report = buildReport(goal, resolution.artifact);
-              this.store.append({
+              await this.store.append({
                 type: 'emitted',
                 at: t(),
                 goalId: goal.id,
@@ -461,12 +461,12 @@ export class Engine {
           const tkConsumed = consumeN(budget, 'tokens', tokensUsed);
           budget = tkConsumed.budget;
           if (tkConsumed.exhausted) {
-            this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'tokens' });
+            await this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'tokens' });
             return this.runBlock(goal, exhaustedBrief(goal, 'tokens'));
           }
         }
 
-        this.store.append({
+        await this.store.append({
           type: 'judge-verdict',
           at: t(),
           goalId: goal.id,
@@ -504,7 +504,7 @@ export class Engine {
 
             if (recheck.passed) {
               const report = buildReport(goal, resolution.artifact);
-              this.store.append({
+              await this.store.append({
                 type: 'emitted',
                 at: t(),
                 goalId: goal.id,
@@ -536,7 +536,7 @@ export class Engine {
 
       // Both gates passed (or no judge) — emit the report
       const report = buildReport(goal, artifact);
-      this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
+      await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
       return report;
     }
   }
@@ -583,7 +583,7 @@ export class Engine {
         ...(allOk ? {} : { failureSignature: `deterministic:${findings.map((f) => f.title).join(',')}` }),
       };
 
-      this.store.append({
+      await this.store.append({
         type: 'deterministic-checked',
         at: t(),
         goalId: goal.id,
@@ -601,7 +601,7 @@ export class Engine {
       const judgeCtx: BrainContext = { tier, memories: goal.memories };
       const verdict = await this.brain.judge(goal, artifact, rubric, judgeCtx);
 
-      this.store.append({
+      await this.store.append({
         type: 'judge-verdict',
         at: t(),
         goalId: goal.id,
@@ -652,14 +652,14 @@ export class Engine {
       );
       const brief = escalatedBrief(goal, escalatedFinding);
       const resolution = this.onBrief ? await this.onBrief(brief) : brief.onTimeout;
-      this.store.append({
+      await this.store.append({
         type: 'blocked',
         at: t(),
         goalId: goal.id,
         brief,
         resolution,
       });
-      this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
+      await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
       return { kind: 'blocked', report };
     }
 
@@ -675,14 +675,14 @@ export class Engine {
       );
       const brief = isomorphicBrief(goal, verdict.failureSignature);
       const resolution = this.onBrief ? await this.onBrief(brief) : brief.onTimeout;
-      this.store.append({
+      await this.store.append({
         type: 'blocked',
         at: t(),
         goalId: goal.id,
         brief,
         resolution,
       });
-      this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
+      await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
       return { kind: 'blocked', report };
     }
 
@@ -700,7 +700,7 @@ export class Engine {
         prescriptions,
         repairCtx,
       );
-      this.store.append({
+      await this.store.append({
         type: 'repair-applied',
         at: t(),
         goalId: goal.id,
@@ -717,7 +717,7 @@ export class Engine {
         // Ladder exhausted
         return this.blockOnBudgetExhaustion(goal, budget, 'attempts');
       }
-      this.store.append({
+      await this.store.append({
         type: 'tier-escalated',
         at: t(),
         goalId: goal.id,
@@ -738,7 +738,7 @@ export class Engine {
   ): Promise<{ kind: 'blocked'; report: Report }> {
     const t = this.now;
     const brief = exhaustedBrief(goal, dim);
-    this.store.append({
+    await this.store.append({
       type: 'budget-exhausted',
       at: t(),
       goalId: goal.id,
@@ -757,8 +757,8 @@ export class Engine {
     const budgets = subdivide(goal.budget, shares);
 
     // Build child goals, injecting memories via memory.query (spawner-mediated)
-    const childGoals: Goal[] = children.map((child, i) => {
-      const childMemories = this.memory.query(child.title, child.scope);
+    const childGoals: Goal[] = await Promise.all(children.map(async (child, i) => {
+      const childMemories = await this.memory.query(child.title, child.scope);
       const childBudget = budgets[i] ?? {
         attempts: 1,
         tokens: 1,
@@ -776,13 +776,13 @@ export class Engine {
         budget: childBudget,
         memories: childMemories,
       };
-    });
+    }));
 
     // Emit child-spawned events
     for (let i = 0; i < children.length; i++) {
       const child = children[i]!;
       const childGoal = childGoals[i]!;
-      this.store.append({
+      await this.store.append({
         type: 'child-spawned',
         at: t(),
         goalId: goal.id,
@@ -820,7 +820,7 @@ export class Engine {
             const report = blockedReport(
               `Blocked because a dependency failed: ${failedDep.blockers[0] ?? 'unknown'}`,
             );
-            this.store.append({
+            await this.store.append({
               type: 'emitted',
               at: t(),
               goalId: childGoal.id,
@@ -834,7 +834,7 @@ export class Engine {
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           const report = blockedReport(`child threw: ${msg}`);
-          this.store.append({ type: 'emitted', at: t(), goalId: childGoal.id, report });
+          await this.store.append({ type: 'emitted', at: t(), goalId: childGoal.id, report });
           return report;
         }
       })();
@@ -913,7 +913,7 @@ export class Engine {
           content: lesson,
           provenance: 'provisional',
         };
-        this.store.append({
+        await this.store.append({
           type: 'memory-written',
           at: t(),
           goalId: childGoal.id,
@@ -924,7 +924,7 @@ export class Engine {
 
       // Reinforce memories actually used
       for (const memId of r.memoriesUsed) {
-        this.store.append({
+        await this.store.append({
           type: 'memory-reinforced',
           at: t(),
           goalId: childGoal.id,
@@ -958,7 +958,7 @@ export class Engine {
       learned: uniqueLearnedLines.join('\n'),
     };
 
-    this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
+    await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
     return report;
   }
 
@@ -971,7 +971,7 @@ export class Engine {
     const resolution = this.onBrief
       ? await this.onBrief(brief)
       : brief.onTimeout;
-    this.store.append({
+    await this.store.append({
       type: 'blocked',
       at: t(),
       goalId: goal.id,
@@ -979,7 +979,7 @@ export class Engine {
       resolution,
     });
     const report = blockedReport(brief.question);
-    this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
+    await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
     return report;
   }
 }

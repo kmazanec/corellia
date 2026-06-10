@@ -66,11 +66,11 @@ describe('deterministic fail → judge never called', () => {
     expect(report.blockers.length).toBeGreaterThan(0);
 
     // Judge should never have been called
-    const judgeEvents = store.list({ type: 'judge-verdict' });
+    const judgeEvents = await store.list({ type: 'judge-verdict' });
     expect(judgeEvents).toHaveLength(0);
 
     // But deterministic-checked events should exist
-    const detEvents = store.list({ type: 'deterministic-checked' });
+    const detEvents = await store.list({ type: 'deterministic-checked' });
     expect(detEvents.length).toBeGreaterThan(0);
   });
 });
@@ -104,7 +104,7 @@ describe('repair rung', () => {
     expect(report.blockers).toHaveLength(0);
     expect(report.artifact).toEqual(textArtifact('fixed'));
 
-    const escalateEvents = store.list({ type: 'tier-escalated' });
+    const escalateEvents = await store.list({ type: 'tier-escalated' });
     expect(escalateEvents).toHaveLength(1);
   });
 
@@ -131,7 +131,7 @@ describe('repair rung', () => {
     expect(report.blockers).toHaveLength(0);
     expect(report.artifact).toEqual(textArtifact('improved'));
 
-    const repairEvents = store.list({ type: 'repair-applied' });
+    const repairEvents = await store.list({ type: 'repair-applied' });
     expect(repairEvents).toHaveLength(1);
   });
 });
@@ -163,7 +163,7 @@ describe('escalation ladder', () => {
 
     expect(report.blockers).toHaveLength(0);
 
-    const escalateEvents = store.list({ type: 'tier-escalated' });
+    const escalateEvents = await store.list({ type: 'tier-escalated' });
     expect(escalateEvents).toHaveLength(1);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((escalateEvents[0] as any).from).toBe('haiku');
@@ -218,7 +218,7 @@ describe('escalation ladder', () => {
     expect(report.blockers.length).toBeGreaterThan(0);
     expect(report.blockers[0]).toMatch(/escalated/i);
 
-    const blockedEvents = store.list({ type: 'blocked' });
+    const blockedEvents = await store.list({ type: 'blocked' });
     expect(blockedEvents).toHaveLength(1);
   });
 });
@@ -306,7 +306,7 @@ describe('split with dependency chain', () => {
     expect(bIdx).toBeGreaterThan(aIdx);
 
     // child-spawned events should be present
-    const spawnEvents = store.list({ type: 'child-spawned' });
+    const spawnEvents = await store.list({ type: 'child-spawned' });
     expect(spawnEvents).toHaveLength(3);
   });
 
@@ -379,7 +379,7 @@ describe('budget accounting', () => {
 
     expect(report.blockers.length).toBeGreaterThan(0);
 
-    const budgetEvents = store.list({ type: 'budget-exhausted' });
+    const budgetEvents = await store.list({ type: 'budget-exhausted' });
     expect(budgetEvents.length).toBeGreaterThan(0);
   });
 });
@@ -449,7 +449,7 @@ describe('lesson promotion and memory reinforcement', () => {
     // Let's verify memory-reinforced when child reports memoriesUsed.
     // The leaf's memories are injected by the spawner (from FixedMemoryView).
     // buildReport sets memoriesUsed = goal.memories.map(m => m.id), so mem-1 gets reinforced.
-    const reinforcedEvents = store.list({ type: 'memory-reinforced' });
+    const reinforcedEvents = await store.list({ type: 'memory-reinforced' });
     expect(reinforcedEvents.length).toBeGreaterThan(0);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((reinforcedEvents[0] as any).memoryId).toBe('mem-1');
@@ -555,7 +555,7 @@ describe('lesson promotion and memory reinforcement', () => {
     const goal = makeGoal({ type: 'splitter', id: 'root' });
     await engine.run(goal);
 
-    const reinforcedEvents = store.list({ type: 'memory-reinforced' });
+    const reinforcedEvents = await store.list({ type: 'memory-reinforced' });
     expect(reinforcedEvents.length).toBeGreaterThan(0);
   });
 });
@@ -666,7 +666,7 @@ describe('unknown type', () => {
     expect(report.blockers.length).toBeGreaterThan(0);
     expect(report.blockers[0]).toMatch(/unknown goal type/i);
 
-    const events = store.list({ type: 'blocked' });
+    const events = await store.list({ type: 'blocked' });
     expect(events).toHaveLength(1);
   });
 });
@@ -749,7 +749,7 @@ describe('fix 3 — toolCalls budget exhaustion', () => {
     const report = await engine.run(goal);
 
     expect(report.blockers.length).toBeGreaterThan(0);
-    const exhausted = store.list({ type: 'budget-exhausted' });
+    const exhausted = await store.list({ type: 'budget-exhausted' });
     expect(exhausted.length).toBeGreaterThan(0);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((exhausted[0] as any).dimension).toBe('toolCalls');
@@ -778,7 +778,7 @@ describe('fix 3 — wallClockMs budget exhaustion', () => {
     const report = await engine.run(goal);
 
     expect(report.blockers.length).toBeGreaterThan(0);
-    const exhausted = store.list({ type: 'budget-exhausted' });
+    const exhausted = await store.list({ type: 'budget-exhausted' });
     expect(exhausted.length).toBeGreaterThan(0);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((exhausted[0] as any).dimension).toBe('wallClockMs');
@@ -800,7 +800,7 @@ describe('fix 3 — tokens budget exhaustion', () => {
     const report = await engine.run(goal);
 
     expect(report.blockers.length).toBeGreaterThan(0);
-    const exhausted = store.list({ type: 'budget-exhausted' });
+    const exhausted = await store.list({ type: 'budget-exhausted' });
     expect(exhausted.length).toBeGreaterThan(0);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((exhausted[0] as any).dimension).toBe('tokens');
@@ -895,7 +895,7 @@ describe('fix 7 — child throws become blocked reports', () => {
     expect(report.blockers.length).toBeGreaterThan(0);
 
     // Find child A's emitted report — it should have blockers with "child threw"
-    const emittedEvents = store.list({ type: 'emitted' });
+    const emittedEvents = await store.list({ type: 'emitted' });
     const childAEmit = emittedEvents.find(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (e) => (e as any).goalId === 'root/a',
@@ -935,7 +935,7 @@ describe('fix 8 — escalated findings consult onBrief', () => {
 
     expect(report.blockers.length).toBeGreaterThan(0);
 
-    const blockedEvents = store.list({ type: 'blocked' });
+    const blockedEvents = await store.list({ type: 'blocked' });
     expect(blockedEvents).toHaveLength(1);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((blockedEvents[0] as any).resolution).toBe('answered');

@@ -1,12 +1,13 @@
 /**
- * File-backed append-only event store. Each event is one JSON line; writes are
- * synchronous so the log is durable before the caller sees control again.
+ * File-backed append-only event store. Each event is one JSON line; the append
+ * resolves once the line is durably written, so the log reflects the event
+ * before the caller proceeds.
  *
  * Reads tolerate a trailing partial line (e.g. from a crash mid-write) by
  * skipping any line that does not parse as valid JSON.
  */
 
-import { mkdirSync, appendFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdir, appendFile, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { EventStore, FactoryEvent } from '../contract/events.js';
 
@@ -15,17 +16,22 @@ export class JsonlEventStore implements EventStore {
 
   constructor(filePath: string) {
     this.#path = filePath;
-    mkdirSync(dirname(filePath), { recursive: true });
   }
 
-  append(e: FactoryEvent): void {
-    appendFileSync(this.#path, JSON.stringify(e) + '\n', 'utf8');
+  async append(e: FactoryEvent): Promise<void> {
+    await mkdir(dirname(this.#path), { recursive: true });
+    await appendFile(this.#path, JSON.stringify(e) + '\n', 'utf8');
   }
 
-  list(filter?: { goalId?: string; type?: FactoryEvent['type'] }): FactoryEvent[] {
-    if (!existsSync(this.#path)) return [];
+  async list(filter?: { goalId?: string; type?: FactoryEvent['type'] }): Promise<FactoryEvent[]> {
+    let raw: string;
+    try {
+      raw = await readFile(this.#path, 'utf8');
+    } catch {
+      // File does not exist yet (no appends): an empty log.
+      return [];
+    }
 
-    const raw = readFileSync(this.#path, 'utf8');
     const events: FactoryEvent[] = [];
 
     for (const line of raw.split('\n')) {

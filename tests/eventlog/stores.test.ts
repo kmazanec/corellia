@@ -61,65 +61,65 @@ const emitted: FactoryEvent = {
 // ──────────────────────────────────────────────
 
 describe('InMemoryEventStore', () => {
-  it('appends and lists all events in order', () => {
+  it('appends and lists all events in order', async () => {
     const store = new InMemoryEventStore();
-    store.append(goalA);
-    store.append(goalB);
-    store.append(emitted);
+    await store.append(goalA);
+    await store.append(goalB);
+    await store.append(emitted);
 
-    const all = store.list();
+    const all = await store.list();
     expect(all).toHaveLength(3);
     expect(all[0]?.type).toBe('goal-received');
     expect(all[2]?.type).toBe('emitted');
   });
 
-  it('filters by goalId', () => {
+  it('filters by goalId', async () => {
     const store = new InMemoryEventStore();
-    store.append(goalA);
-    store.append(goalB);
-    store.append(emitted);
+    await store.append(goalA);
+    await store.append(goalB);
+    await store.append(emitted);
 
-    const g1Only = store.list({ goalId: 'g1' });
+    const g1Only = await store.list({ goalId: 'g1' });
     expect(g1Only).toHaveLength(2);
     expect(g1Only.every((e) => e.goalId === 'g1')).toBe(true);
   });
 
-  it('filters by type', () => {
+  it('filters by type', async () => {
     const store = new InMemoryEventStore();
-    store.append(goalA);
-    store.append(goalB);
-    store.append(emitted);
+    await store.append(goalA);
+    await store.append(goalB);
+    await store.append(emitted);
 
-    const received = store.list({ type: 'goal-received' });
+    const received = await store.list({ type: 'goal-received' });
     expect(received).toHaveLength(2);
   });
 
-  it('filters by goalId AND type together', () => {
+  it('filters by goalId AND type together', async () => {
     const store = new InMemoryEventStore();
-    store.append(goalA);
-    store.append(goalB);
-    store.append(emitted);
+    await store.append(goalA);
+    await store.append(goalB);
+    await store.append(emitted);
 
-    const hits = store.list({ goalId: 'g1', type: 'emitted' });
+    const hits = await store.list({ goalId: 'g1', type: 'emitted' });
     expect(hits).toHaveLength(1);
     expect(hits[0]?.type).toBe('emitted');
   });
 
-  it('returns copies so mutations do not affect the log', () => {
+  it('returns copies so mutations do not affect the log', async () => {
     const store = new InMemoryEventStore();
-    store.append(goalA);
+    await store.append(goalA);
 
-    const [copy] = store.list();
+    const [copy] = await store.list();
     // Mutate the copy; the log should not reflect the change.
     (copy as Record<string, unknown>)['at'] = 99999;
 
-    expect(store.list()[0]?.at).toBe(1000);
+    expect((await store.list())[0]?.at).toBe(1000);
   });
 
-  it('returns empty array when no events match', () => {
+  it('returns empty array when no events match', async () => {
     const store = new InMemoryEventStore();
-    store.append(goalA);
-    expect(store.list({ goalId: 'nonexistent' })).toHaveLength(0);
+    await store.append(goalA);
+    expect(await store.list({ goalId: 'nonexistent' })).toHaveLength(0);
   });
 });
 
@@ -134,66 +134,66 @@ describe('JsonlEventStore', () => {
     if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('appends and reads back in order', () => {
+  it('appends and reads back in order', async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'corellia-test-'));
     const store = new JsonlEventStore(join(tmpDir, 'events.jsonl'));
 
-    store.append(goalA);
-    store.append(goalB);
-    store.append(emitted);
+    await store.append(goalA);
+    await store.append(goalB);
+    await store.append(emitted);
 
-    const all = store.list();
+    const all = await store.list();
     expect(all).toHaveLength(3);
     expect(all[0]?.type).toBe('goal-received');
     expect(all[2]?.type).toBe('emitted');
   });
 
-  it('creates parent directories if they do not exist', () => {
+  it('creates parent directories if they do not exist', async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'corellia-test-'));
     const nested = join(tmpDir, 'deep', 'nested', 'events.jsonl');
     const store = new JsonlEventStore(nested);
-    store.append(goalA);
+    await store.append(goalA);
 
-    expect(store.list()).toHaveLength(1);
+    expect(await store.list()).toHaveLength(1);
   });
 
-  it('filters by goalId', () => {
+  it('filters by goalId', async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'corellia-test-'));
     const store = new JsonlEventStore(join(tmpDir, 'events.jsonl'));
-    store.append(goalA);
-    store.append(goalB);
-    store.append(emitted);
+    await store.append(goalA);
+    await store.append(goalB);
+    await store.append(emitted);
 
-    expect(store.list({ goalId: 'g2' })).toHaveLength(1);
+    expect(await store.list({ goalId: 'g2' })).toHaveLength(1);
   });
 
-  it('filters by type', () => {
+  it('filters by type', async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'corellia-test-'));
     const store = new JsonlEventStore(join(tmpDir, 'events.jsonl'));
-    store.append(goalA);
-    store.append(goalB);
-    store.append(emitted);
+    await store.append(goalA);
+    await store.append(goalB);
+    await store.append(emitted);
 
-    expect(store.list({ type: 'emitted' })).toHaveLength(1);
+    expect(await store.list({ type: 'emitted' })).toHaveLength(1);
   });
 
-  it('tolerates a trailing partial line', () => {
+  it('tolerates a trailing partial line', async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'corellia-test-'));
     const path = join(tmpDir, 'events.jsonl');
     const store = new JsonlEventStore(path);
-    store.append(goalA);
+    await store.append(goalA);
 
     // Append a corrupt partial line to simulate a crash mid-write.
     appendFileSync(path, '{"type":"goal-receiv', 'utf8');
 
-    const all = store.list();
+    const all = await store.list();
     expect(all).toHaveLength(1);
     expect(all[0]?.type).toBe('goal-received');
   });
 
-  it('returns empty array when file does not exist', () => {
+  it('returns empty array when file does not exist', async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'corellia-test-'));
     const store = new JsonlEventStore(join(tmpDir, 'missing.jsonl'));
-    expect(store.list()).toHaveLength(0);
+    expect(await store.list()).toHaveLength(0);
   });
 });

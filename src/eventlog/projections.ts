@@ -61,7 +61,7 @@ export function projectMemory(events: FactoryEvent[]): MemoryView {
   }
 
   return {
-    query(topic: string, _scope: string[]): MemoryPointer[] {
+    async query(topic: string, _scope: string[]): Promise<MemoryPointer[]> {
       const lower = topic.toLowerCase();
       const results: MemoryPointer[] = [];
       for (const { pointer } of slots.values()) {

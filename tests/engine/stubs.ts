@@ -17,11 +17,11 @@ import type { MemoryView } from '../../src/contract/memory.js';
 export class MemoryEventStore implements EventStore {
   private readonly log: FactoryEvent[] = [];
 
-  append(e: FactoryEvent): void {
+  async append(e: FactoryEvent): Promise<void> {
     this.log.push(e);
   }
 
-  list(filter?: { goalId?: string; type?: FactoryEvent['type'] }): FactoryEvent[] {
+  async list(filter?: { goalId?: string; type?: FactoryEvent['type'] }): Promise<FactoryEvent[]> {
     if (!filter) return [...this.log];
     return this.log.filter((e) => {
       if (filter.goalId && e.goalId !== filter.goalId) return false;
@@ -38,14 +38,14 @@ export class MemoryEventStore implements EventStore {
 // ── MemoryView stub ───────────────────────────────────────────────────────
 
 export class NoopMemoryView implements MemoryView {
-  query(_topic: string, _scope: string[]): MemoryPointer[] {
+  async query(_topic: string, _scope: string[]): Promise<MemoryPointer[]> {
     return [];
   }
 }
 
 export class FixedMemoryView implements MemoryView {
   constructor(private readonly pointers: MemoryPointer[]) {}
-  query(_topic: string, _scope: string[]): MemoryPointer[] {
+  async query(_topic: string, _scope: string[]): Promise<MemoryPointer[]> {
     return this.pointers;
   }
 }

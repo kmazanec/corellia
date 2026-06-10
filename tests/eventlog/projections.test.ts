@@ -59,79 +59,79 @@ const verdict = (pass: boolean) => ({
 // ──────────────────────────────────────────────
 
 describe('projectMemory', () => {
-  it('returns empty query when no memory events', () => {
+  it('returns empty query when no memory events', async () => {
     const view = projectMemory([baseGoal()]);
-    expect(view.query('anything', [])).toHaveLength(0);
+    expect((await view.query('anything', []))).toHaveLength(0);
   });
 
-  it('includes a freshly written memory pointer', () => {
+  it('includes a freshly written memory pointer', async () => {
     const events: FactoryEvent[] = [
       baseGoal(),
       memWritten('m1', 'use dependency injection'),
     ];
     const view = projectMemory(events);
-    const results = view.query('injection', []);
+    const results = (await view.query('injection', []));
     expect(results).toHaveLength(1);
     expect(results[0]?.id).toBe('m1');
     expect(results[0]?.provenance).toBe('provisional');
   });
 
-  it('promotes to trusted after 2 success reinforcements', () => {
+  it('promotes to trusted after 2 success reinforcements', async () => {
     const events: FactoryEvent[] = [
       memWritten('m1', 'prefer small functions'),
       memReinforced('m1', 'success'),
       memReinforced('m1', 'success'),
     ];
     const view = projectMemory(events);
-    const results = view.query('prefer', []);
+    const results = (await view.query('prefer', []));
     expect(results[0]?.provenance).toBe('trusted');
   });
 
-  it('stays provisional after only 1 success reinforcement', () => {
+  it('stays provisional after only 1 success reinforcement', async () => {
     const events: FactoryEvent[] = [
       memWritten('m1', 'prefer small functions'),
       memReinforced('m1', 'success'),
     ];
     const view = projectMemory(events);
-    expect(view.query('prefer', [])[0]?.provenance).toBe('provisional');
+    expect((await view.query('prefer', []))[0]?.provenance).toBe('provisional');
   });
 
-  it('evicts memory after 2 failure reinforcements', () => {
+  it('evicts memory after 2 failure reinforcements', async () => {
     const events: FactoryEvent[] = [
       memWritten('m1', 'avoid global state'),
       memReinforced('m1', 'failure'),
       memReinforced('m1', 'failure'),
     ];
     const view = projectMemory(events);
-    expect(view.query('global', [])).toHaveLength(0);
+    expect((await view.query('global', []))).toHaveLength(0);
   });
 
-  it('does not evict after only 1 failure reinforcement', () => {
+  it('does not evict after only 1 failure reinforcement', async () => {
     const events: FactoryEvent[] = [
       memWritten('m1', 'avoid global state'),
       memReinforced('m1', 'failure'),
     ];
     const view = projectMemory(events);
-    expect(view.query('global', [])).toHaveLength(1);
+    expect((await view.query('global', []))).toHaveLength(1);
   });
 
-  it('query is case-insensitive', () => {
+  it('query is case-insensitive', async () => {
     const events: FactoryEvent[] = [memWritten('m1', 'Use SOLID principles')];
     const view = projectMemory(events);
-    expect(view.query('solid', [])).toHaveLength(1);
-    expect(view.query('SOLID', [])).toHaveLength(1);
+    expect((await view.query('solid', []))).toHaveLength(1);
+    expect((await view.query('SOLID', []))).toHaveLength(1);
   });
 
-  it('returns copies so mutations do not affect internal state', () => {
+  it('returns copies so mutations do not affect internal state', async () => {
     const events: FactoryEvent[] = [memWritten('m1', 'immutability matters')];
     const view = projectMemory(events);
-    const [p] = view.query('immutability', []);
+    const [p] = (await view.query('immutability', []));
     if (p) (p as Record<string, unknown>)['provenance'] = 'trusted';
     // Query again — internal state should be unchanged.
-    expect(view.query('immutability', [])[0]?.provenance).toBe('provisional');
+    expect((await view.query('immutability', []))[0]?.provenance).toBe('provisional');
   });
 
-  it('reinforcement for an evicted memory is a no-op', () => {
+  it('reinforcement for an evicted memory is a no-op', async () => {
     const events: FactoryEvent[] = [
       memWritten('m1', 'some tip'),
       memReinforced('m1', 'failure'),
@@ -139,10 +139,10 @@ describe('projectMemory', () => {
       memReinforced('m1', 'success'), // should not resurrect
     ];
     const view = projectMemory(events);
-    expect(view.query('tip', [])).toHaveLength(0);
+    expect((await view.query('tip', []))).toHaveLength(0);
   });
 
-  it('rewrite of a memory resets its reinforcement counters', () => {
+  it('rewrite of a memory resets its reinforcement counters', async () => {
     const events: FactoryEvent[] = [
       memWritten('m1', 'pattern alpha'),
       memReinforced('m1', 'success'),
@@ -150,7 +150,7 @@ describe('projectMemory', () => {
       memWritten('m1', 'pattern alpha updated'), // overwrite — resets to provisional
     ];
     const view = projectMemory(events);
-    expect(view.query('pattern', [])[0]?.provenance).toBe('provisional');
+    expect((await view.query('pattern', []))[0]?.provenance).toBe('provisional');
   });
 });
 
@@ -159,11 +159,11 @@ describe('projectMemory', () => {
 // ──────────────────────────────────────────────
 
 describe('traceStats', () => {
-  it('returns empty object for no events', () => {
+  it('returns empty object for no events', async () => {
     expect(traceStats([])).toEqual({});
   });
 
-  it('counts attempts per goal type', () => {
+  it('counts attempts per goal type', async () => {
     const events: FactoryEvent[] = [
       baseGoal({ goalId: 'g1', goalType: 'feature' }),
       baseGoal({ goalId: 'g2', goalType: 'feature' }),
@@ -174,7 +174,7 @@ describe('traceStats', () => {
     expect(stats['test']?.attempts).toBe(1);
   });
 
-  it('counts deterministic-checked passes and failures', () => {
+  it('counts deterministic-checked passes and failures', async () => {
     const events: FactoryEvent[] = [
       baseGoal({ goalId: 'g1', goalType: 'feature' }),
       { type: 'deterministic-checked', at: 2000, goalId: 'g1', verdict: verdict(true) },
@@ -185,7 +185,7 @@ describe('traceStats', () => {
     expect(stats['feature']?.failures).toBe(1);
   });
 
-  it('counts judge-verdict passes and failures', () => {
+  it('counts judge-verdict passes and failures', async () => {
     const events: FactoryEvent[] = [
       baseGoal({ goalId: 'g1', goalType: 'make' }),
       {
@@ -202,7 +202,7 @@ describe('traceStats', () => {
     expect(stats['make']?.passes).toBe(0);
   });
 
-  it('counts repairs', () => {
+  it('counts repairs', async () => {
     const events: FactoryEvent[] = [
       baseGoal({ goalId: 'g1', goalType: 'feature' }),
       { type: 'repair-applied', at: 2000, goalId: 'g1', prescriptions: ['fix lint'] },
@@ -211,7 +211,7 @@ describe('traceStats', () => {
     expect(stats['feature']?.repairs).toBe(1);
   });
 
-  it('counts escalations', () => {
+  it('counts escalations', async () => {
     const events: FactoryEvent[] = [
       baseGoal({ goalId: 'g1', goalType: 'feature' }),
       { type: 'tier-escalated', at: 2000, goalId: 'g1', from: 'haiku', to: 'sonnet' },
@@ -220,7 +220,7 @@ describe('traceStats', () => {
     expect(stats['feature']?.escalations).toBe(1);
   });
 
-  it('rolls up multiple goals of the same type', () => {
+  it('rolls up multiple goals of the same type', async () => {
     const events: FactoryEvent[] = [
       baseGoal({ goalId: 'g1', goalType: 'feature' }),
       baseGoal({ goalId: 'g2', goalType: 'feature' }),
@@ -234,7 +234,7 @@ describe('traceStats', () => {
     expect(stats['feature']?.escalations).toBe(1);
   });
 
-  it('skips events without a matching goal-received', () => {
+  it('skips events without a matching goal-received', async () => {
     const events: FactoryEvent[] = [
       { type: 'repair-applied', at: 2000, goalId: 'orphan', prescriptions: [] },
     ];
@@ -248,18 +248,18 @@ describe('traceStats', () => {
 // ──────────────────────────────────────────────
 
 describe('renderTree', () => {
-  it('returns empty string for no events', () => {
+  it('returns empty string for no events', async () => {
     expect(renderTree([])).toBe('');
   });
 
-  it('renders a single root node', () => {
+  it('renders a single root node', async () => {
     const events: FactoryEvent[] = [baseGoal({ goalId: 'g1', goalType: 'feature', title: 'Root goal' })];
     const tree = renderTree(events);
     expect(tree).toContain('[feature]');
     expect(tree).toContain('Root goal');
   });
 
-  it('marks emitted goals with ✓', () => {
+  it('marks emitted goals with ✓', async () => {
     const events: FactoryEvent[] = [
       baseGoal({ goalId: 'g1', goalType: 'feature', title: 'Ship it' }),
       {
@@ -282,7 +282,7 @@ describe('renderTree', () => {
     expect(tree).toContain('Ship it');
   });
 
-  it('fix 10 — emitted report with non-empty blockers renders ✗', () => {
+  it('fix 10 — emitted report with non-empty blockers renders ✗', async () => {
     const events: FactoryEvent[] = [
       baseGoal({ goalId: 'g1', goalType: 'feature', title: 'Failed goal' }),
       {
@@ -305,7 +305,7 @@ describe('renderTree', () => {
     expect(tree).not.toContain('✓');
   });
 
-  it('fix 10 — clean emitted report renders ✓', () => {
+  it('fix 10 — clean emitted report renders ✓', async () => {
     const events: FactoryEvent[] = [
       baseGoal({ goalId: 'g1', goalType: 'feature', title: 'Clean goal' }),
       {
@@ -328,7 +328,7 @@ describe('renderTree', () => {
     expect(tree).not.toContain('✗');
   });
 
-  it('marks blocked goals with ✗', () => {
+  it('marks blocked goals with ✗', async () => {
     const events: FactoryEvent[] = [
       baseGoal({ goalId: 'g1', goalType: 'feature', title: 'Risky change' }),
       {
@@ -343,7 +343,7 @@ describe('renderTree', () => {
     expect(tree).toContain('✗');
   });
 
-  it('marks in-flight goals with ◌', () => {
+  it('marks in-flight goals with ◌', async () => {
     const events: FactoryEvent[] = [
       baseGoal({ goalId: 'g1', title: 'In progress' }),
     ];
@@ -351,7 +351,7 @@ describe('renderTree', () => {
     expect(tree).toContain('◌');
   });
 
-  it('renders parent→child indentation', () => {
+  it('renders parent→child indentation', async () => {
     const events: FactoryEvent[] = [
       baseGoal({ goalId: 'g1', goalType: 'feature', title: 'Parent' }),
       baseGoal({ goalId: 'g2', goalType: 'test', parentId: 'g1', title: 'Child' }),
@@ -367,7 +367,7 @@ describe('renderTree', () => {
     expect(childIndent).toBeGreaterThan(parentIndent);
   });
 
-  it('orders siblings by first-seen position', () => {
+  it('orders siblings by first-seen position', async () => {
     const events: FactoryEvent[] = [
       baseGoal({ goalId: 'root', title: 'Root' }),
       baseGoal({ goalId: 'c1', goalType: 'alpha', parentId: 'root', title: 'Alpha child' }),

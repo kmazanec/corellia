@@ -8,11 +8,11 @@ import type { EventStore, FactoryEvent } from '../contract/events.js';
 export class InMemoryEventStore implements EventStore {
   readonly #log: FactoryEvent[] = [];
 
-  append(e: FactoryEvent): void {
+  async append(e: FactoryEvent): Promise<void> {
     this.#log.push(e);
   }
 
-  list(filter?: { goalId?: string; type?: FactoryEvent['type'] }): FactoryEvent[] {
+  async list(filter?: { goalId?: string; type?: FactoryEvent['type'] }): Promise<FactoryEvent[]> {
     let result: FactoryEvent[] = this.#log;
 
     if (filter?.goalId !== undefined) {

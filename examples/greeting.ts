@@ -185,8 +185,8 @@ const store = new JsonlEventStore('out/greeting/events.jsonl');
 
 // Memory is a live projection of the event store — exactly the design pattern.
 const memory = {
-  query: (topic: string, scope: string[]) =>
-    projectMemory(store.list()).query(topic, scope),
+  query: async (topic: string, scope: string[]) =>
+    projectMemory(await store.list()).query(topic, scope),
 };
 
 const registry = createRegistry(starterTypes());
@@ -278,7 +278,7 @@ console.log('');
 // ── Event tree ────────────────────────────────────────────────────────────────
 
 console.log('── goal tree ────────────────────────────────────────────────────');
-const allEvents = store.list();
+const allEvents = await store.list();
 console.log(renderTree(allEvents));
 console.log('');
 

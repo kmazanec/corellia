@@ -167,7 +167,7 @@ describe('greeting e2e', () => {
     store = new InMemoryEventStore();
     const brain = makeBrain();
     const registry = createRegistry(starterTypes());
-    const memory = { query: () => [] };
+    const memory = { query: async () => [] };
 
     const engine = new Engine({ registry, brain, store, memory });
     report = await engine.run(makeRootGoal());
@@ -182,8 +182,8 @@ describe('greeting e2e', () => {
 
   // 2. Repair rung was exercised ─────────────────────────────────────────────
 
-  it('emits at least one repair-applied event', () => {
-    const repairs = store.list({ type: 'repair-applied' });
+  it('emits at least one repair-applied event', async () => {
+    const repairs = await store.list({ type: 'repair-applied' });
     expect(repairs.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -194,8 +194,8 @@ describe('greeting e2e', () => {
   // Both implement children depend on contract, so the engine awaits
   // contract's Promise before spawning either of them.
 
-  it('contract child emits before implement children are received', () => {
-    const events: FactoryEvent[] = store.list();
+  it('contract child emits before implement children are received', async () => {
+    const events: FactoryEvent[] = await store.list();
 
     const contractGoalId = 'greeting-demo/contract';
     const helloGoalId = 'greeting-demo/hello-cmd';
@@ -222,8 +222,8 @@ describe('greeting e2e', () => {
 
   // 4. renderTree contains all three child titles ────────────────────────────
 
-  it('renderTree contains all three child titles', () => {
-    const tree = renderTree(store.list());
+  it('renderTree contains all three child titles', async () => {
+    const tree = renderTree(await store.list());
     expect(tree).toContain('Freeze greeting format contract');
     expect(tree).toContain('Implement hello command');
     expect(tree).toContain('Implement farewell command');
@@ -235,8 +235,8 @@ describe('greeting e2e', () => {
   // events, the first deterministic-checked must appear before the first
   // judge-verdict in the overall event log.
 
-  it('deterministic checks precede judge verdicts for each leaf', () => {
-    const events: FactoryEvent[] = store.list();
+  it('deterministic checks precede judge verdicts for each leaf', async () => {
+    const events: FactoryEvent[] = await store.list();
 
     // Collect all goal IDs that have at least one deterministic-checked event
     const leafIds = new Set(
