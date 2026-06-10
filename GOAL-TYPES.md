@@ -169,6 +169,11 @@ The split and integration evals are themselves library types — that is what
 bar (a spike is judged on "does it answer the question"); it never touches the
 deterministic gates, which live on the *judged* type, not the judge.
 
+`judge-split` also referees the **terraced scan** (see DESIGN.md, "Memoized
+splits"): for a novel spec-shape, k cheap candidate splits compete and
+`judge-split` ranks them against one another before the winner is deepened —
+a per-type policy, with k and the novelty trigger tuned from traces.
+
 ### evolve — four types
 
 | Type (family) | Input → output | Grant (summary) | Eval | Tier | leaf_only |

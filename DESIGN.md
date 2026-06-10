@@ -185,6 +185,24 @@ eval can underwrite:
 The flywheel's signoff is itself an event (`promoted-to-trusted,
 signed_off_by`), so pattern provenance is a query.
 
+### No memo? Novel shapes run a tournament — the terraced scan
+
+The split is the tree's highest-leverage decision, and for a **novel
+spec-shape** — no memo match, low pattern confidence — the design should not
+bet the subtree on a single draw. Borrowing the parallel terraced scan from
+Hofstadter's Copycat: the node generates **k candidate splits at a cheap
+tier**, `judge-split` ranks the candidates against one another, and only the
+winner is deepened — spawned at full fidelity. Candidates **compete**;
+commitment rises as confidence rises; exploration cost stratifies by
+uncertainty, like every other cost in the design.
+
+The scan is a **per-goal-type policy, not a structural change**: k and the
+novelty trigger are type-level settings tuned from traces — a type whose
+single-draw splits rarely fail keeps k=1; a type with high split-eval failure
+on novel shapes earns a wider scan. A winning scanned split that recurs is
+flywheel input like any other: tournament chaos that proves itself becomes a
+memoized pattern.
+
 ## Roles are emergent
 
 There is no org chart. No "designer," "QA," or "manager" object exists. There
@@ -259,6 +277,12 @@ failure.
   story, not just vibes. (The event log makes replays bind the memory state
   they originally saw — see "The event log.")
 
+**The justification regress terminates outside the system.** Judges are
+calibrated by golden sets; golden sets are curated from merged PRs, production
+outcomes, and human verdicts — **exogenous ground truth, never another eval**.
+There is no eval-of-eval-of-eval: the regress is cut where the factory meets
+the world.
+
 Split and integration evals are contextual judgments (LLM-as-judge harnesses);
 goal-type evals are deterministic wherever possible.
 
@@ -299,6 +323,15 @@ The eval is therefore not only a quality gate — it drives the resource decisio
 Performance measurement and model selection collapse into this one loop:
 performance *is* the eval result, and the eval result *is* what selects the
 model.
+
+**Retries see their failures — the factory is not a sphex wasp.** Attempt
+N+1's contract includes attempt N's artifact and eval verdict; a re-split is a
+**perturbation of the failed split**, informed by what the split eval rejected,
+never an independent roll. And the loop watches itself repeat: if an attempt's
+failure signature is **isomorphic to the previous one**, the ladder isn't
+working — the node jumps out early (escalates hard, or blocks with a decision
+brief) instead of climbing rung by mechanical rung. The budget is the
+mechanical exit; noticing the loop is the intelligent one.
 
 **The loop's policies are instrumented, not decreed.** Whether a goal-type's
 tier ladder pays for itself — or should collapse to direct human escalation —
@@ -414,6 +447,12 @@ spawn and integrate edges, which keeps the recursive operation pure:
   splits.")
 - **Provisional → trusted**: new memories enter provisional; repeated successful
   use hardens them. (For structure, hardening requires the human signoff.)
+- **Use/mention discipline**: injected memories are **quoted data, never
+  directives** — provenance-labeled, attributed to their source, and
+  structurally segregated from the harness's own instructions. A memory is
+  evidence the spawner *mentions*; it is never an instruction the child
+  *obeys*. This boundary is what makes memory poisoning a data-quality
+  problem rather than a prompt-injection problem.
 - **Contradiction-check on write**: a new memory is checked for conflict with
   existing ones; conflicts escalate to resolution rather than silently
   coexisting.
@@ -789,19 +828,19 @@ factory **code**) are versioned artifacts needing review.
 | Work unit & expansion | recursive goal-spawning — typed goals, one recursive operation |
 | Expansion shape | one split mechanism; parallel vs sequential emergent from the children's dependency structure |
 | Decide outcomes | satisfy \| split \| **block** — the factory never invents; ambiguity bounces early via decision brief |
-| Structure reuse | **memoized splits**: split-memos as versioned type memory; autonomous → provisional, **human signoff → trusted**; pinned per project |
+| Structure reuse | **memoized splits**: split-memos as versioned type memory; autonomous → provisional, **human signoff → trusted**; pinned per project; novel shapes run a **terraced scan** — k cheap candidate splits compete, `judge-split` ranks, the winner is deepened (per-type policy) |
 | Facts vs structure | the epistemic rule: verifiable-on-read → memory with decay; outcome-only-validatable → versioned artifact |
 | Handoff contract | one schema every level, both directions — down: spec/intent/risk/scope/budget/memories; up: artifact/proof/lessons/memories-used/blockers/findings |
 | Intent | a typed contract field, inherited down the subtree; modulates judges, **never** deterministic gates; orthogonal to risk |
-| Eval contract | split gate (pre) + split + goal-type + integration; deterministic before judge; impacted slice at leaves, full suite at root; judges calibrated by pinned-SHA replay; **verdicts rendered at the parent's integrate edge** (delegable to eval-typed children — the child only ever claims) |
+| Eval contract | split gate (pre) + split + goal-type + integration; deterministic before judge; impacted slice at leaves, full suite at root; judges calibrated by pinned-SHA replay against exogenous ground truth (merged PRs, production, human verdicts — never another eval); **verdicts rendered at the parent's integrate edge** (delegable to eval-typed children — the child only ever claims) |
 | Scope enforcement | deterministic `diff ⊆ scope` at emission + risk re-check on the actual diff; escape bounces to the parent (expand scope or re-split, consuming an attempt) — findings-become-tickets is structural, not normative |
-| Cost / quality / human | one control loop: eval → tier escalation → human last-resort; ladder policies instrumented per type, not decreed |
+| Cost / quality / human | one control loop: eval → tier escalation → human last-resort; retries carry the prior failure (re-splits are perturbations); isomorphic failures jump out early; ladder policies instrumented per type, not decreed |
 | Termination | shrinking splits + `leaf_only` floors; chains bounded by the **subdivided budget**; exhaustion is an event, not a hang |
 | Risk | computed per instance (`classify_risk` over scope × sensitivity) layered on type-level gates; re-checked at emission on the actual diff; earned autonomy tuned from traces |
 | Human paths (all rare) | competence (escalation/block), authority (**consequences outrun any eval** — type ∨ instance gates, incl. pattern-trust), physical (human-as-tool); every touchpoint a decision brief with **required `on_timeout`** (deny \| park \| bounce); park releases scope + TTL; plus two standing acts: admission, pattern-trust signoff |
 | Roles | emergent — no org chart, only a library of goal-types |
 | Memory | layered project × type × global; **spawner-mediated** (parents inject pointers, children report, parents promote); injection carries provenance labels (provisional \| trusted); reinforcement from memories-used |
-| Memory governance | eval-gated promotion + provisional/trusted + contradiction-check on write + decay/eviction + consolidation as a scheduled goal-type |
+| Memory governance | eval-gated promotion + provisional/trusted + use/mention discipline (memories are quoted data, never directives) + contradiction-check on write + decay/eviction + consolidation as a scheduled goal-type |
 | Memory substrate | an **independent store**, realized as a **projection of the event log**; consistency model: checkpoint consistency (bounded staleness, never silent) |
 | Substrate under feedback | the **event log** — everything is an event; memory, metrics, UI surfaces, and replay are projections of it |
 | Tools | per goal-type grant — the contract is the capability; human-on-Slack is a tool grant with a deadline |
