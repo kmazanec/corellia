@@ -5,8 +5,7 @@ Star Wars manufacturing world. This document specifies the high-level design: a
 **foundation layer** (the coordination model every other layer is built on),
 then five layers on top of it — the product-development process, brownfield
 comprehension, the runtime shape, human-team collaboration, and the factory's
-own improvement loop. The concrete goal-type library is the one piece left for
-a later document.
+own improvement loop. The concrete goal-type library lives in `GOAL-TYPES.md`.
 
 This is the second revision. The recursive functional architecture of the first
 revision is preserved intact; it is refined with the lessons of the four-factory
@@ -44,7 +43,11 @@ A **goal-type** declares:
 
 The library of goal-types is the factory's source of truth. A goal-type is
 defined once and reused wherever it is spawned — this is what DRY means here.
-`critique` is one type whether it critiques a layout or a function.
+`critique-code` is one type whether it critiques a parser or a payment service;
+subjects that need materially different harnesses are sibling types in a
+**family**, sharing contract skeletons and skills through the factory repo —
+not through memory. (The library, its four locked kinds, and the
+granularity/speciation rule are specified in `GOAL-TYPES.md`.)
 
 ### The handoff contract — one schema, every level, both directions
 
@@ -814,12 +817,11 @@ factory **code**) are versioned artifacts needing review.
 | Branch coordination | shared state read by pull at checkpoints — adapts at decision boundaries, not instantaneously |
 | The two loops | working IN (memory, per-repo) vs working ON (improvement PRs to the factory repo, human-reviewed); blockers spin out; standing budget envelope; constitution check in factory CI; precise invariant: code by PR, memory by governed write; **the architecture is locked**; no factory-factory in v1 |
 | State placement | factory code in the factory repo; memory in the independent store; product repos receive exactly one thing — a PR |
+| Goal-type library | four locked kinds (make / learn / judge / evolve = eval-shape classes, each a lint-time grant ceiling); families share skeletons + skills in code, never memory; exact static grants per type, scope as the only runtime narrowing; types speciate when traces bifurcate — see `GOAL-TYPES.md` |
 | Unification | a goal-type **is** a harness |
 
 ## Deliberately deferred (documented, defensible)
 
-- **Goal-type library** — the concrete starter set of goal-types and their
-  contracts: the next document.
 - **Token-efficiency self-improvement** — analyzing the log for churn is a real
   gain, deliberately unpursued in v1; the bar is PR acceptance, and the event
   data needed already accrues, so the loop can be added without re-architecture.
