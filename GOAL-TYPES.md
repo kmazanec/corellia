@@ -137,7 +137,7 @@ human:
 | --- | --- | --- | --- | --- | --- | --- |
 | **`deliver-intent`** (deliver) · **core** | commissioned intent (the *only* type that accepts free text) → integrated product increment as PR(s) + typed completion report | PR-View projection; full suite green at root | retrieval API, `classify_risk`, spawn — **no code tools**: the root literally cannot satisfy directly; the grant enforces it | `judge-integration` against the parsed intent | opus → human | no |
 | **`write-prd`** (author) | typed intent + injected research findings → numbered, behavior-focused PRD | every requirement traceable to intent or a finding | doc read/write in workspace; retrieval API | schema/completeness lints → `critique-doc` (testability, no solutioning) | sonnet → opus | yes |
-| **`design-arch`** (author) | PRD slice + knowledge artifacts → design/ADR set | each decision lists alternatives considered + the requirement it serves | doc read/write; retrieval API | coverage lints (every requirement addressed) → `critique-doc` | opus → human | yes |
+| **`design-arch`** (author) | PRD slice + knowledge artifacts → design/ADR set | each decision lists alternatives considered + the requirement it serves — the scan's losing candidates, explored rather than retrofitted | doc read/write; retrieval API | **terraced scan by default**: k candidate architectures at a cheap tier, `critique-doc` ranks, winner deepened at full tier; then coverage lints (every requirement addressed) → `critique-doc` | opus → human | yes |
 | **`implement`** (build) | spec + scope + memories → diff within scope | impacted slice green; tests for new behavior; screenshots for UI | see exemplar above | deterministic gate → `critique-code` | sonnet → opus | no |
 | **`characterize`** (build) | thinly-covered region + coverage facts → baseline tests pinning current behavior (`intent: characterization`, fixed) | new tests run green against *unmodified* code; zero production-code diff (its scope is test dirs) | fs read; test-dir write; test runner | deterministic (green on untouched code) → `critique-code` judged on capture fidelity, not mimicry | sonnet → opus | yes |
 
@@ -173,6 +173,9 @@ deterministic gates, which live on the *judged* type, not the judge.
 splits"): for a novel spec-shape, k cheap candidate splits compete and
 `judge-split` ranks them against one another before the winner is deepened —
 a per-type policy, with k and the novelty trigger tuned from traces.
+`critique-doc` referees the same tournament for `design-arch`, where the
+losing candidates become the ADR's "alternatives considered" — the proof
+artifact falls out of the scan for free.
 
 ### evolve — four types
 

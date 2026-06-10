@@ -203,6 +203,13 @@ on novel shapes earns a wider scan. A winning scanned split that recurs is
 flywheel input like any other: tournament chaos that proves itself becomes a
 memoized pattern.
 
+Nor is the scan split-specific: it applies to any **single-draw, high-leverage
+decision**. `design-arch` runs the same tournament by default — k candidate
+architectures generated at a cheap tier, ranked by `critique-doc`, the winner
+deepened at full tier — and the losing candidates become the ADR's
+"alternatives considered": the proof artifact falls out of the scan for free,
+recording alternatives that were actually explored rather than retrofitted.
+
 ## Roles are emergent
 
 There is no org chart. No "designer," "QA," or "manager" object exists. There
