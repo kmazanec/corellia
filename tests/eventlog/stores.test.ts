@@ -45,7 +45,15 @@ const emitted: FactoryEvent = {
   type: 'emitted',
   at: 3000,
   goalId: 'g1',
-  report: { kind: 'make', goalId: 'g1', summary: 'done', artifacts: [] },
+  report: {
+    artifact: null,
+    proof: [],
+    lessons: [],
+    memoriesUsed: [],
+    blockers: [],
+    findings: [],
+    learned: 'Login was built.',
+  },
 };
 
 // ──────────────────────────────────────────────
