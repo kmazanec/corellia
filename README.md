@@ -107,12 +107,14 @@ artifact, judges it, and optionally repairs it — all via live LLM calls.
 **Setup**
 
 ```bash
-export OPENROUTER_API_KEY=sk-or-...      # required
+cp .env.example .env                     # then fill in OPENROUTER_API_KEY
+# (real environment variables always win over .env values;
+#  `export OPENROUTER_API_KEY=sk-or-...` works too)
 
-# Optional: pin specific model versions
-export CORELLIA_MODEL_HAIKU=anthropic/claude-haiku-latest
-export CORELLIA_MODEL_SONNET=anthropic/claude-sonnet-latest
-export CORELLIA_MODEL_OPUS=anthropic/claude-opus-4-5
+# Optional, in .env or exported: pin specific model versions
+# CORELLIA_MODEL_HAIKU=anthropic/claude-haiku-latest
+# CORELLIA_MODEL_SONNET=anthropic/claude-sonnet-latest
+# CORELLIA_MODEL_OPUS=anthropic/claude-opus-4-5
 ```
 
 **Run**

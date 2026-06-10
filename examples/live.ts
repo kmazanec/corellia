@@ -22,6 +22,7 @@ import { execSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
 import { Engine } from '../src/engine/engine.js';
+import { loadDotEnv } from '../src/env.js';
 import { JsonlEventStore } from '../src/eventlog/jsonl-store.js';
 import { projectMemory, renderTree, traceStats } from '../src/eventlog/projections.js';
 import { createRegistry } from '../src/library/registry.js';
@@ -32,6 +33,10 @@ import { openRouterConfig } from '../src/brains/openrouter.js';
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
+
+// Secrets and config come from the environment; a local .env supplies
+// defaults without ever overriding real environment variables.
+loadDotEnv();
 
 const OUT_DIR = 'out/live';
 mkdirSync(OUT_DIR, { recursive: true });

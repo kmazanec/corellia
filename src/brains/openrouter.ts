@@ -42,7 +42,7 @@ export function openRouterConfig(env: NodeJS.ProcessEnv = process.env): LlmBrain
   if (!apiKey) {
     throw new Error(
       'OPENROUTER_API_KEY is not set. ' +
-        'Export it before running: export OPENROUTER_API_KEY=sk-or-...',
+        'Export it (export OPENROUTER_API_KEY=sk-or-...) or copy .env.example to .env and fill it in.',
     );
   }
 

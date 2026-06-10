@@ -11,5 +11,9 @@ media/video/tools/node_modules/
 node_modules/
 dist/
 out/
+
+# local secrets — copy .env.example to .env
+.env
+.env.local
 *.log
 .claude/worktrees/
