@@ -1,0 +1,68 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Corellia scene player</title>
+<style>
+  html, body { margin: 0; background: #000; height: 100%; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; object-fit: contain; }
+</style>
+<canvas id="cv" width="1920" height="1080"></canvas>
+<script src="lib.js"></script>
+<script src="s01.js"></script>
+<script src="s02.js"></script>
+<script src="s03.js"></script>
+<script src="s04.js"></script>
+<script src="s05.js"></script>
+<script src="s06.js"></script>
+<script src="s07.js"></script>
+<script src="s08.js"></script>
+<script src="s09.js"></script>
+<script src="s10.js"></script>
+<script src="s11.js"></script>
+<script src="s12.js"></script>
+<script src="s13.js"></script>
+<script>
+  const params = new URLSearchParams(location.search);
+  const id = params.get('scene') || 's01';
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+
+  // assets: scenes may declare {assets: {name: 'relative/path.png'}}; loaded before ready
+  window.ASSETS = {};
+  async function loadAssets(scene) {
+    const entries = Object.entries(scene.assets || {});
+    await Promise.all(entries.map(([k, src]) => new Promise(res => {
+      const img = new Image();
+      img.onload = () => { window.ASSETS[k] = img; res(); };
+      img.onerror = () => { console.warn('asset missing:', src); res(); };
+      img.src = src;
+    })));
+  }
+
+  window.seek = t => {
+    const scene = window.SCENES[id];
+    ctx.save();
+    scene.draw(ctx, Math.max(0, Math.min(t, scene.duration)));
+    ctx.restore();
+    return t >= scene.duration;
+  };
+
+  window.ready = (async () => {
+    // missing scene files are tolerated (404 script tags) — but the requested one must exist
+    if (!window.SCENES[id]) throw new Error('scene not loaded: ' + id);
+    await loadAssets(window.SCENES[id]);
+    await document.fonts.ready;
+    window.seek(0);
+    return { id, duration: window.SCENES[id].duration };
+  })();
+
+  // manual preview: ?play=1 runs realtime
+  if (params.get('play')) {
+    window.ready.then(() => {
+      const start = performance.now();
+      (function loop() {
+        const done = window.seek((performance.now() - start) / 1000);
+        if (!done) requestAnimationFrame(loop);
+      })();
+    });
+  }
+</script>

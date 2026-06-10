@@ -2,3 +2,9 @@
 .DS_Store
 
 conversation/
+
+# video production secrets + heavy generated artifacts
+media/video/.env
+media/video/assets/
+media/video/build/
+media/video/tools/node_modules/

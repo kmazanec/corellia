@@ -1,0 +1,54 @@
+[
+  {
+    "id": "s01-cold-open",
+    "text": "What if a factory could build software — all of it, from idea to shipped product? And what if, while it worked, it could quietly rebuild itself? Not science fiction. A design. And inside it, hiding in plain sight: one of the strangest ideas in logic."
+  },
+  {
+    "id": "s02-factory-in-60s",
+    "text": "The design is called Corellia. Here's the whole machine in one breath. Everything is a typed goal — a PRD, a diff, a critique — all goals, with input and output contracts. And there's exactly one operation: receive a goal; decide — satisfy it directly, split it into sub-goals with dependencies, or block; integrate the children's results; emit. That operation, recursing, is the entire factory. Each goal-type is a harness: its context, memory, tools, evals, and model tier. No roles, no org chart — \"the design phase\" is just where design-typed goals got spawned. Three evals guard the loop: was the split sound; does the leaf meet its contract; does the whole satisfy the original goal. When an eval fails, a stronger model retries. Only when that fails does a human appear."
+  },
+  {
+    "id": "s03-tame-hierarchy",
+    "text": "Notice how disciplined this recursion is. Splits shrink the goal — every fan-out bottoms out in atomic leaves. Chains are bounded by an attempts budget. Parents verify children, never the reverse. And while a tree runs, the factory never touches its own code. Every tree terminates. If you like music: a goal tree is a fugue that resolves — deliberately not Bach's endlessly rising canon. There's no paradox here. Yet."
+  },
+  {
+    "id": "s04-hofstadter",
+    "text": "In 1979, Douglas Hofstadter wrote Gödel, Escher, Bach, about what he called strange loops: hierarchies where descending the levels somehow lands you back on top. Escher drew two hands drawing each other. Bach wrote a canon that climbs through keys back to where it began. And Gödel proved that plain statements about numbers can encode statements about arithmetic itself — including \"this statement is unprovable.\" A strange loop is a hierarchy whose bottom acts on its own top. Hofstadter thought that loop is what a self is."
+  },
+  {
+    "id": "s05-twist",
+    "text": "Here's the twist. Within one run, Corellia is a tame, well-founded hierarchy. But across runs — watch what happens when an arrow leaves the bottom of the tree and curves back up to the top. Across runs, the factory is a strange loop. There are four places it crosses levels."
+  },
+  {
+    "id": "s06-evolve",
+    "text": "One: the evolve kind. A leaf hits friction, files a blocker report, and that becomes an improvement PR — a change to the very harness that produces future leaves. Drawing Hands, in production."
+  },
+  {
+    "id": "s07-type-memory",
+    "text": "Two: type memory. Lessons from individual goal runs are distilled and injected into every future goal of that type. Instances rewriting their own class. The students, collectively, revising the textbook."
+  },
+  {
+    "id": "s08-patterns",
+    "text": "Three: the pattern flywheel. A runtime split is a move in the game; a trusted pattern is a rule. Promote recurring splits into patterns and moves become rules — behavior encoded as data that then governs behavior. Gödel's trick, exactly."
+  },
+  {
+    "id": "s09-event-log",
+    "text": "Four: the event log. Hofstadter says an \"I\" is a system's causally active symbol for itself. The factory keeps its own track record — and that record changes what it's permitted to do. Earned autonomy. A self-symbol with consequences."
+  },
+  {
+    "id": "s10-hard-hat",
+    "text": "Four loops — and a human at every crossing. Improvement PRs are reviewed. The architecture is locked. A pattern becomes trusted only with human signoff. Memory writes are eval-gated and provisional. And there is no factory-factory — the loop never closes unsupervised. Why? Gödel again: his second incompleteness theorem says a system can't prove its own consistency from inside. Corellia's authority gap is the same fact, operationally. The authority gap is the incompleteness theorem wearing a hard hat."
+  },
+  {
+    "id": "s11-loop-fed-back",
+    "text": "One more turn. After the analysis, the designer mined Hofstadter for mechanisms — four made it in. The sphex wasp repeats its routine, never noticing; the factory isn't allowed to: retries carry the prior failure, re-splits perturb the failed split, repeated failure signatures jump the ladder early. Injected memories are quoted evidence — mentioned, never obeyed. Novel shapes run Copycat's terraced scan: candidate splits compete cheaply, a judge ranks them, only the winner is deepened. Architectures run the same tournament — the losers become the ADR's \"alternatives considered,\" for free. And \"what calibrates the calibration?\" would regress forever — so it's cut from outside: merged PRs, production, human verdicts. Never another eval. The analysis crossed levels and changed the design it described."
+  },
+  {
+    "id": "s12-the-self",
+    "text": "One last thing. Every tree dies when its goal resolves. So where does the factory live? In what the loop carries forward: type memory, trusted patterns, the harness code, the event log. The trees are thoughts. The loop is the thinker. The strange loop is the factory's self."
+  },
+  {
+    "id": "s13-outro",
+    "text": "Corellia. One operation, recursing. One loop, supervised. A factory that remembers being built."
+  }
+]
