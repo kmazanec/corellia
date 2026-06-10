@@ -56,6 +56,18 @@ export interface GoalTypeDef {
   judgeType: string | null;
   /** The exact, static tool grants — the contract is the capability, readable as blast radius. */
   grants: string[];
+  /**
+   * Whether this type carries a type-level authority gate: goals of this type
+   * route through a human grant/deny decision before their children spawn,
+   * regardless of instance risk. Capability-level authority, not reach.
+   */
+  gated?: boolean;
+  /**
+   * The terraced-scan policy for novel shapes this type may encounter: produce
+   * `k` candidate approaches across the named `lenses` (diversity axes) and grade
+   * them before committing, instead of a single roll on an unfamiliar shape.
+   */
+  scan?: { k: number; lenses: string[] };
 }
 
 /**

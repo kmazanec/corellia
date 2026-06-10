@@ -18,5 +18,5 @@ export interface MemoryView {
    * pointers, not bodies; provenance labels travel on each pointer so trust state
    * means something at read time.
    */
-  query(topic: string, scope: string[]): MemoryPointer[];
+  query(topic: string, scope: string[]): Promise<MemoryPointer[]>;
 }

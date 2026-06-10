@@ -9,6 +9,7 @@ import type { Budget, MemoryPointer, Tier, Goal } from './goal.js';
 import type { Decision, DecisionBrief } from './decision.js';
 import type { Report } from './report.js';
 import type { Verdict } from './verdict.js';
+import type { RiskClass } from './risk.js';
 
 /**
  * One thing that happened in the factory. A discriminated union on `type`; every
@@ -41,7 +42,19 @@ export type FactoryEvent =
   /** The goal emitted its typed report upward. */
   | { type: 'emitted'; at: number; goalId: string; report: Report }
   /** A budget dimension ran out — an event, never a hang; it summons the human. */
-  | { type: 'budget-exhausted'; at: number; goalId: string; dimension: keyof Budget };
+  | { type: 'budget-exhausted'; at: number; goalId: string; dimension: keyof Budget }
+  /** A goal's instance risk was classified before fan-out, against its touched scope. */
+  | { type: 'risk-classified'; at: number; goalId: string; risk: RiskClass }
+  /** The authority gate resolved for a gated goal: the human granted or denied. */
+  | { type: 'gate-decision'; at: number; goalId: string; resolution: 'granted' | 'denied' }
+  /** A goal was parked on a brief, holding for an answer up to a TTL. */
+  | { type: 'parked'; at: number; goalId: string; brief: DecisionBrief; ttlMs: number }
+  /** A parked goal resumed when its question was answered. */
+  | { type: 'resumed'; at: number; goalId: string; answer: string }
+  /** The split-memo flywheel was consulted for a structural shape and its trust state. */
+  | { type: 'pattern-consulted'; at: number; goalId: string; shape: string; status: 'none' | 'provisional' | 'trusted' }
+  /** A split's outcome was recorded against its shape — the flywheel's write. */
+  | { type: 'pattern-recorded'; at: number; goalId: string; shape: string; outcome: 'success' | 'failure' };
 
 /**
  * The append-only event store. The append is the serialization point — the
@@ -50,10 +63,10 @@ export type FactoryEvent =
  */
 export interface EventStore {
   /** Append one event to the log. The only mutation the store admits. */
-  append(e: FactoryEvent): void;
+  append(e: FactoryEvent): Promise<void>;
   /**
    * Read events back, optionally filtered by the goal they concern and/or their
    * discriminant. With no filter, returns the whole log in append order.
    */
-  list(filter?: { goalId?: string; type?: FactoryEvent['type'] }): FactoryEvent[];
+  list(filter?: { goalId?: string; type?: FactoryEvent['type'] }): Promise<FactoryEvent[]>;
 }

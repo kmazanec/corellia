@@ -9,6 +9,7 @@ import type { Goal, MemoryPointer, Tier } from './goal.js';
 import type { Decision } from './decision.js';
 import type { Artifact } from './report.js';
 import type { Verdict } from './verdict.js';
+import type { SplitMemo } from './pattern.js';
 
 /**
  * What the brain is given for a single call, beyond the goal itself: the tier it
@@ -27,6 +28,18 @@ export interface BrainContext {
    * never an independent roll.
    */
   priorAttempt?: { artifact: Artifact | null; verdict: Verdict };
+  /**
+   * A terraced-scan lens: the candidate-diversity axis this call should reason
+   * along, so `k` candidates for a novel shape differ in approach rather than
+   * being independent rolls of the same one. Absent outside a scan.
+   */
+  lens?: string;
+  /**
+   * A provisional split memo consulted for this goal's shape — a suggestion the
+   * brain weighs, never a command it obeys. A trusted memo would already be
+   * relied on upstream; a hint is the factory saying "this shape worked before."
+   */
+  patternHint?: SplitMemo;
 }
 
 /**

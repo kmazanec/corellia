@@ -12,3 +12,5 @@ export type { FactoryEvent, EventStore } from './events.js';
 export type { BrainContext, Brain } from './brain.js';
 export type { DeterministicCheck, GoalTypeDef, Registry } from './goal-type.js';
 export type { MemoryView } from './memory.js';
+export type { SplitMemo, PatternStore } from './pattern.js';
+export type { RiskClass, SensitivityFact } from './risk.js';
