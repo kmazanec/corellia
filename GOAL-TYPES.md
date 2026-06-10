@@ -10,8 +10,11 @@ decisions shape it:
    types speciate when traces bifurcate.
 3. **Families with exact grants** — static per-type tool grants; families share
    contract skeletons and skills through the factory repo, never through memory.
-4. **Full-stack thin** — eighteen types covering intent → PR end to end, one or
+4. **Full-stack thin** — nineteen types covering intent → PR end to end, one or
    two per family, deepened where traces demand it.
+5. **Seeded, not blank** — the hand-built kmaz pipeline is this design's working
+   prototype; its hardened skills are imported as the starter skill bundles
+   (see "Seed harness content").
 
 ## The four kinds — the locked frame
 
@@ -117,6 +120,7 @@ eval:
     - impacted test slice green
     - diff ⊆ scope
     - vault-ref scan (no secret values)
+    - process-reference grep (no goal IDs or factory language in code/comments)
   judge: critique-code                 # delegated; intent modulates the bar
   calibration: golden pairs pinned at the SHA they shipped against
 
@@ -129,9 +133,9 @@ human:
   # any declared touchpoint MUST carry on_timeout: deny | park | bounce
 ```
 
-## The starter set — eighteen types, ten families
+## The starter set — nineteen types, ten families
 
-### make — five types
+### make — six types
 
 | Type (family) | Input → output | Proof | Grant (summary) | Eval | Tier | leaf_only |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -139,6 +143,7 @@ human:
 | **`write-prd`** (author) | typed intent + injected research findings → numbered, behavior-focused PRD | every requirement traceable to intent or a finding | doc read/write in workspace; retrieval API | schema/completeness lints → `critique-doc` (testability, no solutioning) | sonnet → opus | yes |
 | **`design-arch`** (author) | PRD slice + knowledge artifacts → design/ADR set | each decision lists alternatives considered + the requirement it serves — the scan's losing candidates, explored rather than retrofitted | doc read/write; retrieval API | **terraced scan by default**: k candidate architectures at a cheap tier, `critique-doc` ranks, winner deepened at full tier; then coverage lints (every requirement addressed) → `critique-doc` | opus → human | yes |
 | **`implement`** (build) | spec + scope + memories → diff within scope | impacted slice green; tests for new behavior; screenshots for UI | see exemplar above | deterministic gate → `critique-code` | sonnet → opus | no |
+| **`freeze-contract`** (build) | reconciled shared-shape spec (signature + every sibling's additive extension + exhaustive consumers) → the landed minimum-viable shape, committed **before any sibling fan-out** | scoped contract tests green; the diff contains **no feature behavior** — shapes and their exhaustive consumers only | fs read/write (worktree); scoped test runner | deterministic (scoped tests green; no-feature-behavior check; every consumer exhaustive over every case) → `critique-code` | opus → human | yes |
 | **`characterize`** (build) | thinly-covered region + coverage facts → baseline tests pinning current behavior (`intent: characterization`, fixed) | new tests run green against *unmodified* code; zero production-code diff (its scope is test dirs) | fs read; test-dir write; test runner | deterministic (green on untouched code) → `critique-code` judged on capture fidelity, not mimicry | sonnet → opus | yes |
 
 ### learn — four types
@@ -198,7 +203,16 @@ human-reviewed PR — the improvement loop never touches a product repo.
 | --- | --- | --- |
 | **haiku** | `map-repo` | mechanical extraction with deterministic self-validation |
 | **sonnet** | `write-prd`, `implement`, `characterize`, `deep-dive-region`, `research-external`, `investigate`, all five judges, `promote-memory`, `consolidate-memory` | the working tier; escalation to opus on eval failure |
-| **opus** | `deliver-intent`, `design-arch`, `propose-pattern`, `improve-factory` | the four places a bad output poisons everything beneath or after it: the root split, the design, the structure, the harness |
+| **opus** | `deliver-intent`, `design-arch`, `freeze-contract`, `propose-pattern`, `improve-factory` | the five places a bad output poisons everything beneath or after it: the root split, the design, the shared shape, the structure, the harness |
+
+The assignment rule, position-free: *does this step require weighing
+alternatives?* → opus. *Is it specified well enough that the answer is
+determined?* → sonnet. *Is there nothing to decide?* → haiku. When unsure,
+pick the lower tier unless a wrong answer is expensive and hard to reverse.
+The corollary that matters: **specification quality, not stakes, picks the
+tier** — a high-stakes goal with a detailed approved plan runs sonnet because
+the spec carries it; the same goal under-specified runs opus, because someone
+must weigh the alternatives.
 
 Defaults, not decrees: ladder policies are instrumented per type — traces
 showing a type's escalations always rescue (or never do) re-tier it.
@@ -219,6 +233,26 @@ definition, existing or proposed by an improvement PR:
    be removed or have their kind changed by improvement PRs; their prompts,
    skills, and eval sets may be refined.
 8. Free text is accepted only by `deliver-intent`'s input contract.
+
+## Seed harness content — imported field data
+
+The library is not seeded from scratch. The hand-built kmaz pipeline
+(`~/dev/dotmaz`) is this design's working prototype — a fixed DAG of typed
+stages hardened by real builds — and its skills are the starter **skill
+bundles** for the types below: imported as versioned factory code (family
+skills), never as memory, and refined thereafter by the improvement loop.
+
+| Type | Seed content (from the kmaz pipeline) |
+| --- | --- |
+| `write-prd` | the senior-PM interview: four pillars (problem / intent / scope / constraints), question rounds, teach-before-ask, "don't ask what research can answer," Given/When/Then near-executable acceptance criteria, revision-history-never-silent-changes |
+| `design-arch` | the ADR format (context / options / decision / rationale / tradeoffs / consequences-for-the-build), `Contract: yes` flagging, supersede-never-edit, "the tradeoff is the tell," the mandatory security and non-functional rounds, the CTO-defensibility bar |
+| `judge-split` | vertical-slice discipline (the one-sentence before→after test; no layer/infra/schema features; the walking skeleton as the first slice; fewer-fatter), the over-declared-dependency test ("implemented behavior, or just the frozen shape?"), the ≤1-starters serial-build warning, acyclicity, risk-weighted ordering (de-risk early) |
+| `implement` | chunk structure (build-and-test slices ending in one tickable item, each naming its impacted test targets), the batched rhythm (write → run once → fix all → run once; ~1–2 runs and one commit per chunk), contract-drift-as-report-never-fork, the timeless-comment grep |
+| `freeze-contract` | the contract barrier itself: land every shape with every extension and exhaustive consumer, scoped tests only, no feature behavior |
+| `critique-code` | the six-dimension single-read rubric (spec / security / contrarian / robustness / efficiency-and-simplicity / convention), `selfVerified` discipline (omit what you can't confirm), a concrete localized fix per gating finding, the `escalated` flag |
+| `critique-doc` | the defensibility probe ("why this way and not the obvious alternative?"); an empty tradeoffs section means the decision wasn't actually made |
+| `research-external` | inline self-corroboration (≥2 independent sources for load-bearing claims), ONE batched skeptic for the unverified remainder (per-claim verifier fan-out was the measured blowup), confidence flags, load-bearing marking |
+| `deliver-intent` (integration) | linear history by cherry-pick with `git log --merges` proof, the full suite once at convergence, deterministic teardown keyed off verified-shipped lists — irreversible cleanup is mechanism, never agent diligence |
 
 ## Deliberately deferred types
 

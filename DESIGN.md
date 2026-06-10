@@ -61,7 +61,7 @@ downward:
 | `intent` | `production \| spike \| characterization \| …` — inherited down the subtree unless a child overrides; modulates judges, never deterministic gates (see "The three evals") |
 | `risk_class` | computed, not declared — instance risk from scope × sensitivity (see "The human enters…") |
 | `scope` | the impact set — files/regions this goal may touch, from the architecture artifact |
-| `budget` | `{attempts, tokens, wall_clock}` — **inherited and subdivided**: a parent splits its allowance among its children |
+| `budget` | `{attempts, tokens, wall_clock, tool_calls}` — **inherited and subdivided**: a parent splits its allowance among its children. Tool calls are budgeted because the agentic round-trip, not the model, dominates execution cost — a budget teaches *rhythm* (batch the edits, run once, fix all, run once); "run until green" without a budget invites the per-edit loop |
 | `memories` | parent-retrieved memory, injected as pointers with **provenance labels** (`provisional \| trusted`) — a provisional memory reads as suggestion, not fact (see "Memory") |
 
 And the child's return is not a bare artifact — it is a typed report, each
@@ -133,6 +133,29 @@ spawned only once that result exists. The build/investigate distinction is
 emergent from the dependency graph, the way roles are emergent from which types
 get spawned.
 
+### Shared shapes freeze first — the contract barrier
+
+A shape multiple children will touch — a tagged union, a wire schema, a shared
+validator, a provider interface, a design contract — is never one child's
+private business. A sound split **names every shared shape among its children
+and spawns a `freeze-contract` child first**; every sharer depends on it, so
+the ordinary dependency machinery sequences the freeze before the fan-out. The
+frozen artifact is a concrete signature carrying **every child's additive
+extension together with its exhaustive consumers** (every switch / validator /
+serializer that must handle all cases), so siblings build against a stable
+shape and late non-exhaustiveness breaks cannot happen.
+
+This makes wide fan-out safe *proactively* — lateral memory pull remains the
+reactive backstop, but a frozen contract makes the divergence it would catch
+impossible to begin with. It also converts dependencies: a child that merely
+consumes a shared shape does **not** depend on the sibling that introduces it —
+it depends only on the freeze. The honest test for every dependency edge:
+*does this child need the sibling's implemented behavior, or just the shared
+shape they both build against?* Only the former is a real edge. (Field data
+from the hand-built pipeline this design generalizes: over-declared edges are
+the dominant cause of needlessly serial builds, and an unnamed shared shape is
+how concurrent work diverges.)
+
 ## Memoized splits — structure as a governed asset
 
 The recursive form's three practical weaknesses are cost (every split
@@ -203,6 +226,12 @@ on novel shapes earns a wider scan. A winning scanned split that recurs is
 flywheel input like any other: tournament chaos that proves itself becomes a
 memoized pattern.
 
+Candidates are **lens-diverse, not k identical draws** — an architect's cut, a
+reuse-maximizing cut, a contrarian's cut — because diversity catches failure
+modes redundancy cannot. And when the scan isn't justified, the same lenses
+fold into the single pass as a checklist: cheap multi-lens beats expensive
+mono-lens.
+
 Nor is the scan split-specific: it applies to any **single-draw, high-leverage
 decision**. `design-arch` runs the same tournament by default — k candidate
 architectures generated at a cheap tier, ranked by `critique-doc`, the winner
@@ -231,11 +260,15 @@ work system.
 | **Integration eval** | does the assembled result satisfy the *original* parent goal? | judge (contextual) |
 
 The **split eval** is the highest-leverage check — a bad split poisons the whole
-subtree before any work happens beneath it. It judges two things: whether the
-decomposition is sound/complete, and whether the node got the **dependency
-structure right** — did it serialize work that was actually independent (wasting
-wall-clock), or parallelize work that was actually dependent (spawning blind
-sub-goals that needed a sibling's result)? Both are dependency errors.
+subtree before any work happens beneath it. It judges three things: whether the
+decomposition is sound/complete; whether the node got the **dependency
+structure right** — did it serialize work that was actually independent
+(wasting wall-clock — the dominant cause is an over-declared edge against a
+contract's author), or parallelize work that was actually dependent (spawning
+blind sub-goals that needed a sibling's result)?; and **contract discipline** —
+is every shared shape among the children named and frozen first (see "Shared
+shapes freeze first"), with extensions and exhaustive consumers pre-committed?
+An unnamed shared shape is a latent integration failure.
 
 **The split gate precedes it.** Before a node spends a subtree, it passes a
 cheap pre-check: *do we have enough information to decompose?* — a mechanical
@@ -246,9 +279,14 @@ comprehension goals *as dependencies* and splits once they return.
 **Undiscoverable** — the missing information exists only in a human's head
 (ambiguous intent; a backend repo asked to grow a frontend with no conventions
 to mimic): the node **blocks** with a decision brief. The factory never invents
-— but it also never asks a human for what it can go find. The gate is "can I
-responsibly split?"; the split eval is "was the split good?". Spend a cheap
-check before spending a subtree.
+— but it also never asks a human for what it can go find. And it asks in
+**batch**: the gate does a foresight pass over the children it is about to
+spawn, harvests every *foreseeable* ambiguity across them, and emits **one
+batched decision brief** before the fan-out — mid-tree briefs are reserved for
+the genuinely unforeseeable. A dripped question is usually an avoidable
+question; an interrupt that was foreseeable at the gate is a gate failure. The
+gate is "can I responsibly split?"; the split eval is "was the split good?".
+Spend a cheap check before spending a subtree.
 
 The split eval also underwrites **termination**, via two base cases tied to that
 dependency structure:
@@ -304,6 +342,11 @@ delegation is just a split, so heavyweight judging inherits the full machinery
 cheap. Deterministic checks are objective wherever they run; a child's
 self-checks are an inner loop, never the verdict.
 
+Where the library offers one, the delegated judge carries a **different lens or
+skill bundle than the maker** — a second taste on the artifact, not the maker's
+own perspective re-applied. A judge that shares the builder's harness shares
+its blind spots.
+
 ### Scope is enforced, not declared
 
 A deterministic **`diff ⊆ scope`** check runs at emission: the child's actual
@@ -322,8 +365,17 @@ One mechanism ties cost, quality, and human involvement together. An eval result
 selects the next resource:
 
 - **pass** → emit the report upward.
-- **fail** → **escalate**: retry at a higher model tier. The goal-type sets the
-  default tier; failure bumps it. (Type default + escalation.)
+- **fail** → **repair first**: a judge verdict carries **prescriptions** —
+  concrete, localized fix instructions for each gating finding — and a
+  cheap-tier fixer applies exactly those edits. The expensive model judges; the
+  cheap model types. (The fixer is not a new type — it is `implement` with a
+  prescription as its spec.)
+- **repair insufficient** — no prescription was possible, or the fix didn't
+  hold — → **escalate**: retry at a higher model tier, carrying the failed
+  attempt. The goal-type sets the default tier; failure bumps it.
+- **finding flagged `escalated`** — the fix needs a frozen-contract change or a
+  re-architecture, not a localized edit — → straight to **block**: that
+  decision is the human's, not a bigger model's.
 - **budget exhausted** → summon the **human** (last resort).
 
 The eval is therefore not only a quality gate — it drives the resource decision.
@@ -332,7 +384,9 @@ performance *is* the eval result, and the eval result *is* what selects the
 model.
 
 **Retries see their failures — the factory is not a sphex wasp.** Attempt
-N+1's contract includes attempt N's artifact and eval verdict; a re-split is a
+N+1's contract includes attempt N's artifact and eval verdict — and the verdict
+is *executable*, not merely visible: its prescriptions are what the repair rung
+applies; a re-split is a
 **perturbation of the failed split**, informed by what the split eval rejected,
 never an independent roll. And the loop watches itself repeat: if an attempt's
 failure signature is **isomorphic to the previous one**, the ladder isn't
@@ -349,8 +403,8 @@ the traces.
 
 ### Termination: the subdivided budget
 
-Each goal receives a **budget** — `{attempts, tokens, wall_clock}` — inherited
-from its parent and **subdivided among its children**. A retry-at-higher-tier
+Each goal receives a **budget** — `{attempts, tokens, wall_clock, tool_calls}`
+— inherited from its parent and **subdivided among its children**. A retry-at-higher-tier
 consumes attempts; a re-split consumes attempts; everything consumes tokens.
 Attempts bound thrashing at each level; subdivision bounds **total tree
 spend** — a wide fan-out cannot multiply costs past what its root was granted.
@@ -385,6 +439,13 @@ whether work runs concurrently.
 
 **Every human touchpoint is a decision brief, and every brief has a deadline.**
 A brief is typed — `{question, options, links, deadline}` — never a transcript.
+**Gate briefs teach; mid-tree briefs are lean.** A batched gate brief carries
+teaching fields — the relevant finding with its confidence, what each option
+buys and costs *here*, a recommendation — because the human is already sitting
+down and a better-taught decision is a better decision. The unforeseeable
+mid-tree brief stays minimal for fast turnaround. And every boundary handoff
+carries a **`learned`** field — two to four plain sentences of what building
+this taught — so the human leaves smarter than they arrived.
 **`on_timeout` is a required field** of every human touchpoint a goal-type
 declares — `deny | park | bounce` — and a type that omits it fails validation:
 the schema, not discipline, guarantees a safe default exists. **Parking
@@ -763,6 +824,13 @@ once, with reasons; then it complies; overrides are logged into the event store
 (`overridden_by, reason`). Rejection reasons feed learning **only when stated**
 — the factory never reverse-engineers an unstated rationale.
 
+The artifact itself is **process-clean**: no goal IDs, plan references, or
+factory process language in code, comments, or config — a deterministic,
+grep-able gate item on every code-emitting type. The code outlives the process
+that produced it; "never pollutes the product repo" extends down to the comment
+level. Process talk belongs only in specs, commit messages, and the PR body —
+and the PR carries the `learned` note alongside its proof artifacts.
+
 ## The improvement loop — working ON the factory
 
 Working *in* the factory makes a product's work better; working *on* the
@@ -833,18 +901,18 @@ factory **code**) are versioned artifacts needing review.
 | Decision | Resolution |
 | --- | --- |
 | Work unit & expansion | recursive goal-spawning — typed goals, one recursive operation |
-| Expansion shape | one split mechanism; parallel vs sequential emergent from the children's dependency structure |
+| Expansion shape | one split mechanism; parallel vs sequential emergent from the children's dependency structure; **shared shapes freeze first** — a `freeze-contract` child every sharer depends on, extensions + exhaustive consumers pre-committed |
 | Decide outcomes | satisfy \| split \| **block** — the factory never invents; ambiguity bounces early via decision brief |
-| Structure reuse | **memoized splits**: split-memos as versioned type memory; autonomous → provisional, **human signoff → trusted**; pinned per project; novel shapes run a **terraced scan** — k cheap candidate splits compete, `judge-split` ranks, the winner is deepened (per-type policy) |
+| Structure reuse | **memoized splits**: split-memos as versioned type memory; autonomous → provisional, **human signoff → trusted**; pinned per project; novel shapes run a **terraced scan** — k cheap **lens-diverse** candidate splits compete, `judge-split` ranks, the winner is deepened (per-type policy) |
 | Facts vs structure | the epistemic rule: verifiable-on-read → memory with decay; outcome-only-validatable → versioned artifact |
 | Handoff contract | one schema every level, both directions — down: spec/intent/risk/scope/budget/memories; up: artifact/proof/lessons/memories-used/blockers/findings |
 | Intent | a typed contract field, inherited down the subtree; modulates judges, **never** deterministic gates; orthogonal to risk |
-| Eval contract | split gate (pre) + split + goal-type + integration; deterministic before judge; impacted slice at leaves, full suite at root; judges calibrated by pinned-SHA replay against exogenous ground truth (merged PRs, production, human verdicts — never another eval); **verdicts rendered at the parent's integrate edge** (delegable to eval-typed children — the child only ever claims) |
+| Eval contract | split gate (pre, with batched ambiguity harvest) + split (decomposition + dependency honesty + contract discipline) + goal-type + integration; deterministic before judge; impacted slice at leaves, full suite at root; judges calibrated by pinned-SHA replay against exogenous ground truth (merged PRs, production, human verdicts — never another eval); **verdicts rendered at the parent's integrate edge** (delegable to eval-typed children — the child only ever claims) |
 | Scope enforcement | deterministic `diff ⊆ scope` at emission + risk re-check on the actual diff; escape bounces to the parent (expand scope or re-split, consuming an attempt) — findings-become-tickets is structural, not normative |
-| Cost / quality / human | one control loop: eval → tier escalation → human last-resort; retries carry the prior failure (re-splits are perturbations); isomorphic failures jump out early; ladder policies instrumented per type, not decreed |
+| Cost / quality / human | one control loop: eval → **repair** (the judge prescribes, a cheap fixer applies) → tier escalation → human last-resort; `escalated` findings skip straight to block; retries carry the prior failure (re-splits are perturbations); isomorphic failures jump out early; ladder policies instrumented per type, not decreed |
 | Termination | shrinking splits + `leaf_only` floors; chains bounded by the **subdivided budget**; exhaustion is an event, not a hang |
 | Risk | computed per instance (`classify_risk` over scope × sensitivity) layered on type-level gates; re-checked at emission on the actual diff; earned autonomy tuned from traces |
-| Human paths (all rare) | competence (escalation/block), authority (**consequences outrun any eval** — type ∨ instance gates, incl. pattern-trust), physical (human-as-tool); every touchpoint a decision brief with **required `on_timeout`** (deny \| park \| bounce); park releases scope + TTL; plus two standing acts: admission, pattern-trust signoff |
+| Human paths (all rare) | competence (escalation/block), authority (**consequences outrun any eval** — type ∨ instance gates, incl. pattern-trust), physical (human-as-tool); every touchpoint a decision brief with **required `on_timeout`** (deny \| park \| bounce); park releases scope + TTL; plus two standing acts: admission, pattern-trust signoff; gate briefs batched and teaching, mid-tree briefs lean; every boundary handoff carries `learned` |
 | Roles | emergent — no org chart, only a library of goal-types |
 | Memory | layered project × type × global; **spawner-mediated** (parents inject pointers, children report, parents promote); injection carries provenance labels (provisional \| trusted); reinforcement from memories-used |
 | Memory governance | eval-gated promotion + provisional/trusted + use/mention discipline (memories are quoted data, never directives) + contradiction-check on write + decay/eviction + consolidation as a scheduled goal-type |
@@ -859,7 +927,7 @@ factory **code**) are versioned artifacts needing review.
 | Runtime shape | persistent listener (intents, signals, merges, blockers → root-goals) over many concurrent, bounded, isolated trees |
 | Concurrency | scope-disjoint trees run concurrently per repo; overlapping scopes serialize (degenerate v1: serial-per-repo); DAG-parallel within a tree |
 | Human collaboration | beside, turn-based: commission, answer mid-tree, review/merge at the boundary; never live co-edit |
-| Output discipline | PR only, never self-merge; proof artifacts in the output contract; ownership-map review routing; object-once pushback with logged overrides |
+| Output discipline | PR only, never self-merge; proof artifacts + `learned` in the output contract; **process-clean artifacts** (no goal IDs or factory language in code/comments — deterministic gate); ownership-map review routing; object-once pushback with logged overrides |
 | Branch coordination | shared state read by pull at checkpoints — adapts at decision boundaries, not instantaneously |
 | The two loops | working IN (memory, per-repo) vs working ON (improvement PRs to the factory repo, human-reviewed); blockers spin out; standing budget envelope; constitution check in factory CI; precise invariant: code by PR, memory by governed write; **the architecture is locked**; no factory-factory in v1 |
 | State placement | factory code in the factory repo; memory in the independent store; product repos receive exactly one thing — a PR |
