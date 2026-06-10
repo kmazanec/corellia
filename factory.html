@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Corellia — Plate I: The Recursive Goal Factory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Spectral:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ground:#14110c;
+    --ground-2:#1d1810;
+    --paper:#e9e1cf;
+    --paper-2:#ddd2ba;
+    --ink:#2a2417;
+    --ink-soft:#5a4f38;
+    --line:#9c8c66;
+    --line-soft:#bcab83;
+    --brass:#c8932f;
+    --brass-bright:#e9b84a;
+    --oxblood:#9e3a26;
+    --teal:#3c7d78;
+    --teal-bright:#5aa39c;
+    --moss:#5f7a3a;
+    --moss-bright:#7e9a4e;
+    --shadow:rgba(0,0,0,.55);
+    --paren:#a8925e;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--ground);color:var(--paper);
+    font-family:'Spectral',Georgia,serif;line-height:1.5;
+    -webkit-font-smoothing:antialiased;overflow-x:hidden;position:relative;
+  }
+  body::before{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:9999;
+    opacity:.05;mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  body::after{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:1;
+    background:radial-gradient(ellipse at 50% 24%,transparent 42%,rgba(0,0,0,.45) 100%);
+  }
+  .wrap{max-width:1840px;margin:0 auto;padding:38px clamp(30px,4vw,64px) 70px;position:relative;z-index:2}
+
+  /* ── Masthead ── */
+  header.masthead{display:flex;justify-content:space-between;align-items:flex-end;
+    border-bottom:2px solid var(--line);padding-bottom:14px;gap:30px;flex-wrap:wrap}
+  .mh-left{display:flex;align-items:baseline;gap:18px;flex-wrap:wrap}
+  .crest{font-family:'Cinzel',serif;font-weight:700;letter-spacing:.14em;
+    font-size:clamp(26px,4vw,46px);color:var(--brass-bright);
+    text-shadow:0 1px 0 #000,0 0 26px rgba(201,147,47,.25)}
+  .crest .glyph{color:var(--paper);font-weight:400}
+  .subtitle{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.32em;
+    text-transform:uppercase;color:var(--line-soft)}
+  .mh-right{font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.12em;
+    color:var(--line-soft);text-align:right;line-height:1.7;text-transform:uppercase}
+  .mh-right b{color:var(--brass);font-weight:500}
+  .ruleline{height:1px;background:var(--line);margin:0 0 24px;position:relative;opacity:.6}
+  .ruleline::before,.ruleline::after{content:"";position:absolute;top:-3px;width:1px;height:7px;background:var(--line)}
+  .ruleline::before{left:0}.ruleline::after{right:0}
+
+  .lede{font-size:clamp(15px,1.5vw,18px);color:var(--paper-2);max-width:78ch;margin-bottom:18px}
+  .lede em{color:var(--brass-bright);font-style:italic}
+  .lede b{color:var(--paper);font-weight:600}
+
+  /* ── Scenario selector ── */
+  .scenarios{display:flex;gap:12px;margin-bottom:26px;flex-wrap:wrap}
+  .scn{flex:1;min-width:230px;text-align:left;cursor:pointer;
+    background:var(--ground-2);border:1px solid rgba(156,140,102,.4);border-radius:2px;
+    padding:13px 15px;transition:.18s;color:var(--paper-2);position:relative;overflow:hidden}
+  .scn:hover{border-color:var(--line);transform:translateY(-2px)}
+  .scn.active{border-color:var(--brass);background:linear-gradient(180deg,rgba(200,147,47,.10),var(--ground-2));
+    box-shadow:0 0 0 1px var(--brass),0 14px 30px -20px #000}
+  .scn .sx-no{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.2em;color:var(--brass);text-transform:uppercase}
+  .scn .sx-name{font-family:'Cinzel',serif;font-size:14px;font-weight:600;color:var(--paper);margin:3px 0 4px;letter-spacing:.04em}
+  .scn .sx-desc{font-size:12px;line-height:1.4;color:var(--line-soft)}
+  .scn .sx-depth{position:absolute;top:11px;right:13px;font-family:'JetBrains Mono',monospace;font-size:8.5px;
+    letter-spacing:.1em;color:var(--ink-soft);text-transform:uppercase;
+    border:1px solid rgba(156,140,102,.4);padding:1px 5px;border-radius:1px}
+  .scn.active .sx-depth{color:var(--brass);border-color:var(--brass)}
+
+  /* ── Stage ── */
+  .stage{display:grid;grid-template-columns:1fr 316px 348px;gap:24px;align-items:start}
+  @media(max-width:1340px){.stage{grid-template-columns:1fr 316px}}
+  @media(max-width:980px){.stage{grid-template-columns:1fr}}
+  .memcol{position:sticky;top:20px}
+  .mempanel h3{margin-bottom:8px}
+  .mem-axis{display:flex;justify-content:space-between;align-items:center;font-family:'JetBrains Mono',monospace;
+    font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:11px}
+  .mem-axis .mem-arrow{color:var(--brass);letter-spacing:.06em}
+  .mem-note{margin-top:13px;font-family:'Spectral',serif;font-size:11.5px;font-style:italic;color:var(--line-soft);line-height:1.45}
+  .mem-note b{font-style:normal;color:var(--brass);font-family:'JetBrains Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.06em}
+
+  .plate{position:relative;background:var(--paper);color:var(--ink);
+    border:1px solid var(--line);border-radius:2px;
+    box-shadow:0 26px 60px -20px var(--shadow),0 2px 0 rgba(255,255,255,.04) inset;
+    padding:28px 26px 22px;min-height:600px;overflow:hidden}
+  .plate::before{content:"";position:absolute;inset:0;pointer-events:none;opacity:.5;
+    background-image:linear-gradient(rgba(120,104,66,.10) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(120,104,66,.10) 1px,transparent 1px);background-size:26px 26px}
+  .plate::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(circle at 16% 10%,rgba(255,250,235,.6),transparent 45%),
+      radial-gradient(circle at 84% 90%,rgba(120,90,40,.10),transparent 50%);mix-blend-mode:multiply}
+  .tick{position:absolute;width:16px;height:16px;border:1.5px solid var(--line);z-index:6}
+  .tick.tl{top:8px;left:8px;border-right:0;border-bottom:0}
+  .tick.tr{top:8px;right:8px;border-left:0;border-bottom:0}
+  .tick.bl{bottom:8px;left:8px;border-right:0;border-top:0}
+  .tick.br{bottom:8px;right:8px;border-left:0;border-top:0}
+
+  .plate-head{position:relative;z-index:4;display:flex;justify-content:space-between;align-items:baseline;
+    border-bottom:1px solid var(--line-soft);padding-bottom:8px;margin-bottom:6px}
+  .plate-title{font-family:'Cinzel',serif;font-weight:600;font-size:15px;letter-spacing:.1em;color:var(--ink)}
+  .plate-no{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.18em;color:var(--ink-soft);text-transform:uppercase}
+  .plate-caption{position:relative;z-index:4;font-family:'JetBrains Mono',monospace;font-size:10.5px;
+    color:var(--ink-soft);letter-spacing:.04em;margin-bottom:14px;min-height:28px;line-height:1.4}
+
+  /* ── The S-expression tree ── */
+  .sexpr{position:relative;z-index:4;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.2}
+  .form{margin-left:0;opacity:0;transform:translateY(-5px);
+    transition:opacity .4s ease,transform .4s cubic-bezier(.2,.8,.3,1);will-change:opacity,transform}
+  .form.show{opacity:1;transform:none}
+  .form .kids{margin-left:20px;border-left:1px dotted rgba(120,104,66,.32);padding-left:2px}
+  .form.collapsed .kids{display:none}
+
+  /* the head line of a form: ( goal-type ⟨goal⟩ ) */
+  .head{display:flex;align-items:baseline;gap:7px;padding:4px 8px 4px 4px;border-radius:3px;
+    flex-wrap:wrap;transition:background .3s,box-shadow .3s;position:relative}
+  .paren{color:var(--paren);font-weight:700;font-size:14px}
+  .gtype{color:var(--ink);font-weight:700;letter-spacing:.02em}
+  .goal{font-family:'Spectral',serif;font-size:14px;font-style:italic;color:var(--ink);font-weight:500}
+  .goal::before{content:"⟨";color:var(--ink-soft);font-style:normal;margin-right:1px}
+  .goal::after{content:"⟩";color:var(--ink-soft);font-style:normal;margin-left:1px}
+  .tier{font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.06em;text-transform:uppercase;
+    border:1px solid var(--ink-soft);color:var(--ink-soft);padding:0 4px;border-radius:1px;align-self:center}
+  .ret{font-size:11px;color:var(--moss);font-weight:500;margin-left:2px;opacity:0;transition:opacity .4s}
+  .ret.show{opacity:1}
+  .ret .arrow{color:var(--ink-soft)}
+  .badge{font-size:8.5px;letter-spacing:.06em;text-transform:uppercase;padding:0 5px;border-radius:1px;
+    border:1px solid;align-self:center;font-weight:700}
+  .badge.gate{border-color:var(--teal);color:var(--teal)}
+  .badge.dep{border-color:var(--ink-soft);color:var(--ink-soft)}
+  .badge.reverify{border-color:var(--brass);color:#8a6410}
+
+  /* state skins on .head */
+  .head[data-s="active"]{background:rgba(200,147,47,.16);box-shadow:inset 0 0 0 1px rgba(200,147,47,.5)}
+  .head[data-s="active"] .paren{color:var(--brass);animation:flick 1s infinite}
+  .head[data-s="active"] .gtype{color:#8a6410}
+  .head[data-s="fail"]{background:rgba(158,58,38,.14);box-shadow:inset 0 0 0 1px rgba(158,58,38,.55)}
+  .head[data-s="fail"] .paren,.head[data-s="fail"] .gtype{color:var(--oxblood)}
+  .head[data-s="escalate"]{background:rgba(233,184,74,.14);box-shadow:inset 0 0 0 1px rgba(233,184,74,.55)}
+  .head[data-s="escalate"] .paren{color:var(--brass-bright)}
+  .head[data-s="escalate"] .tier{border-color:var(--brass);color:#8a6410;font-weight:700;border-style:dashed}
+  .head[data-s="human"]{background:rgba(60,125,120,.16);box-shadow:inset 0 0 0 1px rgba(60,125,120,.6)}
+  .head[data-s="human"] .paren,.head[data-s="human"] .gtype{color:var(--teal)}
+  .head[data-s="human"] .paren{animation:flick 1.1s infinite}
+  .head[data-s="pass"]{background:rgba(95,122,58,.10)}
+  .head[data-s="pass"] .paren{color:var(--moss)}
+  .head[data-s="pass"] .goal{color:var(--ink-soft)}
+  .head[data-s="reduced"]{opacity:.62}
+  .head[data-s="reduced"] .paren{color:var(--moss)}
+  .head[data-s="reduced"] .goal{color:var(--ink-soft)}
+  @keyframes flick{0%,100%{opacity:1}50%{opacity:.4}}
+
+  .form.foldpulse > .head{animation:foldp .5s ease}
+  @keyframes foldp{0%{background:rgba(95,122,58,.32)}100%{}}
+
+  .revblock{position:absolute;bottom:24px;right:26px;z-index:5;border:1px solid var(--ink-soft);
+    background:rgba(255,253,247,.85);font-family:'JetBrains Mono',monospace;font-size:8px;color:var(--ink-soft);
+    letter-spacing:.08em;text-transform:uppercase}
+  .revblock div{padding:3px 8px;border-bottom:1px solid rgba(90,79,56,.3);display:flex;gap:14px;justify-content:space-between}
+  .revblock div:last-child{border-bottom:0}
+  .revblock b{color:var(--ink)}
+
+  /* ── Margin ── */
+  .margin{display:flex;flex-direction:column;gap:18px;position:sticky;top:20px}
+  .panel{background:linear-gradient(180deg,var(--ground-2),var(--ground));
+    border:1px solid rgba(156,140,102,.4);border-radius:2px;padding:16px 16px 15px;box-shadow:0 14px 34px -22px #000}
+  .panel h3{font-family:'Cinzel',serif;font-weight:600;font-size:12px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--brass);margin-bottom:12px;display:flex;align-items:center;gap:8px}
+  .panel h3::before{content:"";width:14px;height:1px;background:var(--brass);opacity:.6}
+
+  .transport{display:flex;gap:8px;margin-bottom:12px}
+  .btn{flex:1;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    padding:11px 8px;cursor:pointer;color:var(--paper);background:var(--ground-2);border:1px solid var(--line);
+    border-radius:2px;transition:.18s;font-weight:500}
+  .btn:hover{background:var(--brass);color:#1a140a;border-color:var(--brass-bright);transform:translateY(-1px)}
+  .btn.primary{background:var(--brass);color:#1a140a;border-color:var(--brass-bright)}
+  .btn.primary:hover{background:var(--brass-bright)}
+  .btn:disabled{opacity:.32;cursor:not-allowed;transform:none;background:var(--ground-2);color:var(--paper)}
+  .progress{font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.12em;color:var(--line-soft);
+    text-transform:uppercase;display:flex;justify-content:space-between}
+  .progress b{color:var(--brass)}
+  .track{height:3px;background:rgba(156,140,102,.22);margin-top:7px;border-radius:2px;overflow:hidden}
+  .track i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--brass),var(--brass-bright));transition:width .4s}
+
+  .trace{font-family:'JetBrains Mono',monospace;font-size:10.5px;line-height:1.5;max-height:230px;overflow-y:auto;
+    display:flex;flex-direction:column;gap:7px;padding-right:4px}
+  .trace::-webkit-scrollbar{width:5px}.trace::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
+  .trace .t{display:flex;gap:8px;opacity:0;transform:translateX(8px);animation:slideIn .4s forwards;
+    border-left:2px solid var(--line);padding-left:8px}
+  @keyframes slideIn{to{opacity:1;transform:translateX(0)}}
+  .trace .tn{color:var(--line-soft);flex:none}
+  .trace .tx{color:var(--paper-2)}
+  .trace .t.k-active{border-color:var(--brass)} .trace .t.k-active .tx{color:var(--brass-bright)}
+  .trace .t.k-pass{border-color:var(--moss)} .trace .t.k-pass .tx{color:#9ab36a}
+  .trace .t.k-fail{border-color:var(--oxblood)} .trace .t.k-fail .tx{color:#d4775f}
+  .trace .t.k-human{border-color:var(--teal)} .trace .t.k-human .tx{color:var(--teal-bright)}
+  .trace .t.k-mem{border-color:var(--line-soft)} .trace .t.k-mem .tx{color:#c9b98f}
+  .trace .t.k-fold{border-color:var(--moss-bright)} .trace .t.k-fold .tx{color:#b6c98a}
+
+  .legend{display:flex;flex-direction:column;gap:9px}
+  .lg{display:flex;align-items:center;gap:10px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--paper-2)}
+  .lg .sw{width:14px;height:14px;border-radius:2px;flex:none;border:1px solid rgba(0,0,0,.3)}
+  .lg .sw.active{background:var(--brass)} .lg .sw.fail{background:var(--oxblood)}
+  .lg .sw.esc{background:var(--brass-bright);border-style:dashed} .lg .sw.human{background:var(--teal)}
+  .lg .sw.pass{background:var(--moss)}
+  .lg b{color:var(--paper);font-weight:500}
+
+  .reading{font-family:'Spectral',serif;font-size:12.5px;color:var(--line-soft);line-height:1.5;font-style:italic}
+  .reading b{color:var(--brass);font-style:normal;font-family:'JetBrains Mono',monospace;font-size:11px}
+  .reading code{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--paper-2);font-style:normal}
+
+  /* ── Memory layers ── */
+  .memstack{display:flex;flex-direction:column;gap:0}
+  .mlayer{position:relative;border:1px solid rgba(156,140,102,.4);border-radius:2px;
+    padding:10px 12px 11px;background:var(--ground-2);transition:.3s;overflow:hidden}
+  .mlayer + .mlayer{margin-top:7px}
+  .mlayer::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--line);opacity:.5;transition:.3s}
+  .mlayer.project::before{background:var(--brass)}
+  .mlayer.type::before{background:var(--moss-bright)}
+  .mlayer.global::before{background:var(--teal-bright)}
+  .ml-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px}
+  .ml-name{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;font-weight:700;color:var(--paper)}
+  .mlayer.project .ml-name{color:var(--brass-bright)}
+  .mlayer.type .ml-name{color:var(--moss-bright)}
+  .mlayer.global .ml-name{color:var(--teal-bright)}
+  .ml-tag{font-family:'JetBrains Mono',monospace;font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft)}
+  .ml-sub{font-family:'Spectral',serif;font-style:italic;font-size:11px;color:var(--line-soft);line-height:1.35}
+  .ml-facts{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;min-height:4px}
+  .chit{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.02em;color:var(--paper-2);
+    background:rgba(156,140,102,.14);border:1px solid rgba(156,140,102,.4);border-radius:1px;padding:2px 6px;
+    opacity:0;transform:translateY(4px);animation:chitIn .45s forwards}
+  .chit.provisional{border-style:dashed;color:var(--line-soft);opacity:.85}
+  .chit.fresh{border-color:var(--brass);color:var(--brass-bright)}
+  @keyframes chitIn{to{opacity:1;transform:none}}
+  .mlayer.flash{animation:mflash 1s ease}
+  @keyframes mflash{0%{box-shadow:0 0 0 1px var(--brass),0 0 24px -2px rgba(200,147,47,.7);background:rgba(200,147,47,.10)}100%{}}
+  .mlayer.flash::before{animation:mbar 1s ease}
+  @keyframes mbar{0%,40%{opacity:1;width:5px}100%{}}
+  .mlayer.read{animation:mread 1s ease}
+  @keyframes mread{0%{box-shadow:0 0 0 1px var(--brass-bright),0 0 18px -4px rgba(233,184,74,.7)}100%{}}
+  .ml-promote{margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--moss-bright);
+    letter-spacing:.04em;opacity:0;transition:opacity .5s}
+  .ml-promote.show{opacity:1}
+  .ml-promote .arr{color:var(--ink-soft)}
+
+  footer{margin-top:30px;border-top:1px solid var(--line);padding-top:14px;display:flex;justify-content:space-between;
+    flex-wrap:wrap;gap:12px;font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--line-soft)}
+  footer b{color:var(--brass)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="mh-left">
+      <div class="crest">CORELLIA<span class="glyph"> ✶</span></div>
+      <div class="subtitle">Yards · Recursive Goal Factory</div>
+    </div>
+    <div class="mh-right">
+      Plate I — <b>Operation of the Works</b><br>
+      Drawing No. <b>COR·2206·A</b> · Rev <b>4</b><br>
+      <span id="mh-scn">Scenario: <b>—</b></span>
+    </div>
+  </header>
+  <div class="ruleline"></div>
+
+  <p class="lede">
+    Every node is a <b>function with a goal</b>. It reads as a form —
+    <code>(goal-type&nbsp;⟨the&nbsp;goal⟩&nbsp;…)</code> — that either <em>returns a value</em> directly or
+    <em>splits</em> into nested sub-forms and reduces their results upward. The same operation runs whether the
+    work is trivial or deep. Pick a job, then <b>Step</b> through it or <b>Play</b> it.
+  </p>
+
+  <div class="scenarios" id="scn-row"></div>
+
+  <div class="stage">
+    <div class="plate">
+      <span class="tick tl"></span><span class="tick tr"></span>
+      <span class="tick bl"></span><span class="tick br"></span>
+      <div class="plate-head">
+        <div class="plate-title" id="plate-title">Fig. 1 — The Goal, As a Function</div>
+        <div class="plate-no">eval ↓ split · reduce ↑ fold</div>
+      </div>
+      <div class="plate-caption" id="caption">Select a scenario above.</div>
+      <div class="sexpr" id="sexpr"></div>
+      <div class="revblock">
+        <div><span>Step</span><b id="rev-step">00</b></div>
+        <div><span>Max depth</span><b id="rev-depth">0</b></div>
+        <div><span>Escalations</span><b id="rev-esc">0</b></div>
+        <div><span>Human calls</span><b id="rev-human">0</b></div>
+      </div>
+    </div>
+
+    <!-- ── Memory column ── -->
+    <div class="memcol">
+      <div class="panel mempanel">
+        <h3>Shared Memory</h3>
+        <div class="mem-axis">
+          <span>universe</span><span class="mem-arrow">↓ settles · promotes ↑</span><span>instance</span>
+        </div>
+        <div class="memstack">
+          <div class="mlayer global" id="ml-global">
+            <div class="ml-head"><span class="ml-name">Global</span><span class="ml-tag">universe · persistent</span></div>
+            <div class="ml-sub">Org conventions &amp; preferences. Ambient to every goal.</div>
+            <div class="ml-facts" id="ml-global-facts"><span class="chit">conventional commits</span><span class="chit">never prune --rm images</span></div>
+          </div>
+          <div class="mlayer type" id="ml-type">
+            <div class="ml-head"><span class="ml-name">Type</span><span class="ml-tag">class · compounds forever</span></div>
+            <div class="ml-sub">How this operation is done well, across every run. The compounding asset.</div>
+            <div class="ml-promote" id="ml-promote"><span class="arr">↑</span> eval-gated promotion from project · provisional</div>
+            <div class="ml-facts" id="ml-type-facts"></div>
+          </div>
+          <div class="mlayer project" id="ml-project">
+            <div class="ml-head"><span class="ml-name">Project</span><span class="ml-tag">instance · dies with the build</span></div>
+            <div class="ml-sub">Facts about this artifact. Written freely; re-read on pull.</div>
+            <div class="ml-facts" id="ml-project-facts"></div>
+          </div>
+        </div>
+        <div class="mem-note">A run writes <b>project</b> facts and re-reads them on pull. When it completes, a
+          general fact earns an eval-gated, <em>provisional</em> promotion up to <b>type</b> — the layer that compounds.</div>
+      </div>
+    </div>
+
+    <!-- ── Controls rail ── -->
+    <div class="margin">
+      <div class="panel">
+        <h3>Transport</h3>
+        <div class="transport">
+          <button class="btn primary" id="btn-step">Step ▸</button>
+          <button class="btn" id="btn-play">Play ▶</button>
+          <button class="btn" id="btn-reset">Reset ↺</button>
+        </div>
+        <div class="progress"><span>Sequence</span><span><b id="p-cur">0</b> / <span id="p-tot">0</span></span></div>
+        <div class="track"><i id="p-bar"></i></div>
+      </div>
+
+      <div class="panel">
+        <h3>Reading a form</h3>
+        <div class="reading">
+          <code>(<b style="color:var(--paren)">goal-type</b> ⟨goal⟩ …)</code> — the head is the
+          operation, the <em>goal</em> is its purpose, the nested forms are the sub-goals it spawned.
+          A form glows while <b>active</b>, then folds to <code>⇒ ✓</code> when it returns.
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Trace · Attribution</h3>
+        <div class="trace" id="trace"></div>
+      </div>
+
+      <div class="panel">
+        <h3>Form States</h3>
+        <div class="legend">
+          <div class="lg"><span class="sw active"></span><b>Active</b> — the brain evaluating</div>
+          <div class="lg"><span class="sw esc"></span><b>Escalated</b> — retried, higher tier</div>
+          <div class="lg"><span class="sw fail"></span><b>Eval fail</b> — split / type / integ.</div>
+          <div class="lg"><span class="sw human"></span><b>Human</b> — a rare gap</div>
+          <div class="lg"><span class="sw pass"></span><b>Returned</b> — folded to its value</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <span>Corellia · <b>biograph.dev</b></span>
+    <span>One brain · many harnesses · <b>recursion is a choice the node makes</b></span>
+    <span>Trivial work never recurses · deep work folds</span>
+  </footer>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   MODEL
+   A scenario is a TREE of forms (the goal-tree) plus an ordered
+   SCRIPT of events that animate it. Each form: id, gtype, goal,
+   tier, optional badge, children[]. The script references form ids.
+   Event kinds drive both the visual state and the trace line.
+   ═══════════════════════════════════════════════════════════════ */
+
+const SCENARIOS = {
+
+  /* ── 1 · TRIVIAL: no recursion ───────────────────────────── */
+  bugfix:{
+    no:'I', name:'Trivial Bug Fix', depth:'depth 0 · no recursion',
+    label:'Correct an off-by-one in pagination',
+    title:'Fig. 1 — A Goal That Need Not Recurse',
+    tree:{id:'r',gtype:'fix-bug',goal:'off-by-one in pagination',tier:'haiku',children:[]},
+    script:[
+      {k:'active',id:'r',cap:'The listener mints one goal. The node inspects it before deciding anything.',
+        tx:'fix-bug ▸ received · tier=haiku'},
+      {k:'mem',id:'r',cap:'It is small enough to satisfy directly — no split. Recursion is a choice, and the choice here is NO.',
+        tx:'decide ▸ atomic · do-it (no children)'},
+      {k:'active',id:'r',cap:'The brain edits the off-by-one and runs the existing checks as a regression gate.',
+        tx:'fix-bug ▸ patch + run existing tests'},
+      {k:'fold',id:'r',ret:'✓ patch',cap:'Goal-type eval passes; the form returns its value. One node, one pass, done.',
+        tx:'type-eval ✓ → returns ⟨patch⟩'},
+    ],
+  },
+
+  /* ── 2 · MEATIER: shallow happy-ish path w/ one escalation + gate ── */
+  sso:{
+    no:'II', name:'Add SSO (Brownfield)', depth:'depth 2 · split + gate',
+    label:'Add SSO to a brownfield app',
+    title:'Fig. 2 — A Goal That Splits, Escalates & Gates',
+    tree:{id:'r',gtype:'add-sso',goal:'add SSO to the app',tier:'opus',children:[
+      {id:'c',gtype:'comprehend',goal:'shallow-map the repo',tier:'haiku',children:[]},
+      {id:'api',gtype:'build-api',goal:'SSO on the API',tier:'sonnet',children:[
+        {id:'char',gtype:'characterize',goal:'pin auth behaviour',tier:'haiku',badge:'dep',children:[]},
+        {id:'fn',gtype:'implement-fn',goal:'token-exchange fn',tier:'haiku',children:[]},
+      ]},
+      {id:'cl',gtype:'build-client',goal:'SSO in the client',tier:'sonnet',children:[
+        {id:'dep',gtype:'deploy',goal:'ship to prod',tier:'sonnet',badge:'gate',children:[]},
+      ]},
+    ]},
+    script:[
+      {k:'active',id:'r',cap:'A commissioned intent becomes the root form. It cannot split a brownfield repo it does not understand.',tx:'add-sso ▸ root · tier=opus'},
+      {k:'active',id:'c',cap:'First it comprehends — a cheap shallow map of the existing vessel.',tx:'comprehend ▸ shallow map (haiku)'},
+      {k:'mem',id:'c',fact:'auth = session-based, in auth.py',cap:'Comprehension writes codebase facts to PROJECT memory for every sibling to read.',tx:'project ◂ "auth = session-based"',foldId:'c',ret:'✓ map'},
+      {k:'active',id:'r',cap:'Now informed, the root SPLITS. The split eval judges the decomposition AND its dependency structure.',tx:'split eval ✓ — build-api ∥ build-client',show:['api','cl']},
+      {k:'active',id:'api',cap:'build-api splits again. A thinly-covered region forces a safety net BEFORE any change — a dependency.',tx:'build-api ▸ coverage thin → characterize first',show:['char','fn']},
+      {k:'fold',id:'char',ret:'✓ baseline',cap:'Characterization pins current behaviour (the regression guard), then returns.',tx:'characterize ✓ golden tests → returns'},
+      {k:'fail',id:'fn',cap:'The cheap leaf attempts the token-exchange fn. Its goal-type eval FAILS — tests red.',tx:'implement-fn ✗ type-eval (attempt 1, haiku)'},
+      {k:'escalate',id:'fn',tier:'sonnet',cap:'The failed eval drives the resource decision: retry at a higher tier.',tx:'escalate ▸ retry @ sonnet (attempt 2)',esc:1},
+      {k:'fold',id:'fn',ret:'✓ diff',cap:'At the stronger tier the leaf passes and returns its diff.',tx:'implement-fn ✓ → returns ⟨diff⟩'},
+      {k:'fold',id:'api',ret:'✓ api',cap:'Both children returned; build-api integrates them and folds upward.',tx:'integration ✓ build-api → returns'},
+      {k:'human',id:'dep',cap:'build-client reaches deploy — an irreversible goal-type carrying a mandatory AUTHORITY gate.',tx:'deploy ▣ authority gate — awaiting human',show:['dep'],human:1},
+      {k:'fold',id:'dep',ret:'✓ shipped',cap:'A human approves at the boundary. The gate releases.',tx:'human ✓ approved → deploy returns'},
+      {k:'fold',id:'cl',ret:'✓ client',cap:'build-client folds.',tx:'build-client → returns ⟨client⟩'},
+      {k:'fold',id:'r',ret:'✓ SSO live',cap:'Root integration eval checks the WHOLE against the original intent, then emits.',tx:'integration ✓ — intent satisfied · trace archived'},
+    ],
+  },
+
+  /* ── 3 · DEEP BUILD: wide + deep, discovery chain, 2 escalations, human dead-end recovery ── */
+  build:{
+    no:'III', name:'Deep Build', depth:'depth 5 · many branches',
+    label:'Ship a usage-based billing system',
+    title:'Fig. 3 — A Goal That Goes Deep',
+    tree:{id:'r',gtype:'build-billing',goal:'usage-based billing',tier:'opus',children:[
+      {id:'rs',gtype:'investigate',goal:'which metering model?',tier:'sonnet',children:[
+        {id:'rs1',gtype:'probe',goal:'read current event volume',tier:'haiku',children:[]},
+        {id:'rs2',gtype:'interview',goal:'price-tier interviews',tier:'sonnet',children:[]},
+      ]},
+      {id:'mt',gtype:'build-meter',goal:'event metering pipeline',tier:'sonnet',children:[
+        {id:'mt1',gtype:'design-schema',goal:'usage event schema',tier:'sonnet',children:[]},
+        {id:'agg',gtype:'build-aggregator',goal:'aggregation service',tier:'sonnet',children:[
+          {id:'cnt',gtype:'implement-fn',goal:'idempotent counter',tier:'haiku',children:[
+            {id:'cnt_c',gtype:'characterize',goal:'pin ledger invariants',tier:'haiku',badge:'dep',children:[]},
+            {id:'cnt_t',gtype:'write-test',goal:'concurrency suite',tier:'haiku',children:[]},
+          ]},
+          {id:'store',gtype:'provision-infra',goal:'durable event store',tier:'sonnet',children:[
+            {id:'mig',gtype:'write-migration',goal:'partitioned ledger table',tier:'sonnet',children:[
+              {id:'snap',gtype:'characterize',goal:'snapshot prod row shape',tier:'haiku',badge:'dep',children:[]},
+            ]},
+          ]},
+        ]},
+      ]},
+      {id:'inv',gtype:'build-invoicing',goal:'invoice generation',tier:'sonnet',children:[
+        {id:'tax',gtype:'build-tax-engine',goal:'compute tax owed',tier:'sonnet',children:[
+          {id:'tax1',gtype:'integrate-api',goal:'tax-rate provider',tier:'sonnet',badge:'reverify',children:[]},
+          {id:'tax2',gtype:'implement-fn',goal:'rounding & remittance',tier:'haiku',children:[]},
+        ]},
+        {id:'chg',gtype:'charge-card',goal:'capture a real charge',tier:'opus',badge:'gate',children:[]},
+      ]},
+      {id:'ui',gtype:'design-ui',goal:'billing dashboard',tier:'sonnet',children:[
+        {id:'ui1',gtype:'implement-component',goal:'usage chart',tier:'haiku',children:[]},
+      ]},
+    ]},
+    script:[
+      {k:'active',id:'r',cap:'A large intent. The root cannot leap to leaves — it splits into four concerns, worked in parallel.',tx:'build-billing ▸ root · tier=opus'},
+      {k:'active',id:'r',cap:'Split eval ✓: discovery, metering, invoicing, dashboard — independent, so they fan out.',tx:'split ✓ — investigate ∥ meter ∥ invoice ∥ ui',show:['rs','mt','inv','ui']},
+
+      {k:'active',id:'rs',cap:'Discovery is DEPENDENT work — a chain, not a fan-out. You cannot name the next step until the last returns.',tx:'investigate ▸ dependent chain',show:['rs1']},
+      {k:'fold',id:'rs1',ret:'✓ 4M/day',cap:'First probe reads event volume and returns a finding.',tx:'probe ✓ volume = 4M events/day'},
+      {k:'active',id:'rs',cap:'Only now, informed by the first, does it spawn the next step of the chain.',tx:'investigate ▸ next step chosen from result',show:['rs2']},
+      {k:'mem',id:'rs2',fact:'metering = per-event, tiered',cap:'Interviews resolve the model and write it to PROJECT memory — a fact others will depend on.',tx:'project ◂ "metering = per-event, tiered"',foldId:'rs2',ret:'✓ model'},
+      {k:'fold',id:'rs',ret:'✓ decided',cap:'The discovery chain reduces to one decision and folds.',tx:'investigate ⇒ ⟨metering model⟩'},
+
+      {k:'active',id:'mt',cap:'Metering splits into schema design and an aggregation service.',tx:'build-meter ▸ split (depth 2)',show:['mt1','agg']},
+      {k:'fold',id:'mt1',ret:'✓ schema',cap:'Schema design returns.',tx:'design-schema ✓ → returns'},
+      {k:'active',id:'agg',cap:'The aggregator splits again — a counter and the durable store it writes to.',tx:'build-aggregator ▸ split (depth 3)',show:['cnt','store']},
+
+      {k:'active',id:'cnt',cap:'The counter is money-adjacent. Before changing it, it spawns a characterization dependency and a concurrency test.',tx:'implement-fn ▸ split (depth 4)',show:['cnt_c','cnt_t']},
+      {k:'fold',id:'cnt_c',ret:'✓ invariants',cap:'Ledger invariants pinned first — the regression guard at depth 5.',tx:'characterize ✓ ledger invariants (d5)'},
+      {k:'fail',id:'cnt_t',cap:'The concurrency suite catches a real bug: the counter double-counts under retry.',tx:'write-test ✗ double-count under retry'},
+      {k:'escalate',id:'cnt',tier:'sonnet',cap:'The failing test drives an escalation of the counter implementation.',tx:'escalate ▸ implement-fn @ sonnet',esc:1},
+      {k:'fail',id:'cnt_t',cap:'Still red at sonnet — the race is subtle. Attempts budget nearly spent.',tx:'write-test ✗ still failing (attempt 2)'},
+      {k:'escalate',id:'cnt',tier:'opus',cap:'Escalate again to the top tier — the last resort before a human.',tx:'escalate ▸ implement-fn @ opus (attempt 3)',esc:1},
+      {k:'fold',id:'cnt_t',ret:'✓ green',cap:'The concurrency suite passes against the opus implementation.',tx:'write-test ✓ race resolved'},
+      {k:'fold',id:'cnt',ret:'✓ counter',cap:'The counter integrates its guard + tests and folds.',tx:'integration ✓ idempotent counter'},
+
+      {k:'active',id:'store',cap:'The durable store goes deepest: a migration, which first snapshots production shape.',tx:'provision-infra ▸ split (depth 4)',show:['mig']},
+      {k:'active',id:'mig',cap:'The migration spawns the deepest form in the tree — a depth-5 characterization.',tx:'write-migration ▸ split (depth 5)',show:['snap']},
+      {k:'fold',id:'snap',ret:'✓ shape',fact:'ledger rows = (id, ts, tenant, qty)',cap:'Depth 5: snapshot the real production row shape before altering the table. Brownfield safety, five levels down — written to project memory.',tx:'characterize ✓ prod row shape (DEPTH 5)'},
+      {k:'fold',id:'mig',ret:'✓ migrated',cap:'Migration applies against the snapshot and folds.',tx:'write-migration ✓ partitioned ledger'},
+      {k:'fold',id:'store',ret:'✓ store',cap:'The store provisions and folds.',tx:'provision-infra ⇒ ⟨event store⟩'},
+      {k:'fold',id:'agg',ret:'✓ aggregator',cap:'The aggregator integrates counter + store and folds.',tx:'integration ✓ aggregation service'},
+      {k:'fold',id:'mt',ret:'✓ meter',cap:'Metering folds the whole pipeline upward.',tx:'build-meter ⇒ ⟨pipeline⟩'},
+
+      {k:'active',id:'inv',cap:'Invoicing splits into a tax engine and the live charge.',tx:'build-invoicing ▸ split (depth 2)',show:['tax','chg']},
+      {k:'active',id:'tax',cap:'The tax engine splits into a rate-provider integration and the rounding logic.',tx:'build-tax-engine ▸ split (depth 3)',show:['tax1','tax2']},
+      {k:'mem',id:'tax1',read:true,cap:'On PULL, integrate-api re-reads the metering fact at its checkpoint — it changed since spawn, so it re-decides.',tx:'integrate-api ↻ re-verify: model fact fresh'},
+      {k:'fold',id:'tax1',ret:'✓ rates',cap:'Rate provider wired against the confirmed model.',tx:'integrate-api ✓ → returns ⟨rates⟩'},
+      {k:'fold',id:'tax2',ret:'✓ rounding',cap:'Rounding & remittance returns.',tx:'implement-fn ✓ rounding/remittance'},
+      {k:'fold',id:'tax',ret:'✓ tax',cap:'The tax engine integrates and folds.',tx:'build-tax-engine ⇒ ⟨tax⟩'},
+      {k:'human',id:'chg',cap:'charge-card captures a REAL charge — irreversible, money-moving. Mandatory AUTHORITY gate.',tx:'charge-card ▣ authority gate — human sign-off',human:1},
+      {k:'fold',id:'chg',ret:'✓ charge',cap:'A human approves the live-charge capability at the boundary.',tx:'human ✓ approved → charge-card returns'},
+      {k:'fold',id:'inv',ret:'✓ invoicing',cap:'Invoicing folds.',tx:'build-invoicing ⇒ ⟨invoicing⟩'},
+
+      {k:'active',id:'ui',cap:'The dashboard — the simplest branch — splits once into its chart component.',tx:'design-ui ▸ split',show:['ui1']},
+      {k:'fold',id:'ui1',ret:'✓ chart',cap:'The usage chart component returns.',tx:'implement-component ✓ usage chart'},
+      {k:'fold',id:'ui',ret:'✓ dashboard',cap:'Dashboard folds.',tx:'design-ui ⇒ ⟨dashboard⟩'},
+
+      {k:'fold',id:'r',ret:'✓ billing live',cap:'All four concerns returned. Root integration eval validates the whole product, then emits.',tx:'integration ✓ — billing shipped · trace archived'},
+    ],
+  },
+
+};
+
+/* ═══════════════════════════════════════════════════════════════
+   RENDER + ENGINE
+   ═══════════════════════════════════════════════════════════════ */
+const $=id=>document.getElementById(id);
+let current='bugfix', cur=0, playing=false, timer=null;
+let formEls={}, counters={depth:0,esc:0,human:0};
+
+function depthOf(node,d=0){ let m=d; (node.children||[]).forEach(c=>m=Math.max(m,depthOf(c,d+1))); return m; }
+
+function buildTree(node,depth){
+  const wrap=document.createElement('div');
+  wrap.className='form'; wrap.dataset.id=node.id;
+  const head=document.createElement('div');
+  head.className='head'; head.dataset.s='hidden'; head.dataset.id=node.id;
+  const badge = node.badge ? `<span class="badge ${node.badge}">${node.badge==='gate'?'▣ gate':node.badge==='dep'?'⊢ dep':'↻ re-verify'}</span>` : '';
+  head.innerHTML =
+    `<span class="paren">(</span>`+
+    `<span class="gtype">${node.gtype}</span>`+
+    `<span class="goal">${node.goal}</span>`+
+    `<span class="tier">${node.tier}</span>`+ badge +
+    `<span class="ret"><span class="arrow">⇒</span> <span class="rv"></span></span>`+
+    `<span class="paren rparen">)</span>`;
+  wrap.appendChild(head);
+  if(node.children && node.children.length){
+    const kids=document.createElement('div'); kids.className='kids';
+    node.children.forEach(c=>kids.appendChild(buildTree(c,depth+1)));
+    wrap.appendChild(kids);
+  }
+  formEls[node.id]={wrap,head};
+  return wrap;
+}
+
+function renderScenario(key){
+  current=key; const s=SCENARIOS[key];
+  formEls={};
+  $('sexpr').innerHTML='';
+  $('sexpr').appendChild(buildTree(s.tree,0));
+  $('plate-title').textContent=s.title;
+  $('mh-scn').innerHTML='Scenario: <b>'+s.label+'</b>';
+  $('p-tot').textContent=s.script.length;
+  // scenario tab active state
+  document.querySelectorAll('.scn').forEach(t=>t.classList.toggle('active',t.dataset.key===key));
+  reset(true);
+}
+
+function setHead(id,state){ const f=formEls[id]; if(f) f.head.dataset.s=state; }
+function showForm(id){ const f=formEls[id]; if(f){ f.wrap.classList.add('show'); f.head.dataset.s='active'; } }
+function foldForm(id,ret){
+  const f=formEls[id]; if(!f) return;
+  f.head.dataset.s = (f.wrap.querySelector('.kids')) ? 'reduced' : 'pass';
+  if(ret){ const rv=f.head.querySelector('.rv'); rv.textContent=ret; f.head.querySelector('.ret').classList.add('show'); }
+  f.wrap.classList.add('foldpulse');
+  setTimeout(()=>f.wrap.classList.remove('foldpulse'),520);
+}
+
+function addTrace(kind,text,n){
+  const t=document.createElement('div'); t.className='t k-'+kind;
+  t.innerHTML=`<span class="tn">${String(n).padStart(2,'0')}</span><span class="tx">${text}</span>`;
+  $('trace').appendChild(t); $('trace').scrollTop=$('trace').scrollHeight;
+}
+
+/* ── memory stack ── */
+let projectFacts=[];
+function flashLayer(which,cls){ const el=$('ml-'+which); if(!el) return;
+  el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls);
+  setTimeout(()=>el.classList.remove(cls),1000); }
+function memWrite(fact){
+  if(!fact) return;
+  projectFacts.push(fact);
+  flashLayer('project','flash');
+  const box=$('ml-project-facts');
+  const c=document.createElement('span'); c.className='chit fresh'; c.textContent=fact;
+  box.appendChild(c);
+  // earlier facts lose their "fresh" highlight
+  [...box.querySelectorAll('.chit')].forEach((ch,idx,arr)=>{ if(idx<arr.length-1) ch.classList.remove('fresh'); });
+}
+function memRead(){ flashLayer('project','read'); }
+function memPromote(){
+  // on run completion: the most general project fact earns provisional promotion to TYPE
+  if(!projectFacts.length) return;
+  const fact = projectFacts.find(f=>/=/.test(f)) || projectFacts[projectFacts.length-1];
+  flashLayer('type','flash');
+  $('ml-promote').classList.add('show');
+  const c=document.createElement('span'); c.className='chit provisional'; c.textContent=fact+' (provisional)';
+  $('ml-type-facts').appendChild(c);
+}
+function memReset(){
+  projectFacts=[];
+  $('ml-project-facts').innerHTML='';
+  $('ml-type-facts').innerHTML='';
+  $('ml-promote').classList.remove('show');
+}
+
+function applyEvent(e,i){
+  const s=SCENARIOS[current];
+  // reveal the form this event targets, plus any siblings it spawns
+  if(formEls[e.id]) formEls[e.id].wrap.classList.add('show');
+  (e.show||[]).forEach(showForm);
+
+  if(e.k==='active'){ setHead(e.id,'active'); }
+  else if(e.k==='mem'){ setHead(e.id,'active');
+    if(e.read){ memRead(); } else { memWrite(e.fact); }
+    if(e.foldId) foldForm(e.foldId,e.ret); }
+  else if(e.k==='fail'){ setHead(e.id,'fail'); }
+  else if(e.k==='escalate'){ const f=formEls[e.id]; if(f){ f.head.dataset.s='escalate'; if(e.tier) f.head.querySelector('.tier').textContent=e.tier; } }
+  else if(e.k==='human'){ setHead(e.id,'human'); }
+  else if(e.k==='fold'){ foldForm(e.id,e.ret); }
+  // any event may also read/write project memory
+  if(e.k!=='mem'){ if(e.read) memRead(); else if(e.fact) memWrite(e.fact); }
+
+  // trace kind mapping
+  const tk = e.k==='mem'?'mem' : e.k==='fold'?'fold' : e.k;
+  addTrace(tk, e.tx, i+1);
+
+  $('caption').textContent=e.cap;
+  if(e.esc) counters.esc+=e.esc;
+  if(e.human) counters.human+=e.human;
+  $('rev-step').textContent=String(i+1).padStart(2,'0');
+  $('rev-esc').textContent=counters.esc;
+  $('rev-human').textContent=counters.human;
+  $('p-cur').textContent=i+1;
+  $('p-bar').style.width=((i+1)/s.script.length*100)+'%';
+}
+
+function step(){
+  const s=SCENARIOS[current];
+  if(cur>=s.script.length){ stopPlay(); return; }
+  applyEvent(s.script[cur],cur); cur++;
+  if(cur>=s.script.length){ $('btn-step').disabled=true; stopPlay();
+    memPromote();
+    $('caption').textContent+='  · run complete.'; }
+}
+
+function reset(keepScenario){
+  stopPlay(); cur=0; counters={depth:0,esc:0,human:0};
+  const s=SCENARIOS[current];
+  // rebuild fresh (cleans tiers/badges/returns/states)
+  if(!keepScenario){ /* renderScenario already rebuilt */ }
+  formEls={}; $('sexpr').innerHTML=''; $('sexpr').appendChild(buildTree(s.tree,0));
+  // root always visible from the start
+  const rootId=s.tree.id; formEls[rootId].wrap.classList.add('show'); formEls[rootId].head.dataset.s='hidden';
+  $('trace').innerHTML=''; memReset();
+  $('caption').textContent='Ready. '+s.label+'. Press Step ▸.';
+  $('btn-step').disabled=false;
+  $('rev-step').textContent='00';
+  $('rev-depth').textContent=depthOf(s.tree);
+  $('rev-esc').textContent='0'; $('rev-human').textContent='0';
+  $('p-cur').textContent='0'; $('p-bar').style.width='0%'; $('p-tot').textContent=s.script.length;
+}
+
+function startPlay(){
+  const s=SCENARIOS[current];
+  if(cur>=s.script.length) reset(true);
+  playing=true; $('btn-play').textContent='Pause ⏸'; $('btn-play').classList.add('primary');
+  timer=setInterval(()=>{ if(cur>=SCENARIOS[current].script.length){stopPlay();return;} step(); },1450);
+}
+function stopPlay(){ playing=false; clearInterval(timer); timer=null;
+  $('btn-play').textContent='Play ▶'; $('btn-play').classList.remove('primary'); }
+
+$('btn-step').onclick=()=>{ stopPlay(); step(); };
+$('btn-play').onclick=()=> playing?stopPlay():startPlay();
+$('btn-reset').onclick=()=>reset(true);
+document.addEventListener('keydown',e=>{
+  if(e.code==='Space'){e.preventDefault(); playing?stopPlay():step();}
+  if(e.key==='r'||e.key==='R') reset(true);
+});
+
+/* build scenario tabs */
+const row=$('scn-row');
+Object.entries(SCENARIOS).forEach(([key,s])=>{
+  const el=document.createElement('div'); el.className='scn'; el.dataset.key=key;
+  el.innerHTML=`<span class="sx-depth">${s.depth.split(' · ')[0]}</span>
+    <div class="sx-no">Scenario ${s.no}</div>
+    <div class="sx-name">${s.name}</div>
+    <div class="sx-desc">${s.label}</div>`;
+  el.onclick=()=>renderScenario(key);
+  row.appendChild(el);
+});
+
+renderScenario('bugfix');
+</script>
+</body>
+</html>
