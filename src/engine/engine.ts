@@ -18,11 +18,13 @@ import type { Decision, ChildPlan } from '../contract/decision.js';
 import type { Artifact, Report } from '../contract/report.js';
 import type { Verdict, Finding } from '../contract/verdict.js';
 import type { EventStore } from '../contract/events.js';
-import type { Brain, BrainContext } from '../contract/brain.js';
+import type { Brain, BrainContext, StepTranscript } from '../contract/brain.js';
 import type { Registry } from '../contract/goal-type.js';
 import type { MemoryView } from '../contract/memory.js';
 import type { RiskClass, SensitivityFact } from '../contract/risk.js';
 import type { PatternStore } from '../contract/pattern.js';
+import type { ToolBroker, ToolDef } from '../contract/tool.js';
+import { GRANT_TOOL_MAP } from '../contract/tool.js';
 import { subdivide, consume } from './budget.js';
 import { lintLibrary } from '../library/constitution.js';
 import { classifyRisk } from '../library/risk.js';
@@ -63,6 +65,13 @@ export interface EngineOptions {
    * derives every split from scratch.
    */
   patterns?: PatternStore;
+  /**
+   * The tool broker that mediates every tool call for tool-granted goal types.
+   * When present and the goal type declares at least one grant that maps to a
+   * known tool, the engine runs the step loop instead of the classic produce
+   * path. When absent the classic produce path always runs.
+   */
+  broker?: ToolBroker;
 }
 
 export class Engine {
@@ -81,6 +90,7 @@ export class Engine {
     | ((goal: Goal, risk: RiskClass) => Promise<'granted' | 'denied'>)
     | undefined;
   private readonly patterns: PatternStore | undefined;
+  private readonly broker: ToolBroker | undefined;
 
   /**
    * Per-run brief handler override. When set (typically by the Listener), it
@@ -138,6 +148,7 @@ export class Engine {
     this.sensitivity = opts.sensitivity ?? [];
     this.onGate = opts.onGate;
     this.patterns = opts.patterns;
+    this.broker = opts.broker;
   }
 
   async run(goal: Goal): Promise<Report> {
@@ -623,9 +634,82 @@ export class Engine {
       const ctx: BrainContext = priorAttempt
         ? { tier, memories: goal.memories, priorAttempt }
         : { tier, memories: goal.memories };
-      const { value: artifact } = await this.brain.produce(goal, ctx);
 
-      // Account for tokens used by this produce call
+      // ── STEP LOOP (tool-granted path) ──────────────────────────────────────
+      // Run the step loop when the goal type has at least one grant that maps to
+      // a known tool AND a broker is configured. Otherwise fall through to the
+      // classic produce path.
+      let artifact: Artifact;
+      let stepLoopTranscriptTail: StepTranscript | undefined;
+
+      if (isToolGranted(typeDef.grants) && this.broker !== undefined) {
+        const loopResult = await this.runStepLoop(goal, typeDef.grants, budget, ctx, priorAttempt);
+
+        if (loopResult.kind === 'artifact') {
+          artifact = loopResult.artifact;
+          budget = loopResult.budget;
+          stepLoopTranscriptTail = loopResult.transcript;
+        } else {
+          // exhausted or thrown — fail into the control loop
+          if (loopResult.kind === 'exhausted') {
+            await this.store.append({
+              type: 'budget-exhausted',
+              at: t(),
+              goalId: goal.id,
+              dimension: 'toolCalls',
+            });
+          }
+          const transcriptArtifact: Artifact = {
+            kind: 'text',
+            text: JSON.stringify(loopResult.transcript ?? []),
+          };
+          const loopVerdict: import('../contract/verdict.js').Verdict = {
+            pass: false,
+            findings: [
+              {
+                title: loopResult.kind === 'exhausted'
+                  ? 'Tool-call budget exhausted in step loop'
+                  : `Step loop failed: ${loopResult.error}`,
+                dimension: 'spec',
+                severity: 'high',
+                gating: true,
+              },
+            ],
+            failureSignature: `step-loop:${loopResult.kind}`,
+          };
+          const resolution = await this.handleFailure(
+            goal,
+            transcriptArtifact,
+            loopVerdict,
+            loopResult.budget,
+            tier,
+            tierIndex,
+            tierLadder,
+            priorAttempt
+              ? priorAttempt
+              : { artifact: transcriptArtifact, verdict: loopVerdict },
+          );
+          if (resolution.kind === 'repaired') {
+            budget = resolution.budget;
+            priorAttempt = { artifact: transcriptArtifact, verdict: loopVerdict };
+            continue;
+          } else if (resolution.kind === 'escalated') {
+            tier = resolution.tier;
+            tierIndex = tierLadder.indexOf(tier);
+            budget = resolution.budget;
+            priorAttempt = { artifact: transcriptArtifact, verdict: loopVerdict };
+            continue;
+          } else {
+            return resolution.report;
+          }
+        }
+      } else {
+        // Classic produce path — byte-identical to the pre-loop behavior
+        const { value: produced } = await this.brain.produce(goal, ctx);
+        artifact = produced;
+      }
+
+      // Account for tokens used by this produce/step-loop call
       {
         const tokensUsed = Math.ceil(JSON.stringify(artifact ?? '').length / 4);
         const tkConsumed = consumeN(budget, 'tokens', tokensUsed);
@@ -864,6 +948,125 @@ export class Engine {
       const report = buildReport(goal, artifact);
       await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
       return report;
+    }
+  }
+
+  /**
+   * Run the engine-owned step loop for a tool-granted leaf. The brain is called
+   * pure per step; the engine gates each step on remaining toolCalls budget,
+   * routes tool calls through the broker, and logs every step and result. Returns
+   * either the final artifact (with updated budget) or a failure descriptor.
+   */
+  private async runStepLoop(
+    goal: Goal,
+    grants: string[],
+    budget: Budget,
+    ctx: BrainContext,
+    _priorAttempt: { artifact: Artifact | null; verdict: Verdict } | undefined,
+  ): Promise<
+    | { kind: 'artifact'; artifact: Artifact; budget: Budget; transcript: StepTranscript }
+    | { kind: 'exhausted'; budget: Budget; transcript: StepTranscript }
+    | { kind: 'failed'; error: string; budget: Budget; transcript: StepTranscript }
+  > {
+    const t = this.now;
+    const tools = deriveToolDefs(grants);
+    const transcript: StepTranscript = [];
+    let remainingToolCalls = budget.toolCalls;
+    let stepIndex = 0;
+
+    // Inject initial context message for the brain
+    transcript.push({
+      role: 'context',
+      content: `${remainingToolCalls} tool calls remaining`,
+    });
+
+    while (true) {
+      // Gate: must have budget for at least one more step before calling the brain
+      if (remainingToolCalls <= 0) {
+        return { kind: 'exhausted', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
+      }
+
+      // Update the context message with the current remaining count (replace last context)
+      const lastMsg = transcript[transcript.length - 1];
+      if (lastMsg && lastMsg.role === 'context') {
+        (transcript[transcript.length - 1] as { role: 'context'; content: string }).content =
+          `${remainingToolCalls} tool calls remaining`;
+      } else {
+        transcript.push({ role: 'context', content: `${remainingToolCalls} tool calls remaining` });
+      }
+
+      let stepOutput: import('../contract/brain.js').StepOutput;
+      try {
+        stepOutput = await this.brain.step(goal, transcript, tools, ctx);
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        return { kind: 'failed', error, budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
+      }
+
+      // Emit step event
+      await this.store.append({
+        type: 'step',
+        at: t(),
+        goalId: goal.id,
+        index: stepIndex,
+        outputKind: stepOutput.kind,
+        usage: stepOutput.usage,
+      });
+      stepIndex++;
+
+      // Emit transport incidents if any
+      if (stepOutput.incidents) {
+        for (const incident of stepOutput.incidents) {
+          await this.store.append({
+            type: incident.kind,
+            at: incident.at,
+            goalId: goal.id,
+            detail: incident.detail,
+          });
+        }
+      }
+
+      if (stepOutput.kind === 'artifact') {
+        return {
+          kind: 'artifact',
+          artifact: stepOutput.artifact,
+          budget: { ...budget, toolCalls: remainingToolCalls },
+          transcript,
+        };
+      }
+
+      // Tool-calls path: append assistant turn to transcript, then route each call
+      transcript.push({
+        role: 'assistant',
+        content: '',
+        toolCalls: stepOutput.calls,
+      });
+
+      for (const call of stepOutput.calls) {
+        const result = await this.broker!.execute(goal, call);
+        remainingToolCalls--;
+
+        // Log the tool-call event
+        await this.store.append({
+          type: 'tool-call',
+          at: t(),
+          goalId: goal.id,
+          tool: call.name,
+          callId: call.id,
+          outcome: result.ok ? 'ran' : 'refused',
+          ...(result.ok ? {} : { reason: result.output }),
+        });
+
+        // Append result to transcript regardless of ok/refusal (refusal is data)
+        transcript.push({
+          role: 'tool',
+          callId: call.id,
+          content: result.output,
+        });
+      }
+
+      // After routing all calls, update remaining in context for next step
+      // (the context message is prepended at the top of the next iteration)
     }
   }
 
@@ -1312,6 +1515,36 @@ export class Engine {
     await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
     return report;
   }
+}
+
+// ── STEP LOOP HELPERS ────────────────────────────────────────────────────────
+
+/**
+ * Whether a goal type's grants include at least one grant that maps to a known
+ * tool in GRANT_TOOL_MAP. This is the predicate that selects the step-loop path.
+ */
+function isToolGranted(grants: string[]): boolean {
+  const allGranted = Object.values(GRANT_TOOL_MAP).flat();
+  return grants.some((g) => allGranted.includes(g as never));
+}
+
+/**
+ * Derive the ToolDef array the brain receives for a step, from the intersection
+ * of the type's grants and GRANT_TOOL_MAP. The brain uses these as a menu of
+ * available tools; the broker's dispatch table is the executor.
+ */
+function deriveToolDefs(grants: string[]): ToolDef[] {
+  const defs: ToolDef[] = [];
+  for (const [toolName, toolGrants] of Object.entries(GRANT_TOOL_MAP)) {
+    if (toolGrants.some((tg) => grants.includes(tg))) {
+      defs.push({
+        name: toolName,
+        description: `Tool: ${toolName}`,
+        parameters: { type: 'object', properties: {}, additionalProperties: true },
+      });
+    }
+  }
+  return defs;
 }
 
 // ── HELPERS ─────────────────────────────────────────────────────────────────

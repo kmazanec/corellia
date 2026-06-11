@@ -1,0 +1,481 @@
+/**
+ * Engine step-loop tests: covers tool-granted goal types running the step loop,
+ * and the regression guarantee that non-tool-granted types are byte-identical to
+ * the pre-loop produce path.
+ */
+
+import { describe, it, expect, vi } from 'vitest';
+import { Engine } from '../../src/engine/engine.js';
+import { ScriptedBrain as SrcScriptedBrain } from '../../src/brains/scripted.js';
+import {
+  MemoryEventStore,
+  NoopMemoryView,
+  buildRegistry,
+  leafTypeDef,
+  makeGoal,
+  textArtifact,
+  filesArtifact,
+  passVerdict,
+  failVerdict,
+  ScriptedBrain as StubScriptedBrain,
+  alwaysFailCheck,
+} from './stubs.js';
+import { FakeBroker } from './stubs.js';
+import type { ToolCall, ToolResult } from '../../src/contract/tool.js';
+import type { StepOutput } from '../../src/contract/brain.js';
+import { ZERO_USAGE } from '../../src/contract/goal.js';
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+/** A GoalTypeDef with tool grants (implement-like). */
+function toolGrantedType(overrides: Partial<Parameters<typeof leafTypeDef>[0]> = {}) {
+  return leafTypeDef({
+    name: 'implement',
+    grants: ['fs.read', 'fs.write'],
+    ...overrides,
+  });
+}
+
+/** A GoalTypeDef with no grants (classic leaf). */
+function noGrantType(overrides: Partial<Parameters<typeof leafTypeDef>[0]> = {}) {
+  return leafTypeDef({ name: 'leaf', grants: [], ...overrides });
+}
+
+/** A minimal ToolCall. */
+function toolCall(id: string, name = 'write_file'): ToolCall {
+  return { id, name, args: { path: 'src/out.ts', content: 'x' } };
+}
+
+// ── Chunk 1: non-tool-granted types unaffected ────────────────────────────────
+
+describe('non-tool-granted types unaffected', () => {
+  it('leaf-satisfy path emits no step or tool events', async () => {
+    const store = new MemoryEventStore();
+    const brain = new StubScriptedBrain().queueProduce(textArtifact('hello'));
+    const registry = buildRegistry([noGrantType()]);
+
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+    });
+    const goal = makeGoal({ type: 'leaf' });
+    const report = await engine.run(goal);
+
+    expect(report.artifact).toEqual(textArtifact('hello'));
+    expect(report.blockers).toHaveLength(0);
+
+    const types = store.types();
+    expect(types).not.toContain('step');
+    expect(types).not.toContain('tool-call');
+  });
+
+  it('non-tool-granted path with a broker present still emits no step/tool events', async () => {
+    const store = new MemoryEventStore();
+    const brain = new StubScriptedBrain().queueProduce(textArtifact('hi'));
+    const registry = buildRegistry([noGrantType()]);
+    const broker = new FakeBroker([]);
+
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      broker,
+    });
+    const goal = makeGoal({ type: 'leaf' });
+    const report = await engine.run(goal);
+
+    expect(report.artifact).toEqual(textArtifact('hi'));
+    expect(store.types()).not.toContain('step');
+    expect(store.types()).not.toContain('tool-call');
+  });
+
+  it('tool-granted type without a broker present falls through to classic produce', async () => {
+    const store = new MemoryEventStore();
+    const brain = new StubScriptedBrain().queueProduce(textArtifact('classic'));
+    const registry = buildRegistry([toolGrantedType()]);
+
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      // no broker
+    });
+    const goal = makeGoal({ type: 'implement' });
+    const report = await engine.run(goal);
+
+    expect(report.artifact).toEqual(textArtifact('classic'));
+    expect(store.types()).not.toContain('step');
+    expect(store.types()).not.toContain('tool-call');
+  });
+});
+
+// ── Chunk 3: multi-step success ────────────────────────────────────────────────
+
+describe('multi-step success', () => {
+  it('artifact emits after exactly the scripted steps; step events logged', async () => {
+    const store = new MemoryEventStore();
+
+    const finalArtifact = filesArtifact([{ path: 'src/out.ts', content: 'done' }]);
+
+    const brain = new SrcScriptedBrain({
+      step: {
+        'build widget': [
+          {
+            kind: 'tool-calls',
+            calls: [toolCall('c1', 'write_file')],
+            usage: ZERO_USAGE,
+          } satisfies StepOutput,
+          {
+            kind: 'tool-calls',
+            calls: [toolCall('c2', 'write_file'), toolCall('c3', 'read_file')],
+            usage: ZERO_USAGE,
+          } satisfies StepOutput,
+          {
+            kind: 'artifact',
+            artifact: finalArtifact,
+            usage: ZERO_USAGE,
+          } satisfies StepOutput,
+        ],
+      },
+    });
+
+    const broker = new FakeBroker([
+      { callId: 'c1', ok: true, output: 'wrote' },
+      { callId: 'c2', ok: true, output: 'wrote2' },
+      { callId: 'c3', ok: true, output: 'content' },
+    ]);
+
+    const registry = buildRegistry([toolGrantedType()]);
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      broker,
+    });
+
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'build widget',
+      budget: { attempts: 3, tokens: 10000, toolCalls: 10, wallClockMs: 60_000 },
+    });
+
+    const report = await engine.run(goal);
+
+    expect(report.artifact).toEqual(finalArtifact);
+    expect(report.blockers).toHaveLength(0);
+
+    const types = store.types();
+    const stepEvents = (await store.list({ type: 'step' }));
+    expect(stepEvents).toHaveLength(3);
+    expect(stepEvents[0]!.type).toBe('step');
+
+    const toolEvents = await store.list({ type: 'tool-call' });
+    expect(toolEvents).toHaveLength(3);
+    expect(types).toContain('emitted');
+  }, 10_000);
+
+  it('artifact-first: zero tool calls, no tool events', async () => {
+    const store = new MemoryEventStore();
+    const finalArtifact = textArtifact('immediate');
+
+    const brain = new SrcScriptedBrain({
+      step: {
+        'immediate goal': [
+          { kind: 'artifact', artifact: finalArtifact, usage: ZERO_USAGE } satisfies StepOutput,
+        ],
+      },
+    });
+
+    const broker = new FakeBroker([]);
+    const registry = buildRegistry([toolGrantedType()]);
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      broker,
+    });
+
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'immediate goal',
+      budget: { attempts: 3, tokens: 10000, toolCalls: 10, wallClockMs: 60_000 },
+    });
+
+    const report = await engine.run(goal);
+    expect(report.artifact).toEqual(finalArtifact);
+    expect(report.blockers).toHaveLength(0);
+
+    const toolEvents = await store.list({ type: 'tool-call' });
+    expect(toolEvents).toHaveLength(0);
+
+    const stepEvents = await store.list({ type: 'step' });
+    expect(stepEvents).toHaveLength(1);
+    expect((stepEvents[0] as { outputKind: string }).outputKind).toBe('artifact');
+  }, 10_000);
+});
+
+// ── Chunk 4: budget gate + remaining-count injection ──────────────────────────
+
+describe('budget gate and remaining-count injection', () => {
+  it('exhaustion mid-loop: halts, logs budget-exhausted, attempt fails into control loop', async () => {
+    const store = new MemoryEventStore();
+    const finalArtifact = textArtifact('never');
+
+    const brain = new SrcScriptedBrain({
+      step: {
+        'budget goal': [
+          { kind: 'tool-calls', calls: [toolCall('c1')], usage: ZERO_USAGE } satisfies StepOutput,
+          { kind: 'tool-calls', calls: [toolCall('c2')], usage: ZERO_USAGE } satisfies StepOutput,
+          { kind: 'artifact', artifact: finalArtifact, usage: ZERO_USAGE } satisfies StepOutput,
+        ],
+      },
+    });
+
+    const broker = new FakeBroker([
+      { callId: 'c1', ok: true, output: 'ok1' },
+      { callId: 'c2', ok: true, output: 'ok2' },
+    ]);
+
+    const registry = buildRegistry([toolGrantedType()]);
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      broker,
+    });
+
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'budget goal',
+      budget: {
+        attempts: 3,
+        tokens: 10000,
+        toolCalls: 1,
+        wallClockMs: 60_000,
+      },
+    });
+
+    const report = await engine.run(goal);
+
+    // Loop should have exhausted and the run should complete (no hang)
+    expect(report.blockers.length).toBeGreaterThan(0);
+
+    const types = store.types();
+    expect(types).toContain('budget-exhausted');
+
+    // Brain.step must not have been called more than the gate allows
+    const stepEvents = await store.list({ type: 'step' });
+    expect(stepEvents.length).toBeLessThanOrEqual(2);
+  }, 10_000);
+
+  it('exactly one debit per call: remaining == budget.toolCalls - N after N calls', async () => {
+    const store = new MemoryEventStore();
+    const finalArtifact = textArtifact('done');
+
+    const capturedRemaining: number[] = [];
+
+    // Use a custom scripted brain that captures ctx
+    const callsPerStep: ToolCall[][] = [
+      [toolCall('c1')],
+      [toolCall('c2')],
+    ];
+    let stepIndex = 0;
+    const stepsArr: StepOutput[] = [
+      { kind: 'tool-calls', calls: [toolCall('c1')], usage: ZERO_USAGE },
+      { kind: 'tool-calls', calls: [toolCall('c2')], usage: ZERO_USAGE },
+      { kind: 'artifact', artifact: finalArtifact, usage: ZERO_USAGE },
+    ];
+
+    const captureBrain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair() { throw new Error('not used'); },
+      async step(_goal, transcript, _tools, _ctx) {
+        // Look for the remaining count in the transcript context messages
+        const contextMsgs = transcript.filter(m => m.role === 'context');
+        const lastCtx = contextMsgs[contextMsgs.length - 1];
+        if (lastCtx && 'content' in lastCtx) {
+          const match = /(\d+) tool calls? remaining/.exec(lastCtx.content);
+          if (match) capturedRemaining.push(parseInt(match[1]!, 10));
+        }
+        const out = stepsArr[stepIndex++];
+        if (!out) throw new Error('no more steps');
+        return out;
+      },
+    };
+
+    const broker = new FakeBroker([
+      { callId: 'c1', ok: true, output: 'ok' },
+      { callId: 'c2', ok: true, output: 'ok' },
+    ]);
+
+    const registry = buildRegistry([toolGrantedType()]);
+    const engine = new Engine({
+      registry,
+      brain: captureBrain,
+      store,
+      memory: new NoopMemoryView(),
+      broker,
+    });
+
+    const budget = 10;
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'remaining test',
+      budget: { attempts: 3, tokens: 10000, toolCalls: budget, wallClockMs: 60_000 },
+    });
+
+    const report = await engine.run(goal);
+    expect(report.blockers).toHaveLength(0);
+
+    // After 2 calls, step 3 should see budget - 2
+    expect(capturedRemaining[0]).toBe(budget);
+    expect(capturedRemaining[1]).toBe(budget - 1);
+    expect(capturedRemaining[2]).toBe(budget - 2);
+  }, 10_000);
+});
+
+// ── Chunk 5: refusal recovery ─────────────────────────────────────────────────
+
+describe('refusal recovery', () => {
+  it('broker refusal appended to transcript; next step sees it; run completes', async () => {
+    const store = new MemoryEventStore();
+    const finalArtifact = textArtifact('recovered');
+    const capturedTranscripts: import('../../src/contract/brain.js').StepTranscript[] = [];
+
+    let stepIdx = 0;
+    const stepsArr: StepOutput[] = [
+      { kind: 'tool-calls', calls: [toolCall('r1')], usage: ZERO_USAGE },
+      { kind: 'artifact', artifact: finalArtifact, usage: ZERO_USAGE },
+    ];
+
+    const captureBrain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair() { throw new Error('not used'); },
+      async step(_goal, transcript) {
+        capturedTranscripts.push([...transcript]);
+        const out = stepsArr[stepIdx++];
+        if (!out) throw new Error('no more steps');
+        return out;
+      },
+    };
+
+    const broker = new FakeBroker([
+      { callId: 'r1', ok: false, output: 'permission denied' },
+    ]);
+
+    const registry = buildRegistry([toolGrantedType()]);
+    const engine = new Engine({
+      registry,
+      brain: captureBrain,
+      store,
+      memory: new NoopMemoryView(),
+      broker,
+    });
+
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'refusal goal',
+      budget: { attempts: 3, tokens: 10000, toolCalls: 10, wallClockMs: 60_000 },
+    });
+
+    const report = await engine.run(goal);
+    expect(report.artifact).toEqual(finalArtifact);
+    expect(report.blockers).toHaveLength(0);
+
+    // The second step's transcript must contain a tool result for r1 (the refusal)
+    const secondTranscript = capturedTranscripts[1];
+    expect(secondTranscript).toBeDefined();
+    const toolMsg = secondTranscript!.find(m => m.role === 'tool' && (m as { callId: string }).callId === 'r1');
+    expect(toolMsg).toBeDefined();
+
+    // Tool-call event logged for the refusal
+    const toolEvents = await store.list({ type: 'tool-call' });
+    expect(toolEvents.length).toBeGreaterThan(0);
+    const refusalEvent = toolEvents.find(e => (e as { callId: string }).callId === 'r1');
+    expect(refusalEvent).toBeDefined();
+    expect((refusalEvent as { outcome: string }).outcome).toBe('refused');
+  }, 10_000);
+});
+
+// ── Chunk 6: failed loop attempt escalates carrying transcript tail ─────────────
+
+describe('failed-loop attempt escalates carrying transcript tail', () => {
+  it('artifact failing deterministic check feeds handleFailure; repair or escalate fires', async () => {
+    const store = new MemoryEventStore();
+
+    const badArtifact = textArtifact('bad');
+    const goodArtifact = textArtifact('good');
+
+    let stepIdx = 0;
+    const stepsArr: StepOutput[] = [
+      // First attempt: artifact fails deterministic check
+      { kind: 'artifact', artifact: badArtifact, usage: ZERO_USAGE },
+      // Second attempt after repair/escalation: good artifact
+      { kind: 'artifact', artifact: goodArtifact, usage: ZERO_USAGE },
+    ];
+
+    let detCheckCalls = 0;
+    const flakyCheck: import('../../src/contract/goal-type.js').DeterministicCheck = {
+      name: 'flaky',
+      async run() {
+        detCheckCalls++;
+        if (detCheckCalls <= 1) return { ok: false, detail: 'bad output' };
+        return { ok: true, detail: '' };
+      },
+    };
+
+    const captureBrain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair(_goal, artifact) {
+        return { value: goodArtifact, usage: ZERO_USAGE };
+      },
+      async step(_goal, transcript) {
+        const out = stepsArr[stepIdx++];
+        if (!out) throw new Error('no more steps');
+        return out;
+      },
+    };
+
+    const broker = new FakeBroker([]);
+
+    const registry = buildRegistry([toolGrantedType({
+      deterministic: [flakyCheck],
+    })]);
+    const engine = new Engine({
+      registry,
+      brain: captureBrain,
+      store,
+      memory: new NoopMemoryView(),
+      broker,
+    });
+
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'escalate goal',
+      budget: { attempts: 5, tokens: 10000, toolCalls: 10, wallClockMs: 60_000 },
+    });
+
+    const report = await engine.run(goal);
+    // Should have succeeded via repair path
+    expect(report.blockers).toHaveLength(0);
+
+    const types = store.types();
+    // Either repair-applied or tier-escalated should have fired
+    const repaired = types.includes('repair-applied');
+    const escalated = types.includes('tier-escalated');
+    expect(repaired || escalated).toBe(true);
+  }, 10_000);
+});

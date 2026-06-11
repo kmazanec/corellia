@@ -7,12 +7,42 @@ import type { Goal, MemoryPointer, Metered } from '../../src/contract/goal.js';
 import { ZERO_USAGE } from '../../src/contract/goal.js';
 import type { Decision } from '../../src/contract/decision.js';
 import type { Artifact, Report } from '../../src/contract/report.js';
-import type { ToolDef } from '../../src/contract/tool.js';
+import type { ToolBroker, ToolCall, ToolDef, ToolResult } from '../../src/contract/tool.js';
 import type { Verdict } from '../../src/contract/verdict.js';
 import type { FactoryEvent, EventStore } from '../../src/contract/events.js';
 import type { Brain, BrainContext, StepOutput, StepTranscript } from '../../src/contract/brain.js';
 import type { DeterministicCheck, GoalTypeDef, Registry } from '../../src/contract/goal-type.js';
 import type { MemoryView } from '../../src/contract/memory.js';
+
+// ── FakeBroker ────────────────────────────────────────────────────────────
+
+/**
+ * A scripted ToolBroker test double. Returns scripted ToolResults in the order
+ * they were provided; the last result repeats once the list is exhausted.
+ * Records every call for assertion. Never imports the real broker.
+ */
+export class FakeBroker implements ToolBroker {
+  private readonly results: ToolResult[];
+  private callCount = 0;
+  readonly calls: Array<{ goal: Goal; call: ToolCall }> = [];
+
+  constructor(results: ToolResult[]) {
+    this.results = results;
+  }
+
+  async execute(goal: Goal, call: ToolCall): Promise<ToolResult> {
+    this.calls.push({ goal, call });
+    const idx = Math.min(this.callCount, this.results.length - 1);
+    this.callCount++;
+    const result = this.results[idx];
+    if (result === undefined) {
+      // No scripted results — return a refusal
+      return { callId: call.id, ok: false, output: 'FakeBroker: no scripted result' };
+    }
+    // Return the scripted result, but use the actual call's id for correlation
+    return { ...result, callId: call.id };
+  }
+}
 
 // ── EventStore stub ───────────────────────────────────────────────────────
 
