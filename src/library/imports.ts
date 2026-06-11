@@ -49,6 +49,13 @@ export interface ScanOptions {
   sha?: string;
   /** Max file size in bytes to scan; files above this are skipped. Default: 512 KiB. */
   maxFileBytes?: number;
+  /**
+   * Additional directory names to skip during the file-tree walk (opt-in).
+   * Use this to exclude build-output directories (e.g. ['dist', 'build', '.next'])
+   * when you are confident they contain no hand-written source files.
+   * The default skip set is {'node_modules', '.git'} only.
+   */
+  extraSkipDirs?: string[];
 }
 
 // ── Per-language import pattern table (auditable) ─────────────────────────────
@@ -114,7 +121,7 @@ const TEXT_EXTENSIONS = new Set([
   '.sql',
 ]);
 
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.cache', '.next', '.nuxt']);
+const DEFAULT_SKIP_DIRS = new Set(['node_modules', '.git']);
 
 const DEFAULT_MAX_FILE_BYTES = 512 * 1024; // 512 KiB
 
@@ -302,7 +309,7 @@ function normalizeSpecifier(specifier: string, fileExt: string): string {
  * Recursively collect all scannable files under root, skipping excluded dirs.
  * Returns repo-relative paths, sorted for determinism.
  */
-function collectFiles(root: string, maxBytes: number): string[] {
+function collectFiles(root: string, maxBytes: number, extraSkipDirs: Set<string>): string[] {
   const results: string[] = [];
 
   function walk(dir: string): void {
@@ -313,7 +320,7 @@ function collectFiles(root: string, maxBytes: number): string[] {
       return;
     }
     for (const name of entries) {
-      if (SKIP_DIRS.has(name)) continue;
+      if (DEFAULT_SKIP_DIRS.has(name) || extraSkipDirs.has(name)) continue;
       const abs = join(dir, name);
       let st;
       try {
@@ -369,7 +376,8 @@ function readGitSha(root: string): string | null {
  */
 export function scanImports(root: string, opts: ScanOptions = {}): ImportGraph {
   const maxBytes = opts.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
-  const files = collectFiles(root, maxBytes);
+  const extraSkipDirs = new Set(opts.extraSkipDirs ?? []);
+  const files = collectFiles(root, maxBytes, extraSkipDirs);
 
   const rawEdges: ImportEdge[] = [];
 
@@ -462,7 +470,8 @@ function isTestFile(relPath: string): boolean {
  * - Cycle-safe: visited set prevents infinite loops.
  * - Test files are identified by: naming convention (f.test.ts, f.spec.ts) OR
  *   being a test-directory file that transitively imports one of the impacted files.
- * - `files` includes the queried files themselves if they appear in the graph;
+ * - `files` includes the queried files themselves (the seed files) if they appear in the
+ *   graph as either `from` or `to` — this is intentional over-inclusion per ADR-020;
  *   unknown files (not in the graph as either `from` or `to`) return empty results.
  * - Output is deterministically sorted.
  */

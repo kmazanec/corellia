@@ -445,6 +445,77 @@ describe('AC-6: Exclusions, file-size guard, no throws on weird input', () => {
   });
 });
 
+// ── FIX-1: source files under build/ dir are scanned by default ──────────────
+
+describe('FIX-1: default skip set is node_modules + .git only', () => {
+  it('scans a source file under a dir named build/', () => {
+    const root = makeTmp();
+    write(root, 'src/a.ts', `export const a = 1;`);
+    write(root, 'build/x.ts', `import { a } from '../src/a.js';`);
+
+    const graph = scanImports(root, { sha: 'test-sha' });
+    expect(graph.edges).toContainEqual({ from: 'build/x.ts', to: 'src/a.ts' });
+  });
+
+  it('skips build/ when listed in extraSkipDirs', () => {
+    const root = makeTmp();
+    write(root, 'src/a.ts', `export const a = 1;`);
+    write(root, 'build/x.ts', `import { a } from '../src/a.js';`);
+
+    const graph = scanImports(root, { sha: 'test-sha', extraSkipDirs: ['build'] });
+    const fromBuild = graph.edges.filter(e => e.from.startsWith('build/'));
+    expect(fromBuild).toHaveLength(0);
+  });
+});
+
+// ── FIX: multiline / re-export / side-effect import forms ────────────────────
+
+describe('static import edge cases pinned by spec', () => {
+  it('resolves a multiline import (import {\\n a,\\n b\\n} from "./x")', () => {
+    const root = makeTmp();
+    write(root, 'src/x.ts', `export const a = 1; export const b = 2;`);
+    write(root, 'src/consumer.ts', `import {\n  a,\n  b\n} from './x.js';`);
+
+    const graph = scanImports(root, { sha: 'test-sha' });
+    expect(graph.edges).toContainEqual({ from: 'src/consumer.ts', to: 'src/x.ts' });
+  });
+
+  it('produces an edge for export * from "./y"', () => {
+    const root = makeTmp();
+    write(root, 'src/y.ts', `export const y = 1;`);
+    write(root, 'src/barrel.ts', `export * from './y.js';`);
+
+    const graph = scanImports(root, { sha: 'test-sha' });
+    expect(graph.edges).toContainEqual({ from: 'src/barrel.ts', to: 'src/y.ts' });
+  });
+
+  it('produces an edge for a side-effect import ("import \'./z\'")', () => {
+    const root = makeTmp();
+    write(root, 'src/z.ts', `console.log('side effect');`);
+    write(root, 'src/main.ts', `import './z.js';`);
+
+    const graph = scanImports(root, { sha: 'test-sha' });
+    expect(graph.edges).toContainEqual({ from: 'src/main.ts', to: 'src/z.ts' });
+  });
+});
+
+// ── impact() negative assertion: unrelated file absent from files ─────────────
+
+describe('impact() negative: unrelated file not in result', () => {
+  it('an unrelated file is absent from impact().files', () => {
+    const root = makeTmp();
+    write(root, 'src/a.ts', `export const a = 1;`);
+    write(root, 'src/b.ts', `import { a } from './a.js';`);
+    write(root, 'src/unrelated.ts', `export const unrelated = 42;`);
+
+    const graph = scanImports(root, { sha: 'test-sha' });
+    const result = impact(graph, ['src/a.ts']);
+
+    // unrelated.ts imports nothing and is imported by nothing in this chain
+    expect(result.files).not.toContain('src/unrelated.ts');
+  });
+});
+
 // ── Cycle safety ──────────────────────────────────────────────────────────────
 
 describe('Cycle safety', () => {
