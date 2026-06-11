@@ -314,7 +314,7 @@ function translateStepResponse(
       let args: Record<string, unknown>;
       try {
         args = JSON.parse(wc.function.arguments) as Record<string, unknown>;
-      } catch (e) {
+      } catch (_e) {
         return null;
       }
       if (typeof args !== 'object' || args === null || Array.isArray(args)) {

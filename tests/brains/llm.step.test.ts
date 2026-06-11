@@ -719,3 +719,197 @@ describe('step terminal errors', () => {
     expect((err as Error).message).toContain('401');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Chunk 6: Pinned edge-case behaviors (T1, T2a, T2b, T3)
+// ---------------------------------------------------------------------------
+
+describe('step re-prompt transport error is one-shot (T1)', () => {
+  it('throws immediately on 503 during the corrective re-prompt — no retries on re-prompt path', async () => {
+    // First fetch: malformed tool_calls (triggers re-prompt path).
+    // Second fetch (the re-prompt): returns 503.
+    // Documented decision: the corrective re-prompt is one-shot — no retry loop.
+    const malformedBody = {
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'c1',
+                type: 'function',
+                function: { name: 'read_file', arguments: 'NOT VALID JSON {{{' },
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const fakeSleep = vi.fn(async (_ms: number) => {});
+    const { fetch, calls } = stubFetch(
+      { status: 200, body: malformedBody },
+      errorResponse(503, 'service unavailable'),
+    );
+    const brain = new LlmBrain({ baseUrl: BASE, apiKey: KEY, modelByTier, fetchImpl: fetch, sleepFn: fakeSleep });
+
+    await expect(
+      brain.step(baseGoal, [{ role: 'context', content: 'sys' }], tools, ctx),
+    ).rejects.toThrow(/503/);
+
+    // Exactly 2 calls: the initial malformed call + the one-shot re-prompt.
+    // No third call (no retry of the re-prompt).
+    expect(calls).toHaveLength(2);
+    // No backoff sleep on the re-prompt path.
+    expect(fakeSleep).not.toHaveBeenCalled();
+  });
+
+  it('throws immediately on 429 during the corrective re-prompt — no retries on re-prompt path', async () => {
+    const malformedBody = {
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'c1',
+                type: 'function',
+                function: { name: 'read_file', arguments: '{bad' },
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const fakeSleep = vi.fn(async (_ms: number) => {});
+    const { fetch, calls } = stubFetch(
+      { status: 200, body: malformedBody },
+      errorResponse(429, 'rate limited'),
+    );
+    const brain = new LlmBrain({ baseUrl: BASE, apiKey: KEY, modelByTier, fetchImpl: fetch, sleepFn: fakeSleep });
+
+    await expect(
+      brain.step(baseGoal, [{ role: 'context', content: 'sys' }], tools, ctx),
+    ).rejects.toThrow(/429/);
+
+    expect(calls).toHaveLength(2);
+    expect(fakeSleep).not.toHaveBeenCalled();
+  });
+});
+
+describe('step empty tool_calls array takes artifact path (T2a)', () => {
+  it('returns artifact (text) when response has tool_calls: [] — empty array bypasses tool-call branch', async () => {
+    // Pin the actual behavior: tool_calls present but empty → falls through to content path.
+    // content is null → empty string → no file blocks → artifact.kind === 'text' with text === ''.
+    const wireBody = {
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [],
+          },
+        },
+      ],
+    };
+
+    const { fetch } = stubFetch({ status: 200, body: wireBody });
+    const brain = new LlmBrain({ baseUrl: BASE, apiKey: KEY, modelByTier, fetchImpl: fetch });
+    const result = await brain.step(baseGoal, [{ role: 'context', content: 'sys' }], tools, ctx);
+
+    // Pinned behavior: empty tool_calls[] → artifact path.
+    expect(result.kind).toBe('artifact');
+    if (result.kind !== 'artifact') throw new Error('unreachable');
+    // No file blocks in empty content → text artifact.
+    expect(result.artifact.kind).toBe('text');
+    if (result.artifact.kind !== 'text') throw new Error('unreachable');
+    // Content is null on the wire → '' after null-coalesce.
+    expect(result.artifact.text).toBe('');
+  });
+});
+
+describe('step response with both content and tool_calls drops prose (T2b)', () => {
+  it('returns kind:tool-calls and drops prose content when response has both content and non-empty tool_calls', async () => {
+    // Pin the actual behavior: tool_calls branch is taken first; prose content field is ignored.
+    const wireBody = {
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: 'Here is my reasoning about which files to read.',
+            tool_calls: [
+              {
+                id: 'tc-1',
+                type: 'function',
+                function: { name: 'read_file', arguments: JSON.stringify({ path: 'src/main.ts' }) },
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const { fetch } = stubFetch({ status: 200, body: wireBody });
+    const brain = new LlmBrain({ baseUrl: BASE, apiKey: KEY, modelByTier, fetchImpl: fetch });
+    const result = await brain.step(baseGoal, [{ role: 'context', content: 'sys' }], tools, ctx);
+
+    // Pinned behavior: tool_calls branch wins; kind is tool-calls.
+    expect(result.kind).toBe('tool-calls');
+    if (result.kind !== 'tool-calls') throw new Error('unreachable');
+    expect(result.calls).toHaveLength(1);
+    expect(result.calls[0]!.id).toBe('tc-1');
+    expect(result.calls[0]!.name).toBe('read_file');
+    // The prose content string is not present anywhere in the output.
+    expect(JSON.stringify(result)).not.toContain('reasoning about which files');
+  });
+});
+
+describe('step network-rejection retry leg succeeds after two rejections (T3)', () => {
+  it('succeeds when fetchImpl rejects twice then resolves, records 2 transport-retry incidents and invokes sleepFn twice', async () => {
+    const delays: number[] = [];
+    const fakeSleep = async (ms: number) => { delays.push(ms); };
+
+    let callCount = 0;
+    const networkError = Object.assign(new Error('network timeout'), { name: 'NetworkError' });
+    const successBody = contentResponse('done after retries');
+
+    const rejectingFetch = vi.fn(async (_url: string | URL | Request, _opts?: RequestInit) => {
+      callCount++;
+      if (callCount <= 2) {
+        throw networkError;
+      }
+      return new Response(JSON.stringify(successBody), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    const brain = new LlmBrain({
+      baseUrl: BASE,
+      apiKey: KEY,
+      modelByTier,
+      fetchImpl: rejectingFetch,
+      sleepFn: fakeSleep,
+    });
+
+    const result = await brain.step(baseGoal, [{ role: 'context', content: 'sys' }], tools, ctx);
+
+    // Step should succeed after the two rejections.
+    expect(result.kind).toBe('artifact');
+
+    // Exactly 2 transport-retry incidents on the envelope.
+    expect(result.incidents).toHaveLength(2);
+    expect(result.incidents!.every((i) => i.kind === 'transport-retry')).toBe(true);
+
+    // Backoff sleep was requested for each retry.
+    expect(delays).toHaveLength(2);
+    expect(delays[0]!).toBeGreaterThan(0);
+    expect(delays[1]!).toBeGreaterThan(0);
+
+    // fetchImpl was called exactly 3 times (2 rejections + 1 success).
+    expect(callCount).toBe(3);
+  });
+});
