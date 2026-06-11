@@ -116,4 +116,9 @@ export const GRANT_TOOL_MAP = {
   search: ['fs.read'],
   write_file: ['fs.write'],
   run_script: ['test.run_scoped', 'test.run_impacted'],
+  find_symbol: ['retrieval.api', 'fs.read'],
+  find_exemplar: ['retrieval.api', 'fs.read'],
+  conventions_for: ['retrieval.api', 'fs.read'],
+  stack_versions: ['retrieval.api', 'fs.read'],
+  impact: ['retrieval.api', 'fs.read'],
 } as const satisfies Record<string, readonly string[]>;

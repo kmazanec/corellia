@@ -173,6 +173,9 @@ export function traceStats(events: FactoryEvent[]): Record<string, GoalTypeStats
       case 'ceiling-reached':
       case 'transport-retry':
       case 'malformation-reprompt':
+      case 'knowledge-written':
+      case 'knowledge-facts-written':
+      case 'knowledge-checked':
         break;
     }
   }
@@ -299,6 +302,9 @@ export function costSummary(events: FactoryEvent[]): CostSummary {
       case 'ceiling-reached':
       case 'transport-retry':
       case 'malformation-reprompt':
+      case 'knowledge-written':
+      case 'knowledge-facts-written':
+      case 'knowledge-checked':
         break;
     }
   }

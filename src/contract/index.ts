@@ -17,3 +17,4 @@ export { GRANT_TOOL_MAP } from './tool.js';
 export type { MemoryView } from './memory.js';
 export type { SplitMemo, PatternStore } from './pattern.js';
 export type { RiskClass, SensitivityFact } from './risk.js';
+export type { KnowledgeCategory, KnowledgePointer, KnowledgeArtifact, DiveFact, RegionFacts } from './knowledge.js';

@@ -10,6 +10,7 @@ import type { Decision, DecisionBrief } from './decision.js';
 import type { Report } from './report.js';
 import type { Verdict } from './verdict.js';
 import type { RiskClass } from './risk.js';
+import type { KnowledgeArtifact, KnowledgeCategory, RegionFacts } from './knowledge.js';
 
 /**
  * One thing that happened in the factory. A discriminated union on `type`; every
@@ -74,7 +75,13 @@ export type FactoryEvent =
   /** A bounded transport retry fired on a provider failure (not attempt-consuming). */
   | { type: 'transport-retry'; at: number; goalId: string; detail: string }
   /** A single corrective re-prompt fired on malformed model output. */
-  | { type: 'malformation-reprompt'; at: number; goalId: string; detail: string };
+  | { type: 'malformation-reprompt'; at: number; goalId: string; detail: string }
+  /** A knowledge artifact was produced and appended — project memory's write path (ADR-019). */
+  | { type: 'knowledge-written'; at: number; goalId: string; artifact: KnowledgeArtifact }
+  /** A deep-dive's anchored region facts were appended — keeps dive output evented (ADR-003/ADR-019). */
+  | { type: 'knowledge-facts-written'; at: number; goalId: string; facts: RegionFacts }
+  /** A consumer ran the checkpoint freshness check on an artifact (verify-on-read, ADR-019). */
+  | { type: 'knowledge-checked'; at: number; goalId: string; repoRoot: string; category: KnowledgeCategory; sha: string; outcome: 'fresh' | 'stale-validated' | 'invalid' };
 
 /**
  * The append-only event store. The append is the serialization point — the
