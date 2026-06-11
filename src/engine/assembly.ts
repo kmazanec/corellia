@@ -40,6 +40,7 @@ import {
   type ArchScanFn,
   type ScanEdge,
 } from '../library/knowledge-checks.js';
+import { extractArtifactPayload } from '../library/knowledge-checks.js';
 import { writeKnowledge, writeRegionFacts } from '../library/knowledge.js';
 import {
   coverageCheck,
@@ -410,11 +411,12 @@ async function persistLearnArtifact(
   if (!registry.has(goal.type)) return;
   const def = registry.get(goal.type);
   if (def.kind !== 'learn') return;
-  if (artifact.kind !== 'text' || !artifact.text) return;
+  const payload = extractArtifactPayload(artifact);
+  if (payload === null || payload.length === 0) return;
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(artifact.text);
+    parsed = JSON.parse(payload);
   } catch {
     return;
   }

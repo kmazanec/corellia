@@ -159,7 +159,7 @@ const diveRegion = pickDiveRegion(targetRepo);
 const DEFAULT_BUDGET = {
   attempts: 3,
   tokens: 500_000,
-  toolCalls: 30,
+  toolCalls: 40,
   wallClockMs: 600_000,
 };
 
@@ -185,7 +185,7 @@ function mapGoal(category: KnowledgeCategory): Goal {
             ? `For stack, point at the manifest; encode version claims in a pointer note as "version:<name>@<version>". `
             : category === 'conventions'
               ? `For conventions, point at exemplar files that demonstrate the project's conventions. `
-              : `For test-scaffold, include a pointer whose note contains "script:test"; the declared test script will be run to validate. `),
+              : `For test-scaffold, read package.json, run the test script AT MOST ONCE via run_script, then emit immediately; include a pointer whose note contains "script:test". Never repeat a tool call you already made. `),
     },
     intent: 'production',
     scope: [],
@@ -204,7 +204,7 @@ function diveGoal(region: string): Goal {
       repoRoot: targetRepo,
       region,
       description:
-        `Deep-dive the region "${region}". Be economical: read AT MOST 5 files; 4-8 strong facts beat ` +
+        `Deep-dive the region "${region}". Be economical: list the region once, read AT MOST 5 files, then emit immediately; never repeat a tool call you already made; 4-8 strong facts beat ` +
         `an exhaustive sweep. Your final message must be the raw JSON object only — no code fences, no prose. ` +
         `Emit RegionFacts as JSON: { repoRoot, region: "${region}", ` +
         `generatedAtSha (current HEAD), facts: [{ claim, anchors: [{path, line}], sha, confidence }] }. ` +

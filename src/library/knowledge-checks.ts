@@ -36,6 +36,26 @@ import { runScriptCheck } from './checks.js';
  * Failures surface as check failures — not thrown exceptions — so the gate
  * stays deterministic and never crashes the engine loop.
  */
+/**
+ * Extract the textual payload from an artifact, tolerating the two packagings
+ * models actually produce: plain text (optionally fence-wrapped) and a
+ * single-file `files` artifact (the adapter parses a fenced block into one).
+ * Returns null when the artifact has no single textual payload.
+ */
+export function extractArtifactPayload(artifact: Artifact): string | null {
+  let text: string;
+  if (artifact.kind === 'text') {
+    text = artifact.text ?? '';
+  } else if (artifact.kind === 'files' && (artifact.files?.length ?? 0) === 1) {
+    text = artifact.files?.[0]?.content ?? '';
+  } else {
+    return null;
+  }
+  const fenced = text.match(/^\s*```[a-zA-Z]*\s*\n([\s\S]*?)\n?```\s*$/);
+  if (fenced?.[1] !== undefined) text = fenced[1];
+  return text.trim();
+}
+
 function parseArtifactJson(artifact: Artifact | null): { ok: true; value: unknown } | { ok: false; detail: string } {
   if (artifact === null) {
     return { ok: false, detail: 'No artifact was produced.' };
@@ -44,18 +64,10 @@ function parseArtifactJson(artifact: Artifact | null): { ok: true; value: unknow
   // adapter's file-block parser turns into a single-file `files` artifact.
   // Both forms carry the same payload; accept either rather than failing a
   // valid artifact on packaging.
-  let text: string;
-  if (artifact.kind === 'text') {
-    text = artifact.text ?? '';
-  } else if (artifact.kind === 'files' && artifact.files.length === 1) {
-    text = artifact.files[0]?.content ?? '';
-  } else {
+  const text = extractArtifactPayload(artifact);
+  if (text === null) {
     return { ok: false, detail: `Expected a text artifact (or one fenced block); got kind "${artifact.kind}".` };
   }
-  // Strip a surrounding markdown fence (```json ... ``` or ``` ... ```).
-  const fenced = text.match(/^\s*```[a-zA-Z]*\s*\n([\s\S]*?)\n?```\s*$/);
-  if (fenced?.[1] !== undefined) text = fenced[1];
-  text = text.trim();
   if (text.length === 0) {
     return { ok: false, detail: 'Artifact text is empty.' };
   }
