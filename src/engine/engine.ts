@@ -29,6 +29,13 @@ import { subdivide, consume } from './budget.js';
 import { lintLibrary } from '../library/constitution.js';
 import { classifyRisk } from '../library/risk.js';
 import { specShape } from '../flywheel/shape.js';
+import type { CheckContext } from '../contract/goal-type.js';
+import {
+  openSandboxAssembly,
+  type SandboxConfig,
+  type SandboxAssembly,
+} from './assembly.js';
+import { diffWithinScope, collectTree, preserveTree } from './worktree.js';
 
 /**
  * Per-tree spend ceiling default (learning phase, ADR-017).
@@ -109,6 +116,16 @@ export interface EngineOptions {
    * path. When absent the classic produce path always runs.
    */
   broker?: ToolBroker;
+  /**
+   * Optional sandbox/assembly configuration (ADR-016). When present the tree
+   * ROOT opens a git worktree against `repoRoot`, constructs ONE broker bound
+   * to that worktree (core file tools + run_script over the declared scripts),
+   * uses it for the whole tree, feeds executing deterministic checks their
+   * CheckContext, enforces diff ⊆ scope at the root's emission, and collects
+   * (success) or preserves (failure/block) the worktree at tree end. When
+   * absent, behavior is byte-identical to a plain run.
+   */
+  sandbox?: SandboxConfig;
 }
 
 export class Engine {
@@ -128,6 +145,29 @@ export class Engine {
     | undefined;
   private readonly patterns: PatternStore | undefined;
   private readonly broker: ToolBroker | undefined;
+  private readonly sandbox: SandboxConfig | undefined;
+
+  /**
+   * The composed sandbox assembly for the in-flight tree, set by run() at the
+   * root when a SandboxConfig is present and cleared in the finally. While set,
+   * it supplies the tree-scoped broker (overriding EngineOptions.broker) and the
+   * per-goal CheckContext factory; absent, the engine uses the plain broker.
+   */
+  private _activeAssembly: SandboxAssembly | undefined = undefined;
+
+  /** The broker the step loop should use: the assembly's beats the plain option. */
+  private get effectiveBroker(): ToolBroker | undefined {
+    return this._activeAssembly?.broker ?? this.broker;
+  }
+
+  /**
+   * The CheckContext an executing deterministic check receives for `goalId`.
+   * Undefined when no sandbox is active — artifact-only checks ignore it and a
+   * runScriptCheck fails safe with "no exec context" exactly as before.
+   */
+  private checkContextFor(goalId: string): CheckContext | undefined {
+    return this._activeAssembly?.checkContextFor(goalId);
+  }
 
   /**
    * Per-run brief handler override. When set (typically by the Listener), it
@@ -186,12 +226,66 @@ export class Engine {
     this.onGate = opts.onGate;
     this.patterns = opts.patterns;
     this.broker = opts.broker;
+    this.sandbox = opts.sandbox;
   }
 
   async run(goal: Goal): Promise<Report> {
     const ceilingUsd = goal.spendCeilingUsd ?? DEFAULT_SPEND_CEILING_USD;
     const treeState: TreeState = { spentUsd: 0, ceilingUsd };
-    return this._run(goal, treeState);
+
+    // No sandbox configured → byte-identical to a plain run: no worktree, no
+    // assembly, no new events.
+    if (this.sandbox === undefined) {
+      return this._run(goal, treeState);
+    }
+
+    // Sandboxed tree (ADR-016): only the ROOT opens the worktree and constructs
+    // the one broker the whole tree shares. The assembly is torn down — collect
+    // on success, preserve on failure/block — in the finally, always exactly one.
+    const assembly = await openSandboxAssembly(
+      this.sandbox,
+      goal.id,
+      this.registry,
+      this.store,
+      this.now,
+    );
+    this._activeAssembly = assembly;
+    let report: Report | undefined;
+    try {
+      report = await this._run(goal, treeState);
+
+      // ── EMISSION diff ⊆ scope (tree-level, AC-6) ──────────────────────────
+      // The worktree is shared by the whole tree, so a per-leaf diff check would
+      // see siblings' work. The sound v1 enforcement is at the TREE ROOT's
+      // emission against the ROOT goal's scope: the worktree's total diff must
+      // fall within the root goal's declared scope. (Per-leaf scope stays
+      // enforced by the broker's write_file check and the filesWithinScope
+      // deterministic check on each leaf's artifact.) A violation downgrades a
+      // would-be success to a scope-insufficiency block and preserves the tree.
+      if (report.blockers.length === 0) {
+        const diff = diffWithinScope(assembly.worktree.root, goal.scope);
+        if (!diff.ok) {
+          report = blockedReport(
+            `Scope insufficiency at tree emission: ${diff.scopeInsufficiency ?? 'diff exceeds declared scope'}`,
+          );
+          await this.store.append({ type: 'emitted', at: this.now(), goalId: goal.id, report });
+        }
+      }
+      return report;
+    } finally {
+      const failedOrBlocked =
+        report === undefined || report.blockers.length > 0;
+      if (failedOrBlocked) {
+        const reason =
+          report === undefined
+            ? 'tree threw before producing a report'
+            : `tree blocked: ${report.blockers[0] ?? 'unknown'}`;
+        await preserveTree(assembly.worktree, this.store, reason);
+      } else {
+        await collectTree(assembly.worktree, this.store);
+      }
+      this._activeAssembly = undefined;
+    }
   }
 
   private async _run(goal: Goal, treeState: TreeState): Promise<Report> {
@@ -773,7 +867,7 @@ export class Engine {
       // it travels through every priorAttempt assignment that follows.
       let stepLoopTailFinding: import('../contract/verdict.js').Finding | null = null;
 
-      if (isToolGranted(typeDef.grants) && this.broker !== undefined) {
+      if (isToolGranted(typeDef.grants) && this.effectiveBroker !== undefined) {
         const loopResult = await this.runStepLoop(goal, typeDef.grants, budget, ctx, priorAttempt, treeState);
 
         if (loopResult.kind === 'ceiling') {
@@ -896,9 +990,10 @@ export class Engine {
         let allOk = true;
         let toolCallsUsed = 0;
 
+        const checkCtx = this.checkContextFor(goal.id);
         for (const check of typeDef.deterministic) {
           toolCallsUsed++;
-          const result = await check.run(goal, artifact);
+          const result = await check.run(goal, artifact, checkCtx);
           if (!result.ok) {
             allOk = false;
             // Deterministic checks produce objective failures — detail is an
@@ -1263,7 +1358,7 @@ export class Engine {
           return { kind: 'exhausted', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
         }
 
-        const result = await this.broker!.execute(goal, call);
+        const result = await this.effectiveBroker!.execute(goal, call);
         remainingToolCalls--;
 
         // Log the tool-call event
@@ -1310,9 +1405,10 @@ export class Engine {
       let allOk = true;
       let toolCallsUsed = 0;
 
+      const recheckCtx = this.checkContextFor(goal.id);
       for (const check of typeDef.deterministic) {
         toolCallsUsed++;
-        const result = await check.run(goal, artifact);
+        const result = await check.run(goal, artifact, recheckCtx);
         if (!result.ok) {
           allOk = false;
           findings.push({

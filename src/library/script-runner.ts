@@ -43,8 +43,16 @@ const DEFAULT_TIME_LIMIT_MS = 30_000;
  * - A wall-clock timer kills the immediate child on timeout.
  * - `output` is the trailing truncated slice (≤ OUTPUT_TRUNCATION_CAP bytes);
  *   `fullOutput` is the complete capture.
+ *
+ * The optional `env` controls the child process environment. When omitted the
+ * child inherits the parent's environment (current behavior). Assembly passes a
+ * scrubbed env so repo scripts cannot read the factory's secrets.
  */
-export function createScriptRunner(repoRoot: string, declaredScripts: DeclaredScripts): ScriptRunner {
+export function createScriptRunner(
+  repoRoot: string,
+  declaredScripts: DeclaredScripts,
+  env?: NodeJS.ProcessEnv,
+): ScriptRunner {
   return {
     async run(name: string, timeLimitMs = DEFAULT_TIME_LIMIT_MS): Promise<ScriptResult> {
       const entryPoint = declaredScripts[name];
@@ -70,6 +78,7 @@ export function createScriptRunner(repoRoot: string, declaredScripts: DeclaredSc
           cwd: repoRoot,
           shell: false,
           stdio: ['ignore', 'pipe', 'pipe'],
+          ...(env !== undefined ? { env } : {}),
         });
 
         child.stdout.on('data', (d: Buffer) => chunks.push(d));
