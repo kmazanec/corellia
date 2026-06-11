@@ -48,6 +48,48 @@ function toolCall(id: string, name = 'write_file'): ToolCall {
 
 // ── Chunk 1: non-tool-granted types unaffected ────────────────────────────────
 
+describe('harness context in the step transcript', () => {
+  it('first message carries the goal title, type, and spec; the rolling count follows it', async () => {
+    const store = new MemoryEventStore();
+    const captured: import('../../src/contract/brain.js').StepTranscript[] = [];
+    const harnessBrain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair() { throw new Error('not used'); },
+      async step(_goal, transcript) {
+        captured.push([...transcript]);
+        return { kind: 'artifact', artifact: textArtifact('done'), usage: ZERO_USAGE };
+      },
+    };
+    const engine = new Engine({
+      registry: buildRegistry([toolGrantedType()]),
+      brain: harnessBrain,
+      store,
+      memory: new NoopMemoryView(),
+      broker: new FakeBroker([]),
+    });
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'Build the widget',
+      budget: { attempts: 3, tokens: 10000, toolCalls: 5, wallClockMs: 60_000 },
+    });
+    (goal as { spec: unknown }).spec = { detail: 'widget-spec-marker' };
+    await engine.run(goal);
+
+    const first = captured[0]?.[0];
+    expect(first?.role).toBe('context');
+    const firstContent = first && 'content' in first ? first.content : '';
+    expect(firstContent).toContain('Build the widget');
+    expect(firstContent).toContain('widget-spec-marker');
+
+    const second = captured[0]?.[1];
+    expect(second?.role).toBe('context');
+    const secondContent = second && 'content' in second ? second.content : '';
+    expect(secondContent).toMatch(/tool calls remaining/);
+  });
+});
+
 describe('non-tool-granted types unaffected', () => {
   it('leaf-satisfy path emits no step or tool events', async () => {
     const store = new MemoryEventStore();
