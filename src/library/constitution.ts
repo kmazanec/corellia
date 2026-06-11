@@ -7,10 +7,25 @@ import type { GoalTypeDef } from '../contract/goal-type.js';
 import { loadFamilySkill } from './skills.js';
 
 /**
+ * Options for lintLibrary.
+ */
+export interface LintOptions {
+  /**
+   * When true (the default), verify that each type's family skill file exists
+   * and contains a section for the type name. Set to false when linting stub
+   * or synthetic type registries that are not backed by real skill files (e.g.
+   * engine test doubles). The engine constructor uses false so that test types
+   * with synthetic families do not fail the structural guard.
+   */
+  checkSkills?: boolean;
+}
+
+/**
  * Lint a set of GoalTypeDef objects and return a list of human-readable
  * violation strings. An empty array means the library is well-formed.
  */
-export function lintLibrary(defs: GoalTypeDef[]): string[] {
+export function lintLibrary(defs: GoalTypeDef[], opts: LintOptions = {}): string[] {
+  const checkSkills = opts.checkSkills !== false;
   const violations: string[] = [];
 
   // Duplicate type names
@@ -62,16 +77,19 @@ export function lintLibrary(defs: GoalTypeDef[]): string[] {
       );
     }
 
-    // Family skill file must exist and contain a section for this type
-    const skill = loadFamilySkill(def.family);
-    if (skill === null) {
-      violations.push(
-        `Type "${def.name}" family skill file missing: src/library/skills/${def.family}.md`,
-      );
-    } else if (skill.sectionFor(def.name) === null) {
-      violations.push(
-        `Type "${def.name}" has no section in src/library/skills/${def.family}.md (add ## ${def.name})`,
-      );
+    // Family skill file must exist and contain a section for this type.
+    // Skipped when opts.checkSkills is false (engine constructor, synthetic stubs).
+    if (checkSkills) {
+      const skill = loadFamilySkill(def.family);
+      if (skill === null) {
+        violations.push(
+          `Type "${def.name}" family skill file missing: src/library/skills/${def.family}.md`,
+        );
+      } else if (skill.sectionFor(def.name) === null) {
+        violations.push(
+          `Type "${def.name}" has no section in src/library/skills/${def.family}.md (add ## ${def.name})`,
+        );
+      }
     }
   }
 

@@ -88,6 +88,46 @@ describe('harness context in the step transcript', () => {
     const secondContent = second && 'content' in second ? second.content : '';
     expect(secondContent).toMatch(/tool calls remaining/);
   });
+
+  it('first message contains a known phrase from the type skill section when family maps to a real skill file', async () => {
+    const store = new MemoryEventStore();
+    const captured: import('../../src/contract/brain.js').StepTranscript[] = [];
+    const harnessBrain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair() { throw new Error('not used'); },
+      async step(_goal, transcript) {
+        captured.push([...transcript]);
+        return { kind: 'artifact', artifact: textArtifact('done'), usage: ZERO_USAGE };
+      },
+    };
+    // Use the build family so the loader finds src/library/skills/build.md
+    const buildType = leafTypeDef({
+      name: 'implement',
+      family: 'build',
+      grants: ['fs.read', 'fs.write'],
+    });
+    const engine = new Engine({
+      registry: buildRegistry([buildType]),
+      brain: harnessBrain,
+      store,
+      memory: new NoopMemoryView(),
+      broker: new FakeBroker([]),
+    });
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'Implement the thing',
+      budget: { attempts: 3, tokens: 10000, toolCalls: 5, wallClockMs: 60_000 },
+    });
+    await engine.run(goal);
+
+    const first = captured[0]?.[0];
+    const firstContent = first && 'content' in first ? first.content : '';
+    // The build skill file mentions "batched rhythm" in the preamble and the
+    // implement section contains "write → run once → fix all" — verify injection.
+    expect(firstContent).toContain('batched rhythm');
+  });
 });
 
 describe('non-tool-granted types unaffected', () => {

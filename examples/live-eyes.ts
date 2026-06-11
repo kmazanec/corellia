@@ -173,20 +173,16 @@ function mapGoal(category: KnowledgeCategory): Goal {
       repoRoot: targetRepo,
       category,
       description:
-        `PROTOCOL: every message you send must either contain tool calls or be the final raw JSON object — nothing else. Never narrate, never announce readiness, never reply in prose: if you have enough information, your next message IS the JSON itself. ` +
-        `Map the "${category}" knowledge of the repo. Be economical: list_dir the root (and one level ` +
-        `where needed), read AT MOST 4-6 representative files, then emit. You do not need to read ` +
-        `everything — pointers, not bodies. Your final message must be the raw JSON object only: no ` +
-        `code fences, no prose before or after it. Emit a ` +
-        `KnowledgeArtifact as JSON: { repoRoot, category: "${category}", generatedAtSha (current HEAD), ` +
-        `confidence, status: "provisional", pointers: [{path, line?, note}] (pointers-not-bodies), summary }. ` +
+        `Map the "${category}" knowledge of the repo. ` +
+        `Emit a KnowledgeArtifact as JSON: { repoRoot, category: "${category}", generatedAtSha (current HEAD), ` +
+        `confidence, status: "provisional", pointers: [{path, line?, note}], summary }. ` +
         (category === 'architecture'
           ? `For architecture, point at the real entry/module files; every pointer path must exist and at least one must appear in the import graph. `
           : category === 'stack'
             ? `For stack, point at the manifest; encode version claims in a pointer note as "version:<name>@<version>". `
             : category === 'conventions'
               ? `For conventions, point at exemplar files that demonstrate the project's conventions. `
-              : `For test-scaffold, read package.json, run the test script AT MOST ONCE via run_script, then emit immediately; include a pointer whose note contains "script:test". Never repeat a tool call you already made. `),
+              : `For test-scaffold, read package.json, run the test script AT MOST ONCE via run_script, then emit immediately; include a pointer whose note contains "script:test". `),
     },
     intent: 'production',
     scope: [],
@@ -205,12 +201,9 @@ function diveGoal(region: string): Goal {
       repoRoot: targetRepo,
       region,
       description:
-        `PROTOCOL: every message you send must either contain tool calls or be the final raw JSON object — nothing else. Never narrate, never announce readiness, never reply in prose: if you have enough information, your next message IS the JSON itself. ` +
-        `Deep-dive the region "${region}". Be economical: list the region once, read AT MOST 5 files, then emit immediately; never repeat a tool call you already made; 4-8 strong facts beat ` +
-        `an exhaustive sweep. Your final message must be the raw JSON object only — no code fences, no prose. ` +
+        `Deep-dive the region "${region}". ` +
         `Emit RegionFacts as JSON: { repoRoot, region: "${region}", ` +
-        `generatedAtSha (current HEAD), facts: [{ claim, anchors: [{path, line}], sha, confidence }] }. ` +
-        `Every anchor path must exist and the line must be within the file at HEAD (verify-on-read).`,
+        `generatedAtSha (current HEAD), facts: [{ claim, anchors: [{path, line}], sha, confidence }] }.`,
     },
     intent: 'production',
     scope: [region],
