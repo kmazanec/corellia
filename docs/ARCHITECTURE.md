@@ -71,6 +71,9 @@ human signoff (ADR-011). The factory is operated by one person at a terminal
 | [ADR-016](./adrs/ADR-016-worktree-per-tree-bare-exec.md) | Worktree per tree; declared scripts, bare exec | Accepted | no | no |
 | [ADR-017](./adrs/ADR-017-provider-usage-accounting.md) | Provider-reported usage; $15 tree ceiling | Accepted | no | no |
 | [ADR-018](./adrs/ADR-018-provider-failure-semantics.md) | Three-layer provider-failure resolution | Accepted | no | no |
+| [ADR-019](./adrs/ADR-019-knowledge-artifacts-event-projected.md) | Knowledge artifacts event-projected; SHA-anchored freshness | Accepted | no | yes |
+| [ADR-020](./adrs/ADR-020-hybrid-impact-graph.md) | impact() on a deterministic import scan; dives add semantics | Accepted | no | yes |
+| [ADR-021](./adrs/ADR-021-coverage-policy-table.md) | Split-gate coverage as a per-kind policy table | Accepted | no | no |
 
 ## Non-goals
 

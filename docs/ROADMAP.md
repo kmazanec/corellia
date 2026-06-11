@@ -40,19 +40,20 @@ test-first in a tree worktree, its declared test script actually runs red
 then green, a scope-violating call is refused and visible, and the run
 report prints real token + dollar totals (AC-7/8/11/12 observed live).
 
-### Iteration 4 — Eyes: brownfield comprehension
+### Iteration 4 — Eyes: brownfield comprehension *(specified, awaiting plan approval)*
 
-`map-repo` / `deep-dive-region` producing SHA-stamped self-validating
-knowledge artifacts (pointers, not bodies); the typed retrieval API
-(`find_symbol`, `find_exemplar`, `impact`, `conventions_for`,
-`stack_versions`) as granted tools; verify-on-read; the split gate's
-coverage check made mechanical. **Gate-brief candidates:** knowledge
-artifact schema + storage home; retrieval implementation (the contract
-barrier of this iteration).
+Decisions locked in ADR-019/020/021 (event-projected artifacts with
+SHA-anchored freshness; hybrid impact graph — deterministic scanner +
+semantic dives; coverage as a policy table). Four categories ship:
+architecture, stack, conventions, test-scaffold. Specs in
+[iterations/04-eyes/](./iterations/04-eyes/) (F-41..F-46, assembly-owned
+integration pre-applied).
 
-*Done when:* pointed at an existing repo, the factory maps what it needs,
-splits sensibly, and a leaf consults `impact()` before touching code
-(AC-15/16/17).
+*Done when:* the scripted convergence passes (gate spawns maps as deps; a
+leaf consults `impact()` through the broker before its first write; SHA
+drift triggers validation+refresh), `live:eyes` maps corellia itself with
+self-validating artifacts, and one operator-named foreign repo maps
+read-only (early AC-3 evidence).
 
 ### Iteration 5 — Taste: the library at full strength
 

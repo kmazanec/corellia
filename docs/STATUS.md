@@ -4,8 +4,8 @@
 
 ## Now
 
-Foundation docs landed (PRD, ARCHITECTURE, ADR-001..018, iteration-3 specs).
-Next up: plan iteration 03-hands.
+Iteration 03 (Hands) landed on main; iteration 04 (Eyes) is planned and
+awaiting approval.
 
 ## Iterations
 
@@ -13,13 +13,12 @@ Next up: plan iteration 03-hands.
 |---|-----------|--------|-------------|-------|
 | 01 | Walking skeleton | Shipped | — | engine, evals, budgets, event log (PR #1) |
 | 02 | Substrate + live brain | Shipped | — | Postgres, gates, listener, flywheel, OpenRouter (PR #2) |
-| 03 | Hands | Built (PR open) | — | 555 tests; live convergence run green at $0.07 |
-| 04 | Eyes | Arc only | — | gate brief + specs after 03 ships (JIT) |
+| 03 | Hands | Shipped (PR #3) | — | 555 tests; live convergence run green at $0.07 |
+| 04 | Eyes | Planned (awaiting approval) | — | ADR-019..021 locked; F-41..F-46 specs + BUILD-PLAN-04-eyes |
 | 05 | Taste | Arc only | — | after 04 |
 | 06 | Self-hosting | Arc only | — | after 05; closes the PRD's success bar |
 
 ## What's next
 
-Review and merge the iteration-03 PR (build/03-hands). Then iteration 04
-(Eyes) gets its gate brief + specs per the JIT rule — candidates already
-named in ROADMAP.md.
+Push main (closes PR #3 as merged). Approve BUILD-PLAN-04-eyes.md, then
+build iteration 04 by the same direct process as 03.
