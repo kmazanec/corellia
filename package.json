@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "demo": "tsx examples/greeting.ts",
     "live": "tsx examples/live.ts",
-    "live:hands": "tsx examples/live-hands.ts"
+    "live:hands": "tsx examples/live-hands.ts",
+    "live:eyes": "tsx examples/live-eyes.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
