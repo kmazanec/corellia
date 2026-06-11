@@ -362,7 +362,7 @@ export function projectKnowledge(events: FactoryEvent[]): KnowledgeView {
     switch (e.type) {
       case 'knowledge-written': {
         const key = `${e.artifact.repoRoot}::${e.artifact.category}`;
-        artifacts.set(key, { artifact: { ...e.artifact }, freshness: 'fresh' });
+        artifacts.set(key, { artifact: { ...e.artifact, pointers: e.artifact.pointers.map((p) => ({ ...p })) }, freshness: 'fresh' });
         break;
       }
 

@@ -2,10 +2,13 @@ import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, rmSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import pg from 'pg';
 import { InMemoryEventStore } from '../../src/eventlog/memory-store.js';
 import { JsonlEventStore } from '../../src/eventlog/jsonl-store.js';
 import type { FactoryEvent } from '../../src/contract/events.js';
 import type { KnowledgeArtifact, RegionFacts, DiveFact } from '../../src/contract/knowledge.js';
+
+const { Pool } = pg;
 
 // ── Knowledge event fixtures ──────────────────
 
@@ -398,20 +401,21 @@ describe('JsonlEventStore', () => {
 
 describe.skipIf(!process.env['DATABASE_URL'])('PgEventStore — knowledge events', () => {
   let PgEventStore: typeof import('../../src/substrate/pg-event-store.js').PgEventStore;
+  let pool: pg.Pool;
   let store: InstanceType<typeof PgEventStore>;
 
   beforeAll(async () => {
     const mod = await import('../../src/substrate/pg-event-store.js');
     PgEventStore = mod.PgEventStore;
-    store = new PgEventStore(process.env['DATABASE_URL']!);
+    pool = new Pool({ connectionString: process.env['DATABASE_URL']! });
+    store = new PgEventStore(pool);
     await store.ensureSchema();
     // Clean out any leftover rows from a prior run so assertions stay exact.
-    // @ts-expect-error — accessing private pool for test isolation
-    await store['#pool'].query(`DELETE FROM corellia_events WHERE goal_id = 'g1'`);
+    await pool.query(`DELETE FROM corellia_events WHERE goal_id = 'g1'`);
   });
 
   afterAll(async () => {
-    await store.close();
+    await pool.end();
   });
 
   it('round-trips knowledge-written through pg with artifact fields intact', async () => {

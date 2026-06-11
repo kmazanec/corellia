@@ -695,6 +695,46 @@ describe('projectKnowledge', () => {
     expect(view.artifacts.get(key)?.artifact.generatedAtSha).toBe('new-sha');
   });
 
+  it('freshness moves in both directions via checked events alone — invalid then stale-validated', () => {
+    const artifact = makeArtifact();
+    const events: FactoryEvent[] = [
+      knowledgeWritten(artifact),
+      {
+        type: 'knowledge-checked',
+        at: Date.now(),
+        goalId: 'g1',
+        repoRoot: artifact.repoRoot,
+        category: artifact.category,
+        sha: 'sha-v1',
+        outcome: 'invalid',
+      },
+      {
+        type: 'knowledge-checked',
+        at: Date.now(),
+        goalId: 'g1',
+        repoRoot: artifact.repoRoot,
+        category: artifact.category,
+        sha: 'sha-v2',
+        outcome: 'stale-validated',
+      },
+    ];
+    const key = `${artifact.repoRoot}::${artifact.category}`;
+
+    // After write: fresh
+    const atWrite = projectKnowledge(events.slice(0, 1));
+    expect(atWrite.artifacts.get(key)?.freshness).toBe('fresh');
+
+    // After invalid check: invalid
+    const atInvalid = projectKnowledge(events.slice(0, 2));
+    expect(atInvalid.artifacts.get(key)?.freshness).toBe('invalid');
+
+    // After stale-validated check (no rewrite): stale-validated — freshness moved forward without a new artifact
+    const atStaleValidated = projectKnowledge(events);
+    expect(atStaleValidated.artifacts.get(key)?.freshness).toBe('stale-validated');
+    // Artifact itself is unchanged — same SHA, same summary
+    expect(atStaleValidated.artifacts.get(key)?.artifact.generatedAtSha).toBe(artifact.generatedAtSha);
+  });
+
   it('knowledge-checked before any artifact for that key is a no-op', () => {
     const events: FactoryEvent[] = [
       {
