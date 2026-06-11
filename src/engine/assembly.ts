@@ -355,26 +355,36 @@ export function defaultMintComprehension(
   missing: MissingRequirement[],
 ): ChildPlan[] {
   const plans: ChildPlan[] = [];
-  let n = 0;
+  // Dedup: one map-repo per category, one deep-dive per region — a category and
+  // a region can each be reported more than once (e.g. the same region surfaced
+  // by both the parent and a child scope). Minting a child twice for the same
+  // unit would only waste budget and risk a localId collision.
+  const seenCategories = new Set<string>();
+  const seenRegions = new Set<string>();
   for (const m of missing) {
     if (m.region !== undefined) {
+      const region = m.region;
+      if (seenRegions.has(region)) continue;
+      seenRegions.add(region);
       plans.push({
-        localId: `dive-${m.category}-${n++}`,
+        localId: `dive-${region.replace(/[^a-zA-Z0-9]+/g, '-')}`,
         type: 'deep-dive-region',
-        title: `Deep-dive region ${m.region}`,
-        spec: { repoRoot, region: m.region, reason: m.reason },
-        scope: [m.region],
-        budgetShare: 0.2,
+        title: `Deep-dive region ${region}`,
+        spec: { repoRoot, region, reason: m.reason },
+        scope: [region],
+        budgetShare: 0.1,
         dependsOn: [],
       });
     } else {
+      if (seenCategories.has(m.category)) continue;
+      seenCategories.add(m.category);
       plans.push({
-        localId: `map-${m.category}-${n++}`,
+        localId: `map-${m.category}`,
         type: 'map-repo',
         title: `Map repo: ${m.category}`,
         spec: { repoRoot, category: m.category, reason: m.reason },
         scope: [],
-        budgetShare: 0.2,
+        budgetShare: 0.1,
         dependsOn: [],
       });
     }
@@ -446,11 +456,18 @@ export function assembleKnowledgeWiring(
     },
     headSha: async (repoRoot: string): Promise<string> => gitHeadSha(repoRoot),
     validate: async (artifact: KnowledgeArtifact): Promise<boolean> => {
-      const check = categoryCheck(artifact.category, scanFn);
-      const ctx: CheckContext = { sandboxRoot: artifact.repoRoot };
+      // The engine's checkpoint hands a stub with empty pointers (it only carries
+      // category + sha from the coverage projection). Re-project the FULL latest
+      // artifact for this repo × category from the store so self-validation runs
+      // against the real pointers/anchors the producer emitted.
+      const view = projectKnowledge(await store.list());
+      const key = `${artifact.repoRoot}::${artifact.category}`;
+      const full = view.artifacts.get(key)?.artifact ?? artifact;
+      const check = categoryCheck(full.category, scanFn);
+      const ctx: CheckContext = { sandboxRoot: full.repoRoot };
       const result = await check.run(
         { id: 'validate', type: 'map-repo' } as unknown as Goal,
-        { kind: 'text', text: JSON.stringify(artifact) },
+        { kind: 'text', text: JSON.stringify(full) },
         ctx,
       );
       return result.ok;
