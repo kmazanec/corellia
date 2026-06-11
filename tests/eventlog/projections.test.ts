@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { projectMemory, traceStats, renderTree } from '../../src/eventlog/projections.js';
+import { projectMemory, traceStats, renderTree, costSummary } from '../../src/eventlog/projections.js';
 import type { FactoryEvent } from '../../src/contract/events.js';
-import type { MemoryPointer } from '../../src/contract/goal.js';
+import type { MemoryPointer, Usage } from '../../src/contract/goal.js';
 
 // ──────────────────────────────────────────────
 // Shared test helpers
@@ -377,5 +377,185 @@ describe('renderTree', () => {
     const alphaPos = tree.indexOf('Alpha child');
     const betaPos = tree.indexOf('Beta child');
     expect(alphaPos).toBeLessThan(betaPos);
+  });
+});
+
+// ──────────────────────────────────────────────
+// costSummary
+// ──────────────────────────────────────────────
+
+function usageOf(p: number, c: number, cost?: number): Usage {
+  return cost !== undefined
+    ? { promptTokens: p, completionTokens: c, costUsd: cost }
+    : { promptTokens: p, completionTokens: c };
+}
+
+describe('costSummary', () => {
+  it('returns empty tree totals for no usage events', () => {
+    const result = costSummary([baseGoal()]);
+    expect(result.tree.promptTokens).toBe(0);
+    expect(result.tree.completionTokens).toBe(0);
+    expect(result.tree.costUsd).toBeUndefined();
+    expect(Object.keys(result.byGoal)).toHaveLength(0);
+  });
+
+  it('folds produced event usage into per-goal and tree totals', () => {
+    const events: FactoryEvent[] = [
+      { type: 'produced', at: 100, goalId: 'g1', usage: usageOf(100, 50) },
+    ];
+    const result = costSummary(events);
+    expect(result.byGoal['g1']?.promptTokens).toBe(100);
+    expect(result.byGoal['g1']?.completionTokens).toBe(50);
+    expect(result.tree.promptTokens).toBe(100);
+    expect(result.tree.completionTokens).toBe(50);
+  });
+
+  it('folds decided event usage when present', () => {
+    const events: FactoryEvent[] = [
+      {
+        type: 'decided',
+        at: 100,
+        goalId: 'g1',
+        decision: { kind: 'block', brief: { question: 'q', options: [], links: [], deadlineMs: 1000, onTimeout: 'deny' } },
+        usage: usageOf(20, 10),
+      },
+    ];
+    const result = costSummary(events);
+    expect(result.byGoal['g1']?.promptTokens).toBe(20);
+    expect(result.byGoal['g1']?.completionTokens).toBe(10);
+    expect(result.tree.promptTokens).toBe(20);
+  });
+
+  it('skips decided event with no usage field', () => {
+    const events: FactoryEvent[] = [
+      {
+        type: 'decided',
+        at: 100,
+        goalId: 'g1',
+        decision: { kind: 'block', brief: { question: 'q', options: [], links: [], deadlineMs: 1000, onTimeout: 'deny' } },
+      },
+    ];
+    const result = costSummary(events);
+    expect(Object.keys(result.byGoal)).toHaveLength(0);
+    expect(result.tree.promptTokens).toBe(0);
+  });
+
+  it('folds judge-verdict usage when present', () => {
+    const events: FactoryEvent[] = [
+      {
+        type: 'judge-verdict',
+        at: 100,
+        goalId: 'g1',
+        judgeType: 'code-review',
+        verdict: verdict(true),
+        tier: 'sonnet',
+        usage: usageOf(200, 80),
+      },
+    ];
+    const result = costSummary(events);
+    expect(result.byGoal['g1']?.promptTokens).toBe(200);
+    expect(result.byGoal['g1']?.completionTokens).toBe(80);
+    expect(result.tree.completionTokens).toBe(80);
+  });
+
+  it('folds repair-applied usage when present', () => {
+    const events: FactoryEvent[] = [
+      {
+        type: 'repair-applied',
+        at: 100,
+        goalId: 'g1',
+        prescriptions: ['fix types'],
+        usage: usageOf(50, 30),
+      },
+    ];
+    const result = costSummary(events);
+    expect(result.byGoal['g1']?.promptTokens).toBe(50);
+    expect(result.tree.promptTokens).toBe(50);
+  });
+
+  it('folds step event usage when present', () => {
+    const events: FactoryEvent[] = [
+      {
+        type: 'step',
+        at: 100,
+        goalId: 'g1',
+        index: 0,
+        outputKind: 'tool-calls',
+        usage: usageOf(10, 5),
+      },
+    ];
+    const result = costSummary(events);
+    expect(result.byGoal['g1']?.promptTokens).toBe(10);
+    expect(result.tree.promptTokens).toBe(10);
+  });
+
+  it('accumulates costUsd only when events report cost', () => {
+    const events: FactoryEvent[] = [
+      { type: 'produced', at: 100, goalId: 'g1', usage: usageOf(100, 50, 0.002) },
+      { type: 'produced', at: 200, goalId: 'g1', usage: usageOf(100, 50, 0.003) },
+    ];
+    const result = costSummary(events);
+    expect(result.byGoal['g1']?.costUsd).toBeCloseTo(0.005);
+    expect(result.tree.costUsd).toBeCloseTo(0.005);
+  });
+
+  it('costUsd stays undefined when no event reports cost', () => {
+    const events: FactoryEvent[] = [
+      { type: 'produced', at: 100, goalId: 'g1', usage: usageOf(100, 50) },
+      { type: 'produced', at: 200, goalId: 'g1', usage: usageOf(200, 100) },
+    ];
+    const result = costSummary(events);
+    expect(result.byGoal['g1']?.costUsd).toBeUndefined();
+    expect(result.tree.costUsd).toBeUndefined();
+  });
+
+  it('accumulates across multiple goals for tree total', () => {
+    const events: FactoryEvent[] = [
+      { type: 'produced', at: 100, goalId: 'g1', usage: usageOf(100, 50) },
+      { type: 'produced', at: 200, goalId: 'g2', usage: usageOf(200, 100) },
+    ];
+    const result = costSummary(events);
+    expect(result.byGoal['g1']?.promptTokens).toBe(100);
+    expect(result.byGoal['g2']?.promptTokens).toBe(200);
+    expect(result.tree.promptTokens).toBe(300);
+    expect(result.tree.completionTokens).toBe(150);
+  });
+
+  it('per-goal totals match summed usage fields exactly', () => {
+    const events: FactoryEvent[] = [
+      { type: 'produced', at: 100, goalId: 'g1', usage: usageOf(100, 40) },
+      {
+        type: 'judge-verdict',
+        at: 200,
+        goalId: 'g1',
+        judgeType: 'review',
+        verdict: verdict(false),
+        tier: 'haiku',
+        usage: usageOf(60, 20),
+      },
+      {
+        type: 'repair-applied',
+        at: 300,
+        goalId: 'g1',
+        prescriptions: [],
+        usage: usageOf(30, 10),
+      },
+    ];
+    const result = costSummary(events);
+    expect(result.byGoal['g1']?.promptTokens).toBe(190);
+    expect(result.byGoal['g1']?.completionTokens).toBe(70);
+    expect(result.tree.promptTokens).toBe(190);
+    expect(result.tree.completionTokens).toBe(70);
+  });
+
+  it('mixed cost/no-cost: costUsd accumulates only from reporting events', () => {
+    const events: FactoryEvent[] = [
+      { type: 'produced', at: 100, goalId: 'g1', usage: usageOf(100, 50) },
+      { type: 'produced', at: 200, goalId: 'g1', usage: usageOf(100, 50, 0.004) },
+    ];
+    const result = costSummary(events);
+    expect(result.byGoal['g1']?.costUsd).toBeCloseTo(0.004);
+    expect(result.tree.costUsd).toBeCloseTo(0.004);
+    expect(result.byGoal['g1']?.promptTokens).toBe(200);
   });
 });

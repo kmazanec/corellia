@@ -5,7 +5,7 @@
  */
 
 import type { FactoryEvent } from '../contract/events.js';
-import type { MemoryPointer } from '../contract/goal.js';
+import type { MemoryPointer, Usage } from '../contract/goal.js';
 import type { MemoryView } from '../contract/memory.js';
 
 // ──────────────────────────────────────────────
@@ -178,6 +178,132 @@ export function traceStats(events: FactoryEvent[]): Record<string, GoalTypeStats
   }
 
   return result;
+}
+
+// ──────────────────────────────────────────────
+// costSummary
+// ──────────────────────────────────────────────
+
+/** Accumulated token and dollar totals for a set of events. */
+export interface UsageTotals {
+  promptTokens: number;
+  completionTokens: number;
+  costUsd: number | undefined;
+}
+
+/** Per-goal and tree-wide aggregated usage totals from the event log. */
+export interface CostSummary {
+  byGoal: Record<string, UsageTotals>;
+  tree: UsageTotals;
+}
+
+function addUsage(totals: UsageTotals, usage: Usage): void {
+  totals.promptTokens += usage.promptTokens;
+  totals.completionTokens += usage.completionTokens;
+  if (usage.costUsd !== undefined) {
+    totals.costUsd = (totals.costUsd ?? 0) + usage.costUsd;
+  }
+}
+
+function emptyTotals(): UsageTotals {
+  return { promptTokens: 0, completionTokens: 0, costUsd: undefined };
+}
+
+/**
+ * Fold usage-bearing events into per-goal and per-tree token/dollar totals.
+ *
+ * Events that carry usage: produced (required), decided (optional),
+ * judge-verdict (optional), repair-applied (optional), step (optional).
+ * All other event members are visited but do not contribute to cost totals.
+ * Satisfies the exhaustive-switch discipline from ADR-003.
+ */
+export function costSummary(events: FactoryEvent[]): CostSummary {
+  const byGoal: Record<string, UsageTotals> = {};
+  const tree: UsageTotals = emptyTotals();
+
+  const ensure = (goalId: string): UsageTotals => {
+    let t = byGoal[goalId];
+    if (!t) {
+      t = emptyTotals();
+      byGoal[goalId] = t;
+    }
+    return t;
+  };
+
+  for (const e of events) {
+    switch (e.type) {
+      case 'produced': {
+        const t = ensure(e.goalId);
+        addUsage(t, e.usage);
+        addUsage(tree, e.usage);
+        break;
+      }
+
+      case 'decided': {
+        if (e.usage !== undefined) {
+          const t = ensure(e.goalId);
+          addUsage(t, e.usage);
+          addUsage(tree, e.usage);
+        }
+        break;
+      }
+
+      case 'judge-verdict': {
+        if (e.usage !== undefined) {
+          const t = ensure(e.goalId);
+          addUsage(t, e.usage);
+          addUsage(tree, e.usage);
+        }
+        break;
+      }
+
+      case 'repair-applied': {
+        if (e.usage !== undefined) {
+          const t = ensure(e.goalId);
+          addUsage(t, e.usage);
+          addUsage(tree, e.usage);
+        }
+        break;
+      }
+
+      case 'step': {
+        if (e.usage !== undefined) {
+          const t = ensure(e.goalId);
+          addUsage(t, e.usage);
+          addUsage(tree, e.usage);
+        }
+        break;
+      }
+
+      case 'goal-received':
+      case 'gate-checked':
+      case 'child-spawned':
+      case 'deterministic-checked':
+      case 'tier-escalated':
+      case 'blocked':
+      case 'memory-written':
+      case 'memory-reinforced':
+      case 'emitted':
+      case 'budget-exhausted':
+      case 'risk-classified':
+      case 'gate-decision':
+      case 'parked':
+      case 'resumed':
+      case 'pattern-consulted':
+      case 'pattern-recorded':
+      case 'tool-call':
+      case 'script-ran':
+      case 'worktree-created':
+      case 'worktree-collected':
+      case 'worktree-preserved':
+      case 'ceiling-reached':
+      case 'transport-retry':
+      case 'malformation-reprompt':
+        break;
+    }
+  }
+
+  return { byGoal, tree };
 }
 
 // ──────────────────────────────────────────────
