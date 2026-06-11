@@ -4,14 +4,14 @@ title: "Assembly: engine wiring + convergence"
 iteration: 03-hands
 type: implement
 intent: production
-status: not-started
+status: shipped
 dependsOn: [F-31, F-32, F-33, F-34, F-35, F-36]
 contracts: [ADR-014, ADR-015, ADR-016, ADR-017]
 ---
 
 # Feature: Assembly — engine wiring + the convergence checks
 
-**ID:** F-37 · **Iteration:** 03-hands · **Status:** Not started
+**ID:** F-37 · **Iteration:** 03-hands · **Status:** Shipped (build/03-hands)
 *(Added at approval review, 2026-06-11: the plan review found that every
 feature built a well-tested module and no feature owned composing them — the
 exact engine↔eval seam failure mode from iteration 1, recurring.)*
@@ -68,7 +68,7 @@ flagged barrier amendment, not a silent addition.
 
 ## Build plan (approved)
 
-- [ ] **Engine tree-root wiring** — Delivers: the engine accepts an optional
+- [x] **Engine tree-root wiring** — Delivers: the engine accepts an optional
   assembly config `{repoRoot, declaredScripts}`; when present, the tree root
   opens a worktree (F-34 `openTreeWorktree`), constructs one `ToolBroker` for
   the tree bound to the worktree root with `tools: [...coreTools,
@@ -83,7 +83,7 @@ flagged barrier amendment, not a silent addition.
   events, existing engine.test.ts green unchanged; config present → broker
   constructed once per tree, ctx reaches checks, emission calls the diff
   check. Touches `src/engine/engine.ts` (last in the serial chain).
-- [ ] **Scripted full-stack convergence test** — Delivers: one integration
+- [x] **Scripted full-stack convergence test** — Delivers: one integration
   test driving the whole path with `ScriptedBrain` against a real tmp git
   fixture repo (declared scripts: a real red-then-green test script):
   scripted implement leaf writes a failing module + test via `write_file`,
@@ -96,7 +96,7 @@ flagged barrier amendment, not a silent addition.
   projection; worktree collected with commits on the tree branch. Runs in CI
   with zero network — this is the iteration's done-when, minus "live".
   Tests: `tests/engine/convergence.test.ts`.
-- [ ] **`npm run live:hands`** (moved from F-36) — Delivers:
+- [x] **`npm run live:hands`** (moved from F-36) — Delivers:
   `examples/live-hands.ts` + package script, gated behind
   `OPENROUTER_API_KEY`: creates the fixture repo **programmatically in a tmp
   dir** (no manual fixture — gap closed), runs a live sonnet-class implement
@@ -129,4 +129,6 @@ operator-run done-when, never a CI gate. Run per-chunk files only; one
 
 ## Implementation notes (filled in by the building agent)
 
-> Owned by the builder, not the planner. Starts empty.
+> Owned by the builder, not the planner.
+
+All three chunks landed. Shared-worktree AC-6 semantics: root-emission diffWithinScope against root scope + per-leaf broker write checks + per-leaf filesWithinScope (judged honest). scrubEnv: denylist + credential-suffix sweep, PATH-survival pinned. Real tool schemas reach the brain (broker defs() probe). Live run PASSED first try: red→green real script execution, 10 brokered calls, worktree collected (1 commit), $0.0658 from provider-reported usage.

@@ -1,6 +1,6 @@
 # Status — Corellia
 
-**Updated:** 2026-06-10 · **Roadmap:** [ROADMAP.md](./ROADMAP.md)
+**Updated:** 2026-06-11 · **Roadmap:** [ROADMAP.md](./ROADMAP.md)
 
 ## Now
 
@@ -13,14 +13,13 @@ Next up: plan iteration 03-hands.
 |---|-----------|--------|-------------|-------|
 | 01 | Walking skeleton | Shipped | — | engine, evals, budgets, event log (PR #1) |
 | 02 | Substrate + live brain | Shipped | — | Postgres, gates, listener, flywheel, OpenRouter (PR #2) |
-| 03 | Hands | Planned + approved | A | 7 features: F-31..F-36 fan out behind one barrier; F-37 (assembly) wires them, last |
+| 03 | Hands | Built (PR open) | — | 555 tests; live convergence run green at $0.07 |
 | 04 | Eyes | Arc only | — | gate brief + specs after 03 ships (JIT) |
 | 05 | Taste | Arc only | — | after 04 |
 | 06 | Self-hosting | Arc only | — | after 05; closes the PRD's success bar |
 
 ## What's next
 
-Build iteration 03 from the approved BUILD-PLAN-03-hands.md: barrier commit
-first (incl. mechanical compile-true propagation), then F-31/F-33/F-36 in
-worktrees + F-32 → F-35 → F-34 on the trunk, then F-37 (assembly +
-convergence) last. Launch is operator-triggered.
+Review and merge the iteration-03 PR (build/03-hands). Then iteration 04
+(Eyes) gets its gate brief + specs per the JIT rule — candidates already
+named in ROADMAP.md.
