@@ -14,6 +14,11 @@
  *  11. SHA-drift + validate-fail → invalid event, refresh child injected.
  *  12. Learn-kind goals exempt from coverage gate.
  *  13. No knowledge wiring → byte-identical behavior (regression guard).
+ * New gate tests (FIX 2/3/5):
+ *  14. injection-blows-validateSplit → blocked, not silently over-subdivided.
+ *  15. double-spawn exact-count → stale+invalid category spawns EXACTLY one child.
+ *  16. no-sandbox-with-knowledge → gate skipped, zero gate-checked events.
+ *  17. fresh-pass brain-call count unchanged vs baseline (AC-2 tightened).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -34,6 +39,35 @@ import type { SensitivityFact } from '../../src/contract/risk.js';
 import type { KnowledgeForCoverage } from '../../src/library/coverage.js';
 import type { ChildPlan } from '../../src/contract/decision.js';
 import type { KnowledgeArtifact } from '../../src/contract/knowledge.js';
+import type { SandboxAssembly } from '../../src/engine/assembly.js';
+
+// ── Fake sandbox assembly (for gate tests that require an active sandbox) ─────
+// FIX 5: the coverage gate requires an active sandbox/assembly to obtain a
+// real repoRoot. Tests that exercise gate behavior must inject a fake assembly.
+
+function fakeAssembly(repoRoot = '/repo'): SandboxAssembly {
+  return {
+    broker: {
+      async execute() {
+        return { callId: 'x', ok: false, output: 'fakeAssembly: not used' };
+      },
+    },
+    worktree: {
+      treeId: 'test-tree',
+      branch: 'test-branch',
+      root: repoRoot,
+      repoRoot,
+      goalId: 'root',
+    },
+    checkContextFor(_goalId: string) {
+      return undefined as never;
+    },
+  };
+}
+
+function injectAssembly(engine: Engine, assembly: SandboxAssembly): void {
+  (engine as unknown as { _activeAssembly: SandboxAssembly })._activeAssembly = assembly;
+}
 
 // ── 1. Constructor throws on unconstitutional library ─────────────────────
 
@@ -427,6 +461,7 @@ describe('coverage gate — missing knowledge spawns map-repo children', () => {
       memory: new NoopMemoryView(),
       knowledge: knowledgeWiring(emptyKnowledge()),
     });
+    injectAssembly(engine, fakeAssembly());
 
     const goal = makeGoal({ type: 'splitter', budget: { attempts: 10, tokens: 10000, toolCalls: 100, wallClockMs: 60000 } });
     const report = await engine.run(goal);
@@ -502,6 +537,7 @@ describe('coverage gate — fresh knowledge passes without extra brain calls', (
       memory: new NoopMemoryView(),
       knowledge: knowledgeWiring(freshKnowledge()),
     });
+    injectAssembly(engine, fakeAssembly());
 
     const goal = makeGoal({
       type: 'splitter',
@@ -574,6 +610,7 @@ describe('coverage gate — region-dive miss for code leaf', () => {
       memory: new NoopMemoryView(),
       knowledge: knowledgeWiring(knowledge),
     });
+    injectAssembly(engine, fakeAssembly());
 
     const goal = makeGoal({
       type: 'splitter',
@@ -640,6 +677,7 @@ describe('coverage gate — SHA-drift validate-pass path', () => {
       memory: new NoopMemoryView(),
       knowledge: knowledgeWiring(staleKnowledge, true), // validate returns true
     });
+    injectAssembly(engine, fakeAssembly());
 
     const goal = makeGoal({
       type: 'splitter',
@@ -702,6 +740,7 @@ describe('coverage gate — SHA-drift validate-fail path', () => {
       memory: new NoopMemoryView(),
       knowledge: knowledgeWiring(staleKnowledge, false), // validate returns false
     });
+    injectAssembly(engine, fakeAssembly());
 
     const goal = makeGoal({
       type: 'splitter',
@@ -766,6 +805,7 @@ describe('coverage gate — learn-kind exemption', () => {
       memory: new NoopMemoryView(),
       knowledge: knowledgeWiring(emptyKnowledge()),
     });
+    injectAssembly(engine, fakeAssembly());
 
     const goal = makeGoal({
       type: 'map-repo',
@@ -833,5 +873,228 @@ describe('coverage gate — knowledge-absent regression guard', () => {
 
     // Report succeeds normally
     expect(report.blockers).toHaveLength(0);
+  });
+});
+
+// ── 14. FIX 2: injection-blows-validateSplit → blocked, not silently over-subdivided
+
+describe('coverage gate — injection that exceeds attempt budget is blocked', () => {
+  it('blocks when minted children push fan-out over attempt budget (FIX 2)', async () => {
+    const store = new MemoryEventStore();
+
+    // Brain proposes 2 children with budgetShare ~0.5 each; budget.attempts = 3
+    // Minting 2 comprehension children will push total to 4, exceeding attempts=3
+    const splitDecision = {
+      kind: 'split' as const,
+      children: [
+        { localId: 'a', type: 'leaf', title: 'child A', spec: {}, dependsOn: [], scope: [], budgetShare: 0.4 },
+        { localId: 'b', type: 'leaf', title: 'child B', spec: {}, dependsOn: [], scope: [], budgetShare: 0.4 },
+      ],
+    };
+
+    const brain = new ScriptedBrain().queueDecide(splitDecision);
+
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'splitter' }),
+      leafTypeDef({ name: 'leaf' }),
+      leafTypeDef({ name: 'map-repo' }),
+    ]);
+
+    // Empty knowledge → 2 comprehension children will be minted (architecture + stack)
+    // 2 original + 2 minted = 4 children > attempts=3 → structural error
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      knowledge: knowledgeWiring(emptyKnowledge()),
+    });
+    injectAssembly(engine, fakeAssembly());
+
+    const goal = makeGoal({
+      type: 'splitter',
+      budget: { attempts: 3, tokens: 10000, toolCalls: 100, wallClockMs: 60000 },
+    });
+    const report = await engine.run(goal);
+
+    // Must block — not silently proceed with over-budget fan-out
+    expect(report.blockers.length).toBeGreaterThan(0);
+    expect(report.blockers[0]).toMatch(/coverage.*(injection|invalid|structural)/i);
+  });
+});
+
+// ── 15. FIX 3: double-spawn exact-count — stale+invalid category → EXACTLY one child
+
+describe('coverage gate — invalid category yields exactly one refresh child', () => {
+  it('spawns exactly one map-repo child for an invalid stale category (FIX 3)', async () => {
+    const store = new MemoryEventStore();
+
+    const splitDecision = {
+      kind: 'split' as const,
+      children: [
+        { localId: 'a', type: 'leaf', title: 'child A', spec: {}, dependsOn: [], scope: [], budgetShare: 0.3 },
+      ],
+    };
+
+    const brain = new ScriptedBrain()
+      .queueDecide(splitDecision)
+      .queueProduce(textArtifact('refreshed'))
+      .queueProduce(textArtifact('done'));
+
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'splitter' }),
+      leafTypeDef({ name: 'leaf' }),
+      leafTypeDef({ name: 'map-repo' }),
+    ]);
+
+    // architecture is stale and invalid (validate=false); stack is fresh.
+    // Without FIX 3, checkpointVerifyArtifacts mints one refresh child for
+    // architecture AND coverageCheck would flag architecture as missing and
+    // mintComprehension would mint a second child — two children for the same
+    // category. FIX 3 must ensure only one map-repo child is spawned.
+    const staleInvalidKnowledge: KnowledgeForCoverage = {
+      headSha: HEAD_SHA,
+      artifacts: [
+        { category: 'architecture', generatedAtSha: 'old-sha', repoRoot: '' },
+        { category: 'stack', generatedAtSha: HEAD_SHA, repoRoot: '' },
+      ],
+      regionFacts: [],
+    };
+
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      knowledge: knowledgeWiring(staleInvalidKnowledge, false), // validate=false → invalid
+    });
+    injectAssembly(engine, fakeAssembly());
+
+    const goal = makeGoal({
+      type: 'splitter',
+      budget: { attempts: 10, tokens: 10000, toolCalls: 100, wallClockMs: 60000 },
+    });
+    await engine.run(goal);
+
+    // Exactly one map-repo child must be spawned for the architecture category
+    const spawnEvents = await store.list({ type: 'child-spawned' });
+    const mapRepoChildren = spawnEvents.filter(
+      (e) => (e as { childType: string }).childType === 'map-repo',
+    );
+    expect(mapRepoChildren).toHaveLength(1);
+  });
+});
+
+// ── 16. FIX 5: no-sandbox-with-knowledge → gate skipped, zero gate-checked events
+
+describe('coverage gate — no sandbox skips gate entirely', () => {
+  it('skips gate when knowledge is wired but no sandbox is active (FIX 5)', async () => {
+    const store = new MemoryEventStore();
+
+    const splitDecision = {
+      kind: 'split' as const,
+      children: [
+        { localId: 'a', type: 'leaf', title: 'child', spec: {}, dependsOn: [], scope: [], budgetShare: 0.5 },
+      ],
+    };
+
+    const brain = new ScriptedBrain()
+      .queueDecide(splitDecision)
+      .queueProduce(textArtifact('done'));
+
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'splitter' }),
+      leafTypeDef({ name: 'leaf' }),
+    ]);
+
+    // Knowledge wired but NO sandbox injected — gate must be skipped entirely
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      knowledge: knowledgeWiring(emptyKnowledge()),
+      // no sandbox option → _activeAssembly stays undefined
+    });
+    // Deliberately NOT calling injectAssembly
+
+    const goal = makeGoal({
+      type: 'splitter',
+      budget: { attempts: 5, tokens: 10000, toolCalls: 50, wallClockMs: 60000 },
+    });
+    const report = await engine.run(goal);
+
+    // Gate skipped → no gate-checked events emitted
+    const gateEvents = await store.list({ type: 'gate-checked' });
+    expect(gateEvents).toHaveLength(0);
+
+    // No knowledge-checked events either
+    const checkedEvents = await store.list({ type: 'knowledge-checked' });
+    expect(checkedEvents).toHaveLength(0);
+
+    // Split proceeds normally (knowledge gaps ignored without sandbox)
+    expect(report.blockers).toHaveLength(0);
+  });
+});
+
+// ── 17. FIX 2 / AC-2: fresh-pass asserts brain call count unchanged vs baseline
+
+describe('coverage gate — fresh knowledge does not add brain calls vs no-wiring baseline', () => {
+  it('brain call count with fresh knowledge equals baseline (AC-2 tightened)', async () => {
+    const splitDecision = {
+      kind: 'split' as const,
+      children: [
+        { localId: 'a', type: 'leaf', title: 'child', spec: {}, dependsOn: [], scope: [], budgetShare: 0.5 },
+      ],
+    };
+
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'splitter' }),
+      leafTypeDef({ name: 'leaf' }),
+    ]);
+
+    // Baseline: no knowledge wiring
+    let baselineCalls = 0;
+    const baseBrain = new ScriptedBrain()
+      .queueDecide(splitDecision)
+      .queueProduce(textArtifact('done'));
+    const origDecide = baseBrain.decide.bind(baseBrain);
+    baseBrain.decide = async (...args) => { baselineCalls++; return origDecide(...args); };
+
+    const baseEngine = new Engine({
+      registry,
+      brain: baseBrain,
+      store: new MemoryEventStore(),
+      memory: new NoopMemoryView(),
+    });
+
+    await baseEngine.run(makeGoal({
+      type: 'splitter',
+      budget: { attempts: 5, tokens: 10000, toolCalls: 50, wallClockMs: 60000 },
+    }));
+
+    // With fresh knowledge: should produce identical brain call count
+    let wiredCalls = 0;
+    const wiredBrain = new ScriptedBrain()
+      .queueDecide(splitDecision)
+      .queueProduce(textArtifact('done'));
+    const origDecide2 = wiredBrain.decide.bind(wiredBrain);
+    wiredBrain.decide = async (...args) => { wiredCalls++; return origDecide2(...args); };
+
+    const wiredEngine = new Engine({
+      registry,
+      brain: wiredBrain,
+      store: new MemoryEventStore(),
+      memory: new NoopMemoryView(),
+      knowledge: knowledgeWiring(freshKnowledge()),
+    });
+    injectAssembly(wiredEngine, fakeAssembly());
+
+    await wiredEngine.run(makeGoal({
+      type: 'splitter',
+      budget: { attempts: 5, tokens: 10000, toolCalls: 50, wallClockMs: 60000 },
+    }));
+
+    expect(wiredCalls).toBe(baselineCalls);
   });
 });

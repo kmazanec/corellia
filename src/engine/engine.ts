@@ -138,9 +138,16 @@ export interface EngineOptions {
    * comprehension ChildPlans are minted and injected as dependencies of every
    * existing child so the ordinary dependency scheduler sequences them first.
    * On pass, a gate-checked {ok:true} event is emitted with no extra brain
-   * calls (the check is purely mechanical). At decide/split/integrate
-   * checkpoints, consumed artifacts are verified for SHA drift; a drifted
-   * artifact that fails self-validation spawns a refresh child as a dependency.
+   * calls (the check is purely mechanical). At the split checkpoint, consumed
+   * artifacts are verified for SHA drift; a drifted artifact that fails
+   * self-validation spawns a refresh child as a dependency.
+   *
+   * CHECKPOINT STATUS: only the split checkpoint (verify-on-read before fan-out)
+   * is currently wired. The decide checkpoint and the integrate checkpoint are
+   * deferred — they do not fire in this implementation.
+   *
+   * SANDBOX REQUIREMENT: the gate is skipped when no sandbox is active (repoRoot
+   * would be ''); knowledge wiring requires a sandbox.
    *
    * When absent, behavior is byte-identical to a run without this option —
    * zero new events, no new brain calls (regression guard, AC-6).
@@ -731,10 +738,20 @@ export class Engine {
         // query only — no brain call, no side effect.
         let childrenToSplit = decision.children;
         if (this.knowledge !== undefined) {
-          childrenToSplit = await this.runCoverageGate(
-            goal, typeDef.kind as 'make' | 'learn' | 'judge' | 'evolve',
-            decision.children, treeState,
-          );
+          try {
+            childrenToSplit = await this.runCoverageGate(
+              goal, typeDef.kind as 'make' | 'learn' | 'judge' | 'evolve',
+              decision.children, treeState,
+            );
+          } catch (gateErr) {
+            // FIX 2: coverage gate threw a structural split error (injection
+            // pushed children over the budget). Block through the existing
+            // structural-error block path rather than silently over-subdividing.
+            const msg = gateErr instanceof Error ? gateErr.message : String(gateErr);
+            const report = blockedReport(`Split structural validation failed after coverage injection: ${msg}`);
+            await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
+            return report;
+          }
         }
 
         const splitReport = await this.runSplit(goal, childrenToSplit, terracedLoserFindings, treeState);
@@ -1715,6 +1732,19 @@ export class Engine {
    * children list so the dependency scheduler sequences comprehension first.
    *
    * No brain call on either path. The check is a projection query only.
+   *
+   * SANDBOX REQUIREMENT: knowledge wiring requires an active sandbox/assembly
+   * (so that repoRoot is a real path). When no sandbox is active the gate is
+   * skipped entirely — children are returned unchanged and no gate-checked event
+   * is emitted. Callers that want gate enforcement must configure a sandbox.
+   *
+   * GATE-CHECKED MISSING ENCODING: each entry in the `missing` array of the
+   * gate-checked event is encoded by {@link encodeMissing}.
+   *
+   * CHECKPOINT: verify-on-read fires at the split gate only. The integrate
+   * checkpoint is deferred (not yet wired); the EngineOptions.knowledge docstring
+   * describes the intended three-checkpoint design but only the split checkpoint
+   * is currently implemented.
    */
   private async runCoverageGate(
     goal: Goal,
@@ -1726,11 +1756,12 @@ export class Engine {
     const kw = this.knowledge;
     if (kw === undefined) return children;
 
-    // Determine repoRoot: prefer the sandbox's repoRoot when available
-    // (the assembly provides the concrete path). For tests and non-sandbox
-    // runs, fall back to an empty string — the synthetic knowledge stub in
-    // tests always returns the pre-built KnowledgeForCoverage regardless.
-    const repoRoot = this._activeAssembly?.worktree.repoRoot ?? '';
+    // FIX 5: knowledge wiring requires a sandbox with a real repoRoot.
+    // Without a sandbox the gate cannot query meaningful knowledge — skip it
+    // entirely so callers never query with repoRoot '' by accident.
+    if (this._activeAssembly === undefined) return children;
+
+    const repoRoot = this._activeAssembly.worktree.repoRoot;
 
     const knowledgeState = await kw.query(repoRoot);
 
@@ -1738,9 +1769,8 @@ export class Engine {
     // Before running the coverage check, verify any artifacts the goal's kind
     // would consume. On drift, validate; pass → stale-validated event + proceed;
     // fail → invalid event + inject refresh child as a dependency.
-    const { refreshChildren, validatedOk } = await this.checkpointVerifyArtifacts(
-      goal, knowledgeState, repoRoot, kw,
-    );
+    const { refreshChildren, validatedOk, refreshedCategories } =
+      await this.checkpointVerifyArtifacts(goal, knowledgeState, repoRoot, kw);
 
     // Build a goal model for coverageCheck — use the parent's kind and split status.
     // For a root split, the check covers architecture + stack.
@@ -1769,33 +1799,48 @@ export class Engine {
 
     const result = coverageCheck(effectiveCoverageGoal, knowledgeState, validatedOk);
 
+    // FIX 3: filter out categories already covered by a refresh child so that
+    // an invalid-then-refreshed category never produces two children for the
+    // same category (one from checkpointVerifyArtifacts and one from
+    // mintComprehension). Each category gets exactly one child.
+    const filteredMissing = result.missing.filter(
+      (m) => !refreshedCategories.has(m.category),
+    );
+    const filteredResult = { ok: filteredMissing.length === 0, missing: filteredMissing };
+
     // Emit gate-checked (always, per spec)
     await this.store.append({
       type: 'gate-checked',
       at: t(),
       goalId: goal.id,
-      ok: result.ok && refreshChildren.length === 0,
+      ok: filteredResult.ok && refreshChildren.length === 0,
       missing: [
-        ...result.missing.map((m) =>
-          m.region !== undefined
-            ? `${m.category}:${m.region}`
-            : m.category,
-        ),
+        ...filteredResult.missing.map(encodeMissing),
         ...refreshChildren.map((rc) => `refresh:${rc.type}:${rc.localId}`),
       ],
     });
 
-    if (result.ok && refreshChildren.length === 0) {
+    if (filteredResult.ok && refreshChildren.length === 0) {
       // Gate passes — no new children, no extra brain calls
       return children;
     }
 
-    // Gate failed — mint comprehension children for the misses
+    // Gate failed — mint comprehension children for the filtered misses
     const comprehensionChildren: ChildPlan[] =
-      result.ok ? [] : kw.mintComprehension(result.missing);
+      filteredResult.ok ? [] : kw.mintComprehension(filteredResult.missing);
+
+    // FIX 3: strip dependsOn on minted children to prevent cycles by construction
+    const safeComprehensionChildren = comprehensionChildren.map((c) => ({
+      ...c,
+      dependsOn: [],
+    }));
+    const safeRefreshChildren = refreshChildren.map((c) => ({
+      ...c,
+      dependsOn: [],
+    }));
 
     // Merge all injected children (comprehension + refresh from drift)
-    const allInjected: ChildPlan[] = [...comprehensionChildren, ...refreshChildren];
+    const allInjected: ChildPlan[] = [...safeComprehensionChildren, ...safeRefreshChildren];
 
     if (allInjected.length === 0) return children;
 
@@ -1812,6 +1857,16 @@ export class Engine {
       })),
     ];
 
+    // FIX 2: re-validate the augmented split against the parent budget.
+    // Comprehension/refresh injection can push the child count past the parent's
+    // attempt budget — that is a structural split error. Throw so the caller
+    // catches it and routes through the existing structural-error block path,
+    // never silently proceeding with an over-budget fan-out.
+    const augmentedErr = validateSplit(augmentedChildren, goal.budget);
+    if (augmentedErr) {
+      throw new Error(`coverage-gate-invalid-split:${augmentedErr}`);
+    }
+
     return augmentedChildren;
   }
 
@@ -1821,23 +1876,35 @@ export class Engine {
    *   - pass → emit knowledge-checked {stale-validated}, proceed, mark validated
    *   - fail → emit knowledge-checked {invalid}, return a refresh ChildPlan
    *
-   * Returns both the refresh children to inject AND the set of categories that
-   * were validated OK — the latter is passed into coverageCheck so validated
-   * stale artifacts are not double-reported as missing.
+   * Returns:
+   *   - refreshChildren: ChildPlans to inject for invalid artifacts
+   *   - validatedOk: categories that were stale-validated (coverageCheck treats
+   *     these as fresh to avoid double-reporting)
+   *   - refreshedCategories: categories for which a refresh child was minted
+   *     (coverageCheck misses for these categories are filtered out before
+   *     mintComprehension so exactly one child is spawned per category)
    *
-   * This is the minimal honest implementation: runs at the split checkpoint
-   * (before fan-out). The decide checkpoint re-runs this before the first split
-   * decision, and the integration entry re-runs for root goals.
+   * CHECKPOINT SCOPE: this checkpoint fires at the split gate only. There is no
+   * decide checkpoint or integrate checkpoint currently wired — the EngineOptions
+   * docstring describes the intended three-checkpoint design as a future target.
+   * The integrate checkpoint is deferred.
    */
   private async checkpointVerifyArtifacts(
     goal: Goal,
     knowledge: KnowledgeForCoverage,
     repoRoot: string,
     kw: NonNullable<EngineOptions['knowledge']>,
-  ): Promise<{ refreshChildren: ChildPlan[]; validatedOk: Set<import('../contract/knowledge.js').KnowledgeCategory> }> {
+  ): Promise<{
+    refreshChildren: ChildPlan[];
+    validatedOk: Set<import('../contract/knowledge.js').KnowledgeCategory>;
+    refreshedCategories: Set<import('../contract/knowledge.js').KnowledgeCategory>;
+  }> {
     const t = this.now;
     const refreshChildren: ChildPlan[] = [];
     const validatedOk = new Set<import('../contract/knowledge.js').KnowledgeCategory>();
+    // FIX 3: track which categories already have a refresh child so
+    // mintComprehension does not spawn a second child for the same category.
+    const refreshedCategories = new Set<import('../contract/knowledge.js').KnowledgeCategory>();
 
     for (const artifact of knowledge.artifacts) {
       if (artifact.generatedAtSha === knowledge.headSha) {
@@ -1892,10 +1959,13 @@ export class Engine {
         }];
         const minted = kw.mintComprehension(refreshMissing);
         refreshChildren.push(...minted);
+        // Track the refreshed category so coverageCheck's missing list for this
+        // category is filtered out — exactly one child per category.
+        refreshedCategories.add(artifact.category);
       }
     }
 
-    return { refreshChildren, validatedOk };
+    return { refreshChildren, validatedOk, refreshedCategories };
   }
 
   // ── SPLIT PATH ────────────────────────────────────────────────────────────
@@ -2391,6 +2461,19 @@ function isomorphicBrief(
     deadlineMs: 30_000,
     onTimeout: 'deny',
   };
+}
+
+/**
+ * Encode a missing requirement into the gate-checked event's missing[] string
+ * format: the single source of truth for this encoding so callers (gate
+ * emission and tests) never diverge.
+ *
+ * Encoding:
+ *   - Category miss:  "<category>"              (e.g. "architecture")
+ *   - Region miss:    "<category>:<region>"     (e.g. "architecture:src/payments")
+ */
+function encodeMissing(m: MissingRequirement): string {
+  return m.region !== undefined ? `${m.category}:${m.region}` : m.category;
 }
 
 /**

@@ -140,12 +140,17 @@ export interface CoverageCheckResult {
  *
  * @param goal   The goal being checked — minimal structural slice.
  * @param knowledge  The available knowledge for the repo.
+ * @param validatedCategories  Categories that have been verified as stale-but-valid
+ *   by the checkpoint verify-on-read step — these are treated as fresh regardless
+ *   of SHA mismatch. This prevents a validated stale artifact from being flagged
+ *   again as missing by the coverage check.
  * @returns {ok, missing} — ok:true means the gate passes; ok:false means the
  *   gate records missing[] and the engine should spawn comprehension children.
  */
 export function coverageCheck(
   goal: CoverageGoal,
   knowledge: KnowledgeForCoverage,
+  validatedCategories: Set<KnowledgeCategory> = new Set(),
 ): CoverageCheckResult {
   // ── 1. learn-kind exemption ──────────────────────────────────────────────
   if (goal.kind === 'learn') {
@@ -179,7 +184,9 @@ export function coverageCheck(
         reason: `No ${category} artifact exists — must be generated before this split can proceed`,
       };
     }
-    if (artifact.generatedAtSha !== headSha) {
+    // A stale artifact that has been verified by checkpoint verify-on-read
+    // (stale-validated) is treated as fresh for the purpose of this check.
+    if (artifact.generatedAtSha !== headSha && !validatedCategories.has(category)) {
       return {
         category,
         reason: `${category} artifact is stale (generated at ${artifact.generatedAtSha}, HEAD is ${headSha}) — verify-on-read will validate; if invalid a refresh is needed`,

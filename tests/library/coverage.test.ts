@@ -340,3 +340,59 @@ describe('stale artifact detection', () => {
     expect(result.ok).toBe(true);
   });
 });
+
+// ── validatedCategories — stale-but-validated artifacts treated as fresh ──────
+
+describe('validatedCategories parameter', () => {
+  it('stale artifact in validatedCategories is treated as fresh (no miss)', () => {
+    const validated = new Set<import('../../src/contract/knowledge.js').KnowledgeCategory>(
+      ['architecture' as const],
+    );
+    const result = coverageCheck(
+      makeGoal({ isRootSplit: true }),
+      makeKnowledge({
+        artifacts: [
+          { category: 'architecture', generatedAtSha: STALE, repoRoot: '/repo' },
+          { category: 'stack', generatedAtSha: HEAD, repoRoot: '/repo' },
+        ],
+      }),
+      validated,
+    );
+    expect(result.ok).toBe(true);
+    expect(result.missing).toHaveLength(0);
+  });
+
+  it('stale artifact NOT in validatedCategories is still reported as missing', () => {
+    const validated = new Set<import('../../src/contract/knowledge.js').KnowledgeCategory>();
+    const result = coverageCheck(
+      makeGoal({ isRootSplit: true }),
+      makeKnowledge({
+        artifacts: [
+          { category: 'architecture', generatedAtSha: STALE, repoRoot: '/repo' },
+          { category: 'stack', generatedAtSha: HEAD, repoRoot: '/repo' },
+        ],
+      }),
+      validated,
+    );
+    expect(result.ok).toBe(false);
+    const cats = result.missing.map((m) => m.category);
+    expect(cats).toContain('architecture');
+  });
+
+  it('default empty set behaves identically to the two-arg form', () => {
+    const knowledge = makeKnowledge({
+      artifacts: [
+        { category: 'architecture', generatedAtSha: STALE, repoRoot: '/repo' },
+        { category: 'stack', generatedAtSha: HEAD, repoRoot: '/repo' },
+      ],
+    });
+    const twoArg = coverageCheck(makeGoal({ isRootSplit: true }), knowledge);
+    const threeArg = coverageCheck(
+      makeGoal({ isRootSplit: true }),
+      knowledge,
+      new Set(),
+    );
+    expect(twoArg.ok).toBe(threeArg.ok);
+    expect(twoArg.missing.length).toBe(threeArg.missing.length);
+  });
+});
