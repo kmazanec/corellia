@@ -6,6 +6,17 @@ import { InMemoryEventStore } from '../../src/eventlog/memory-store.js';
 import { JsonlEventStore } from '../../src/eventlog/jsonl-store.js';
 import type { FactoryEvent } from '../../src/contract/events.js';
 
+// script-ran fixture
+const scriptRan: FactoryEvent = {
+  type: 'script-ran',
+  at: 9000,
+  goalId: 'g1',
+  command: 'test',
+  exitStatus: 0,
+  durationMs: 123,
+  outputRef: 'g1:test:9000',
+};
+
 // Minimal valid FactoryEvent fixtures — no engine or brain imports.
 const goalA: FactoryEvent = {
   type: 'goal-received',
@@ -121,6 +132,22 @@ describe('InMemoryEventStore', () => {
     await store.append(goalA);
     expect(await store.list({ goalId: 'nonexistent' })).toHaveLength(0);
   });
+
+  it('round-trips a script-ran event with all required fields', async () => {
+    const store = new InMemoryEventStore();
+    await store.append(scriptRan);
+
+    const all = await store.list({ type: 'script-ran' });
+    expect(all).toHaveLength(1);
+
+    const ev = all[0] as Extract<FactoryEvent, { type: 'script-ran' }>;
+    expect(ev.type).toBe('script-ran');
+    expect(ev.goalId).toBe('g1');
+    expect(ev.command).toBe('test');
+    expect(ev.exitStatus).toBe(0);
+    expect(ev.durationMs).toBe(123);
+    expect(ev.outputRef).toBe('g1:test:9000');
+  });
 });
 
 // ──────────────────────────────────────────────
@@ -195,5 +222,22 @@ describe('JsonlEventStore', () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'corellia-test-'));
     const store = new JsonlEventStore(join(tmpDir, 'missing.jsonl'));
     expect(await store.list()).toHaveLength(0);
+  });
+
+  it('round-trips a script-ran event through JSONL with all required fields', async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'corellia-test-'));
+    const store = new JsonlEventStore(join(tmpDir, 'events.jsonl'));
+    await store.append(scriptRan);
+
+    const all = await store.list({ type: 'script-ran' });
+    expect(all).toHaveLength(1);
+
+    const ev = all[0] as Extract<FactoryEvent, { type: 'script-ran' }>;
+    expect(ev.type).toBe('script-ran');
+    expect(ev.goalId).toBe('g1');
+    expect(ev.command).toBe('test');
+    expect(ev.exitStatus).toBe(0);
+    expect(ev.durationMs).toBe(123);
+    expect(ev.outputRef).toBe('g1:test:9000');
   });
 });
