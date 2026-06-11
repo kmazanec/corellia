@@ -66,15 +66,11 @@ human signoff (ADR-011). The factory is operated by one person at a terminal
 | [ADR-011](./adrs/ADR-011-flywheel-trust-mechanics.md) | Spec-shape memo matching; human-only trust | Accepted | no | yes |
 | [ADR-012](./adrs/ADR-012-secrets-via-environment.md) | Secrets only through the environment | Accepted | no | no |
 | [ADR-013](./adrs/ADR-013-families-exact-grants.md) | Families with exact static grants | Accepted | no | no |
-| ADR-014 *(pending)* | Tool interface + broker | — | — | yes |
-| ADR-015 *(pending)* | Where the agentic leaf loop lives | — | — | yes |
-| ADR-016 *(pending)* | Sandbox/security model for leaf execution | — | — | no |
-| ADR-017 *(pending)* | Real token/dollar accounting | — | — | no |
-| ADR-018 *(pending)* | Provider-failure semantics | — | — | no |
-
-ADRs 014–018 are iteration 3's gate-brief decisions; they are listed so the
-roadmap can cite them before they're written. Numbers are reserved, not
-decided.
+| [ADR-014](./adrs/ADR-014-tool-interface-broker.md) | One Tool contract, one Broker | Accepted | no | yes |
+| [ADR-015](./adrs/ADR-015-engine-owned-step-loop.md) | Engine-owned step loop; brain pure per step | Accepted | no | yes |
+| [ADR-016](./adrs/ADR-016-worktree-per-tree-bare-exec.md) | Worktree per tree; declared scripts, bare exec | Accepted | no | no |
+| [ADR-017](./adrs/ADR-017-provider-usage-accounting.md) | Provider-reported usage; $15 tree ceiling | Accepted | no | no |
+| [ADR-018](./adrs/ADR-018-provider-failure-semantics.md) | Three-layer provider-failure resolution | Accepted | no | no |
 
 ## Non-goals
 
