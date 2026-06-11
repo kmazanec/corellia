@@ -231,7 +231,7 @@ console.log('');
 console.log(`Target:   ${targetRepo}${targetRepo === corelliaRoot ? ' (corellia itself)' : ' (foreign)'}`);
 console.log(`Plan:     map-repo x${CATEGORIES.length} (${CATEGORIES.join(', ')}) + deep-dive-region (${diveRegion})`);
 console.log(`Test:     ${declaredTest ? declaredTest.entry : '(no declared test script — test-scaffold validation will soft-pass)'}`);
-console.log('Brain:    LlmBrain via OpenRouter (Anthropic model family)');
+console.log('Brain:    LlmBrain via OpenRouter (tier defaults from openRouterConfig)');
 console.log('Mode:     READ-ONLY — learn grants only; worktree isolated; torn down after each goal');
 console.log('');
 

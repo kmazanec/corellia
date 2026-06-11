@@ -163,7 +163,7 @@ console.log('╚═════════════════════�
 console.log('');
 console.log(`Repo:   ${repoRoot} (throwaway git fixture)`);
 console.log(`Goal:   make \`npm test\` pass by writing ${TARGET_FILE}`);
-console.log('Brain:  LlmBrain via OpenRouter (Anthropic model family)');
+console.log('Brain:  LlmBrain via OpenRouter (tier defaults from openRouterConfig)');
 console.log('');
 
 // ---------------------------------------------------------------------------
