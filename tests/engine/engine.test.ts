@@ -11,6 +11,7 @@ import {
   alwaysFailCheck,
   failThenPassCheck,
   ScriptedBrain,
+  rawBrain,
   makeGoal,
   textArtifact,
   filesArtifact,
@@ -284,6 +285,9 @@ describe('split with dependency chain', () => {
       async repair(goal: import('../../src/contract/goal.js').Goal, artifact: import('../../src/contract/report.js').Artifact, prescriptions: string[], ctx: import('../../src/contract/brain.js').BrainContext) {
         return brain.repair(goal, artifact, prescriptions, ctx);
       },
+      async step(): Promise<import('../../src/contract/brain.js').StepOutput> {
+        throw new Error('trackingBrain.step: not used in this test');
+      },
     };
 
     const engine = new Engine({
@@ -435,7 +439,7 @@ describe('lesson promotion and memory reinforcement', () => {
 
     const engine = new Engine({
       registry,
-      brain: leafBrain,
+      brain: rawBrain(leafBrain),
       store,
       memory: memoryView,
       now: () => 1,
@@ -546,7 +550,7 @@ describe('lesson promotion and memory reinforcement', () => {
 
     const engine = new Engine({
       registry,
-      brain,
+      brain: rawBrain(brain),
       store,
       memory: memoryView,
       now: () => 1,
@@ -625,7 +629,7 @@ describe('leafOnly-split rejection', () => {
     const store = new MemoryEventStore();
     let decideCalled = false;
 
-    const brain = {
+    const brain = rawBrain({
       async decide() {
         decideCalled = true;
         return { kind: 'satisfy' as const };
@@ -639,7 +643,7 @@ describe('leafOnly-split rejection', () => {
       async repair() {
         return textArtifact('');
       },
-    };
+    });
 
     const registry = buildRegistry([leafTypeDef({ name: 'leaf', leafOnly: true })]);
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
@@ -871,7 +875,7 @@ describe('fix 7 — child throws become blocked reports', () => {
       budgetShare: 0.5,
     };
 
-    const brain = {
+    const brain = rawBrain({
       async decide() {
         return { kind: 'split' as const, children: [childA, childB] };
       },
@@ -884,7 +888,7 @@ describe('fix 7 — child throws become blocked reports', () => {
       async repair() {
         return textArtifact('');
       },
-    };
+    });
 
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
     const goal = makeGoal({ type: 'splitter', id: 'root' });

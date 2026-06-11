@@ -17,12 +17,14 @@
  *   are detected.
  */
 
-import type { Brain, BrainContext } from '../contract/brain.js';
-import type { Goal } from '../contract/goal.js';
+import type { Brain, BrainContext, StepOutput, StepTranscript } from '../contract/brain.js';
+import type { Goal, Metered } from '../contract/goal.js';
+import { ZERO_USAGE } from '../contract/goal.js';
 import type { Tier } from '../contract/goal.js';
 import type { MemoryPointer } from '../contract/goal.js';
 import type { Decision } from '../contract/decision.js';
 import type { Artifact } from '../contract/report.js';
+import type { ToolDef } from '../contract/tool.js';
 import type { Verdict, Finding } from '../contract/verdict.js';
 
 // ---------------------------------------------------------------------------
@@ -281,7 +283,7 @@ export class LlmBrain implements Brain {
   // Brain interface
   // -------------------------------------------------------------------------
 
-  async decide(goal: Goal, ctx: BrainContext): Promise<Decision> {
+  async decide(goal: Goal, ctx: BrainContext): Promise<Metered<Decision>> {
     const model = this.config.modelByTier[ctx.tier];
     // When a type catalog is available, inject it so the model can name real
     // goal-types in a split rather than inventing names the registry will reject.
@@ -311,10 +313,11 @@ export class LlmBrain implements Brain {
           `Reply with ONLY the JSON object — no prose, no markdown fences.`,
       },
     ];
-    return this.callJson(model, messages, parseDecision);
+    const value = await this.callJson(model, messages, parseDecision);
+    return { value, usage: ZERO_USAGE };
   }
 
-  async produce(goal: Goal, ctx: BrainContext): Promise<Artifact> {
+  async produce(goal: Goal, ctx: BrainContext): Promise<Metered<Artifact>> {
     const model = this.config.modelByTier[ctx.tier];
     const messages: ChatMessage[] = [
       {
@@ -336,10 +339,8 @@ export class LlmBrain implements Brain {
     ];
     const raw = await this.callCompletions(model, messages, false);
     const files = parseFileBlocks(raw);
-    if (files.length > 0) {
-      return { kind: 'files', files };
-    }
-    return { kind: 'text', text: raw };
+    const value: Artifact = files.length > 0 ? { kind: 'files', files } : { kind: 'text', text: raw };
+    return { value, usage: ZERO_USAGE };
   }
 
   async judge(
@@ -347,7 +348,7 @@ export class LlmBrain implements Brain {
     subject: Artifact,
     rubric: string,
     ctx: BrainContext,
-  ): Promise<Verdict> {
+  ): Promise<Metered<Verdict>> {
     const model = this.config.modelByTier[ctx.tier];
     const subjectSummary =
       subject.kind === 'files'
@@ -387,7 +388,8 @@ export class LlmBrain implements Brain {
           `Set pass=false and add a gating finding whenever the artifact fails the rubric.`,
       },
     ];
-    return this.callJson(model, messages, parseVerdict);
+    const value = await this.callJson(model, messages, parseVerdict);
+    return { value, usage: ZERO_USAGE };
   }
 
   async repair(
@@ -395,7 +397,7 @@ export class LlmBrain implements Brain {
     artifact: Artifact,
     prescriptions: string[],
     ctx: BrainContext,
-  ): Promise<Artifact> {
+  ): Promise<Metered<Artifact>> {
     const model = this.config.modelByTier[ctx.tier];
     const artifactDesc =
       artifact.kind === 'files'
@@ -422,9 +424,16 @@ export class LlmBrain implements Brain {
     ];
     const raw = await this.callCompletions(model, messages, false);
     const files = parseFileBlocks(raw);
-    if (files.length > 0) {
-      return { kind: 'files', files };
-    }
-    return { kind: 'text', text: raw };
+    const value: Artifact = files.length > 0 ? { kind: 'files', files } : { kind: 'text', text: raw };
+    return { value, usage: ZERO_USAGE };
+  }
+
+  async step(
+    _goal: Goal,
+    _transcript: StepTranscript,
+    _tools: ToolDef[],
+    _ctx: BrainContext,
+  ): Promise<StepOutput> {
+    throw new Error('step not implemented — lands with F-32/F-36');
   }
 }

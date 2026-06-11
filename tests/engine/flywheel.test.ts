@@ -23,9 +23,11 @@ import {
   textArtifact,
   passVerdict,
   failVerdict,
+  rawBrain,
 } from './stubs.js';
+import type { RawBrain } from './stubs.js';
 import type { ChildPlan } from '../../src/contract/decision.js';
-import type { Brain, BrainContext } from '../../src/contract/brain.js';
+import type { BrainContext } from '../../src/contract/brain.js';
 import type { Goal } from '../../src/contract/goal.js';
 import type { Artifact } from '../../src/contract/report.js';
 import type { Verdict } from '../../src/contract/verdict.js';
@@ -48,7 +50,7 @@ function oneChildSplit(): ChildPlan[] {
 }
 
 // A brain that throws if decide is ever called — proves trusted memo bypasses it.
-function throwingDecideBrain(): Brain {
+function throwingDecideBrain(): RawBrain {
   return {
     async decide(_goal: Goal, _ctx: BrainContext) {
       throw new Error('brain.decide must not be called for a trusted memo');
@@ -87,7 +89,7 @@ describe('flywheel — trusted memo skips brain.decide', () => {
 
     const engine = new Engine({
       registry,
-      brain,
+      brain: rawBrain(brain),
       store,
       memory: new NoopMemoryView(),
       patterns,
@@ -122,7 +124,7 @@ describe('flywheel — trusted memo skips brain.decide', () => {
     await patterns.promote('splitter|{}|goal test', 'trusted');
 
     let judgeCallCount = 0;
-    const brain: Brain = {
+    const brain: RawBrain = {
       async decide() {
         throw new Error('decide must not be called for trusted memo');
       },
@@ -146,7 +148,7 @@ describe('flywheel — trusted memo skips brain.decide', () => {
 
     const engine = new Engine({
       registry,
-      brain,
+      brain: rawBrain(brain),
       store,
       memory: new NoopMemoryView(),
       patterns,
@@ -174,7 +176,7 @@ describe('flywheel — provisional memo arrives as patternHint', () => {
 
     let capturedHint: SplitMemo | undefined;
 
-    const brain: Brain = {
+    const brain: RawBrain = {
       async decide(_goal: Goal, ctx: BrainContext) {
         capturedHint = ctx.patternHint;
         return splitDecision;
@@ -197,7 +199,7 @@ describe('flywheel — provisional memo arrives as patternHint', () => {
 
     const engine = new Engine({
       registry,
-      brain,
+      brain: rawBrain(brain),
       store,
       memory: new NoopMemoryView(),
       patterns,
@@ -222,7 +224,7 @@ describe('flywheel — provisional memo arrives as patternHint', () => {
 
     let capturedHint: SplitMemo | undefined = { shape: 'sentinel' } as unknown as SplitMemo;
 
-    const brain: Brain = {
+    const brain: RawBrain = {
       async decide(_goal: Goal, ctx: BrainContext) {
         capturedHint = ctx.patternHint;
         return { kind: 'split' as const, children: oneChildSplit() };
@@ -245,7 +247,7 @@ describe('flywheel — provisional memo arrives as patternHint', () => {
 
     const engine = new Engine({
       registry,
-      brain,
+      brain: rawBrain(brain),
       store,
       memory: new NoopMemoryView(),
       patterns,
@@ -267,7 +269,7 @@ describe('flywheel — terraced scan', () => {
 
     const lensesUsed: string[] = [];
 
-    const brain: Brain = {
+    const brain: RawBrain = {
       async decide(_goal: Goal, ctx: BrainContext) {
         if (ctx.lens !== undefined) lensesUsed.push(ctx.lens);
         return { kind: 'split' as const, children: oneChildSplit() };
@@ -294,7 +296,7 @@ describe('flywheel — terraced scan', () => {
 
     const engine = new Engine({
       registry,
-      brain,
+      brain: rawBrain(brain),
       store,
       memory: new NoopMemoryView(),
       patterns,
@@ -317,7 +319,7 @@ describe('flywheel — terraced scan', () => {
     let judgeCallCount = 0;
     // candidate 0 fails, candidate 1 passes, candidate 2 passes
     // winner must be candidate 1 (first pass)
-    const brain: Brain = {
+    const brain: RawBrain = {
       async decide(_goal: Goal, _ctx: BrainContext) {
         return { kind: 'split' as const, children: oneChildSplit() };
       },
@@ -345,7 +347,7 @@ describe('flywheel — terraced scan', () => {
 
     const engine = new Engine({
       registry,
-      brain,
+      brain: rawBrain(brain),
       store,
       memory: new NoopMemoryView(),
       patterns,
@@ -365,7 +367,7 @@ describe('flywheel — terraced scan', () => {
 
     // All candidates pass — winner is first (all identical splits), other two are losers.
     // judge returns passVerdict() so the first candidate wins; losers are the other two.
-    const brain: Brain = {
+    const brain: RawBrain = {
       async decide(_goal: Goal, _ctx: BrainContext) {
         return { kind: 'split' as const, children: oneChildSplit() };
       },
@@ -391,7 +393,7 @@ describe('flywheel — terraced scan', () => {
 
     const engine = new Engine({
       registry,
-      brain,
+      brain: rawBrain(brain),
       store,
       memory: new NoopMemoryView(),
       patterns,
@@ -422,7 +424,7 @@ describe('flywheel — terraced scan', () => {
     let fallbackPriorAttempt: { artifact: Artifact | null; verdict: Verdict } | undefined;
     let decideCallCount = 0;
 
-    const brain: Brain = {
+    const brain: RawBrain = {
       async decide(_goal: Goal, ctx: BrainContext) {
         decideCallCount++;
         if (decideCallCount <= 3) {
@@ -457,7 +459,7 @@ describe('flywheel — terraced scan', () => {
 
     const engine = new Engine({
       registry,
-      brain,
+      brain: rawBrain(brain),
       store,
       memory: new NoopMemoryView(),
       patterns,
@@ -487,7 +489,7 @@ describe('flywheel — terraced scan', () => {
 
     let lensPassedToDecide: string | undefined = 'not-set';
 
-    const brain: Brain = {
+    const brain: RawBrain = {
       async decide(_goal: Goal, ctx: BrainContext) {
         lensPassedToDecide = ctx.lens;
         return { kind: 'split' as const, children: oneChildSplit() };
@@ -514,7 +516,7 @@ describe('flywheel — terraced scan', () => {
 
     const engine = new Engine({
       registry,
-      brain,
+      brain: rawBrain(brain),
       store,
       memory: new NoopMemoryView(),
       patterns,
@@ -535,7 +537,7 @@ describe('flywheel — pattern recorded after split', () => {
     const store = new MemoryEventStore();
     const patterns = new InMemoryPatternStore();
 
-    const brain: Brain = {
+    const brain: RawBrain = {
       async decide() {
         return { kind: 'split' as const, children: oneChildSplit() };
       },
@@ -557,7 +559,7 @@ describe('flywheel — pattern recorded after split', () => {
 
     const engine = new Engine({
       registry,
-      brain,
+      brain: rawBrain(brain),
       store,
       memory: new NoopMemoryView(),
       patterns,
@@ -582,7 +584,7 @@ describe('flywheel — pattern recorded after split', () => {
     const store = new MemoryEventStore();
     const patterns = new InMemoryPatternStore();
 
-    const brain: Brain = {
+    const brain: RawBrain = {
       async decide() {
         return { kind: 'split' as const, children: oneChildSplit() };
       },
@@ -610,7 +612,7 @@ describe('flywheel — pattern recorded after split', () => {
 
     const engine = new Engine({
       registry,
-      brain,
+      brain: rawBrain(brain),
       store,
       memory: new NoopMemoryView(),
       patterns,
@@ -646,7 +648,7 @@ describe('flywheel — pattern recorded after split', () => {
       async list() { return inner.list(); },
     };
 
-    const brain: Brain = {
+    const brain: RawBrain = {
       async decide() {
         return { kind: 'split' as const, children: oneChildSplit() };
       },
@@ -668,7 +670,7 @@ describe('flywheel — pattern recorded after split', () => {
 
     const engine = new Engine({
       registry,
-      brain,
+      brain: rawBrain(brain),
       store,
       memory: new NoopMemoryView(),
       patterns,
@@ -688,7 +690,7 @@ describe('flywheel — recurring shape', () => {
     const store = new MemoryEventStore();
     const patterns = new InMemoryPatternStore();
 
-    const brain: Brain = {
+    const brain: RawBrain = {
       async decide() {
         return { kind: 'split' as const, children: oneChildSplit() };
       },
@@ -710,7 +712,7 @@ describe('flywheel — recurring shape', () => {
 
     const engine = new Engine({
       registry,
-      brain,
+      brain: rawBrain(brain),
       store,
       memory: new NoopMemoryView(),
       patterns,

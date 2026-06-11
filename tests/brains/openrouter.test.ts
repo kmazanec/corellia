@@ -182,7 +182,7 @@ describe('LlmBrain produce artifact JSON roundtrip', () => {
     const { fetch } = stubFetch(chatResponse(content));
     const cfg = openRouterConfig({ OPENROUTER_API_KEY: 'test-key' });
     const brain = new LlmBrain({ ...cfg, fetchImpl: fetch });
-    const artifact = await brain.produce(baseGoal, ctxSonnet);
+    const { value: artifact } = await brain.produce(baseGoal, ctxSonnet);
     expect(artifact.kind).toBe('files');
     expect(artifact.files).toHaveLength(1);
     expect(artifact.files?.[0]?.path).toBe('out/live/wc.mjs');
@@ -196,7 +196,7 @@ describe('LlmBrain produce artifact JSON roundtrip', () => {
     const { fetch } = stubFetch(chatResponse(content));
     const cfg = openRouterConfig({ OPENROUTER_API_KEY: 'test-key' });
     const brain = new LlmBrain({ ...cfg, fetchImpl: fetch });
-    const artifact = await brain.produce(baseGoal, ctxSonnet);
+    const { value: artifact } = await brain.produce(baseGoal, ctxSonnet);
     expect(artifact.kind).toBe('files');
     expect(artifact.files).toHaveLength(2);
     expect(artifact.files?.[0]?.path).toBe('out/live/wc.mjs');
@@ -207,7 +207,7 @@ describe('LlmBrain produce artifact JSON roundtrip', () => {
     const { fetch } = stubFetch(chatResponse('word count implementation notes'));
     const cfg = openRouterConfig({ OPENROUTER_API_KEY: 'test-key' });
     const brain = new LlmBrain({ ...cfg, fetchImpl: fetch });
-    const artifact = await brain.produce(baseGoal, ctxSonnet);
+    const { value: artifact } = await brain.produce(baseGoal, ctxSonnet);
     expect(artifact.kind).toBe('text');
     expect(artifact.text).toContain('word count');
   });

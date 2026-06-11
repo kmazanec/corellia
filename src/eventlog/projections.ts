@@ -160,6 +160,20 @@ export function traceStats(events: FactoryEvent[]): Record<string, GoalTypeStats
       case 'tier-escalated':
         s.escalations += 1;
         break;
+
+      // Iteration-3 members do not contribute to the per-type stats yet; a
+      // later projection counts tool, step, script, worktree, and spend events.
+      case 'tool-call':
+      case 'step':
+      case 'script-ran':
+      case 'worktree-created':
+      case 'worktree-collected':
+      case 'worktree-preserved':
+      case 'produced':
+      case 'ceiling-reached':
+      case 'transport-retry':
+      case 'malformation-reprompt':
+        break;
     }
   }
 

@@ -256,7 +256,7 @@ export class Engine {
           terracedLoserFindings = scanResult.loserFindings;
         } else {
           // Normal single-derive path: no memo, or scan not warranted.
-          decision = await this.brain.decide(goal, baseCtx);
+          decision = (await this.brain.decide(goal, baseCtx)).value;
         }
       }
     }
@@ -341,7 +341,7 @@ export class Engine {
             memories: goal.memories,
             priorAttempt: { artifact: splitPlanArtifact, verdict: failVerdict },
           };
-          decision = await this.brain.decide(goal, reDecideCtx);
+          decision = (await this.brain.decide(goal, reDecideCtx)).value;
           if (decision.kind !== 'split') break; // changed its mind
           continue;
         }
@@ -358,7 +358,7 @@ export class Engine {
             tier: currentTier,
             memories: goal.memories,
           };
-          const splitVerdict = await this.brain.judge(
+          const { value: splitVerdict } = await this.brain.judge(
             goal,
             splitPlanArtifact,
             rubric,
@@ -426,7 +426,7 @@ export class Engine {
                 verdict: splitVerdict,
               },
             };
-            decision = await this.brain.decide(goal, reDecideCtx);
+            decision = (await this.brain.decide(goal, reDecideCtx)).value;
             if (decision.kind !== 'split') break; // changed to satisfy or block
             continue;
           }
@@ -514,7 +514,7 @@ export class Engine {
     for (let i = 0; i < k; i++) {
       const lens = lenses[i % lenses.length] ?? lenses[0]!;
       const lensCtx: BrainContext = { ...baseCtx, lens };
-      const candidate = await this.brain.decide(goal, lensCtx);
+      const { value: candidate } = await this.brain.decide(goal, lensCtx);
 
       if (candidate.kind !== 'split') {
         // A candidate that is not a split is itself a meaningful decision —
@@ -527,7 +527,7 @@ export class Engine {
         text: JSON.stringify(candidate.children),
       };
       const judgeCtx: BrainContext = { tier: currentTier, memories: goal.memories };
-      const verdict = await this.brain.judge(goal, splitArtifact, rubric, judgeCtx);
+      const { value: verdict } = await this.brain.judge(goal, splitArtifact, rubric, judgeCtx);
 
       candidates.push({ decision: candidate, verdict, lens });
     }
@@ -573,7 +573,7 @@ export class Engine {
       ...baseCtx,
       priorAttempt: { artifact: fallbackArtifact, verdict: bestLoser.verdict },
     };
-    const fallbackDecision = await this.brain.decide(goal, fallbackCtx);
+    const { value: fallbackDecision } = await this.brain.decide(goal, fallbackCtx);
     return { decision: fallbackDecision, loserFindings };
   }
 
@@ -623,7 +623,7 @@ export class Engine {
       const ctx: BrainContext = priorAttempt
         ? { tier, memories: goal.memories, priorAttempt }
         : { tier, memories: goal.memories };
-      const artifact = await this.brain.produce(goal, ctx);
+      const { value: artifact } = await this.brain.produce(goal, ctx);
 
       // Account for tokens used by this produce call
       {
@@ -779,7 +779,7 @@ export class Engine {
       if (typeDef.judgeType !== null) {
         const rubric = `Judge this artifact as a ${typeDef.judgeType} for goal type ${typeDef.name}`;
         const judgeCtx: BrainContext = { tier, memories: goal.memories };
-        const verdict = await this.brain.judge(goal, artifact, rubric, judgeCtx);
+        const { value: verdict } = await this.brain.judge(goal, artifact, rubric, judgeCtx);
 
         // Account for tokens used by this judge call
         {
@@ -925,7 +925,7 @@ export class Engine {
     if (typeDef.judgeType !== null) {
       const rubric = `Judge this artifact as a ${typeDef.judgeType} for goal type ${typeDef.name}`;
       const judgeCtx: BrainContext = { tier, memories: goal.memories };
-      const verdict = await this.brain.judge(goal, artifact, rubric, judgeCtx);
+      const { value: verdict } = await this.brain.judge(goal, artifact, rubric, judgeCtx);
 
       await this.store.append({
         type: 'judge-verdict',
@@ -1020,7 +1020,7 @@ export class Engine {
     if (prescribedFindings.length > 0) {
       const prescriptions = prescribedFindings.map((f) => f.prescription!);
       const repairCtx: BrainContext = { tier, memories: goal.memories };
-      const repairedArtifact = await this.brain.repair(
+      const { value: repairedArtifact } = await this.brain.repair(
         goal,
         artifact,
         prescriptions,
@@ -1212,7 +1212,7 @@ export class Engine {
         tier: integTypeDef.tier.default,
         memories: goal.memories,
       };
-      const intVerdict = await this.brain.judge(
+      const { value: intVerdict } = await this.brain.judge(
         goal,
         mergedArtifact,
         rubric,

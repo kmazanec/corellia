@@ -87,6 +87,52 @@ export interface MemoryPointer {
 }
 
 /**
+ * Provider-reported usage for one brain call. Tokens and cost come from the
+ * endpoint's own accounting, never an estimate (ADR-017). `costUsd` is present
+ * only when the endpoint reports it; a token-only endpoint omits it.
+ */
+export interface Usage {
+  /** Prompt (input) tokens the provider charged for this call. */
+  promptTokens: number;
+  /** Completion (output) tokens the provider charged for this call. */
+  completionTokens: number;
+  /** The provider-reported dollar cost of this call, when the endpoint reports it. */
+  costUsd?: number;
+}
+
+/** The zero-usage sentinel: no tokens, no cost. Used by non-metering paths. */
+export const ZERO_USAGE: Usage = { promptTokens: 0, completionTokens: 0 };
+
+/**
+ * One infrastructure event that occurred while producing a value, reported back
+ * to the engine so it can append the matching log event. Adapters never hold
+ * the event store (adapter purity, ADR-018); they surface incidents as data and
+ * the engine records them. `at` is wall-clock ms.
+ */
+export interface TransportIncident {
+  /** Whether this was a bounded transport retry or a single malformation re-prompt. */
+  kind: 'transport-retry' | 'malformation-reprompt';
+  /** Human-readable detail (the status code, the parse error) for the log. */
+  detail: string;
+  /** Wall-clock ms at which the incident occurred. */
+  at: number;
+}
+
+/**
+ * A value paired with the provider usage spent producing it, and any transport
+ * incidents that occurred along the way. Every metered brain method returns this
+ * so the engine can debit tokens and dollars from measured figures (ADR-017).
+ */
+export interface Metered<T> {
+  /** The produced value. */
+  value: T;
+  /** The provider-reported usage for the call(s) that produced `value`. */
+  usage: Usage;
+  /** Transport retries / malformation re-prompts the adapter encountered, if any. */
+  incidents?: TransportIncident[];
+}
+
+/**
  * A goal instance — the downward half of the one handoff contract, identical at
  * every level of the tree. Free text never flows down: parsing happens once, at
  * the root, and below that `spec` is always typed for the goal's type.
@@ -113,4 +159,10 @@ export interface Goal {
   budget: Budget;
   /** Spawner-injected memory pointers, provenance-labeled. */
   memories: MemoryPointer[];
+  /**
+   * The per-tree dollar ceiling: measured spend reaching it halts the tree with
+   * a decision brief (ADR-017). Set at the root (learning-phase default $15) and
+   * threaded to child runs; unlike {@link Budget}, it is never subdivided.
+   */
+  spendCeilingUsd?: number;
 }

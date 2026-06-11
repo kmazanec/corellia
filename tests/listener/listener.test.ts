@@ -26,8 +26,10 @@ import {
   nonLeafTypeDef,
   textArtifact,
   passVerdict,
+  rawBrain,
 } from '../engine/stubs.js';
-import type { Brain, BrainContext } from '../../src/contract/brain.js';
+import type { RawBrain } from '../engine/stubs.js';
+import type { BrainContext } from '../../src/contract/brain.js';
 import type { Artifact } from '../../src/contract/report.js';
 import type { Verdict } from '../../src/contract/verdict.js';
 
@@ -587,7 +589,7 @@ describe('real Engine + Listener: brief-seam park and resume', () => {
 
     // A brain that on its first decide returns block-with-park, then on the
     // second decide (after answer()) returns satisfy so the leaf can produce.
-    const brain: Brain = {
+    const brain: RawBrain = {
       async decide(_goal: Goal, _ctx: BrainContext) {
         decideCalls.push({ memoriesCount: _goal.memories.length });
         if (decideCalls.length === 1) {
@@ -627,7 +629,7 @@ describe('real Engine + Listener: brief-seam park and resume', () => {
 
     const engine = new Engine({
       registry,
-      brain,
+      brain: rawBrain(brain),
       store,
       memory: new NoopMemoryView(),
       now,

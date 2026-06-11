@@ -8,10 +8,12 @@
  * results is declared upfront, so every call is auditable and reproducible.
  */
 
-import type { Brain, BrainContext } from '../contract/brain.js';
-import type { Goal } from '../contract/goal.js';
+import type { Brain, BrainContext, StepOutput, StepTranscript } from '../contract/brain.js';
+import type { Goal, Metered } from '../contract/goal.js';
+import { ZERO_USAGE } from '../contract/goal.js';
 import type { Decision } from '../contract/decision.js';
 import type { Artifact } from '../contract/report.js';
+import type { ToolDef } from '../contract/tool.js';
 import type { Verdict } from '../contract/verdict.js';
 
 /**
@@ -80,12 +82,14 @@ export class ScriptedBrain implements Brain {
     this.script = script;
   }
 
-  async decide(goal: Goal, _ctx: BrainContext): Promise<Decision> {
-    return nextFrom(this.script.decide, 'decide', goal.title, goal.type, this.counters);
+  async decide(goal: Goal, _ctx: BrainContext): Promise<Metered<Decision>> {
+    const value = nextFrom(this.script.decide, 'decide', goal.title, goal.type, this.counters);
+    return { value, usage: ZERO_USAGE };
   }
 
-  async produce(goal: Goal, _ctx: BrainContext): Promise<Artifact> {
-    return nextFrom(this.script.produce, 'produce', goal.title, goal.type, this.counters);
+  async produce(goal: Goal, _ctx: BrainContext): Promise<Metered<Artifact>> {
+    const value = nextFrom(this.script.produce, 'produce', goal.title, goal.type, this.counters);
+    return { value, usage: ZERO_USAGE };
   }
 
   async judge(
@@ -93,8 +97,9 @@ export class ScriptedBrain implements Brain {
     _subject: Artifact,
     _rubric: string,
     _ctx: BrainContext,
-  ): Promise<Verdict> {
-    return nextFrom(this.script.judge, 'judge', goal.title, goal.type, this.counters);
+  ): Promise<Metered<Verdict>> {
+    const value = nextFrom(this.script.judge, 'judge', goal.title, goal.type, this.counters);
+    return { value, usage: ZERO_USAGE };
   }
 
   async repair(
@@ -102,7 +107,11 @@ export class ScriptedBrain implements Brain {
     artifact: Artifact,
     prescriptions: string[],
     _ctx: BrainContext,
-  ): Promise<Artifact> {
+  ): Promise<Metered<Artifact>> {
+    return { value: this.repairValue(goal, artifact, prescriptions), usage: ZERO_USAGE };
+  }
+
+  private repairValue(goal: Goal, artifact: Artifact, prescriptions: string[]): Artifact {
     // Try script first.
     if (
       this.script.repair !== undefined &&
@@ -132,5 +141,14 @@ export class ScriptedBrain implements Brain {
     const commentLines = prescriptions.map((p) => `// ${p}`).join('\n');
     const sep = artifact.text?.endsWith('\n') ? '' : '\n';
     return { ...artifact, text: (artifact.text ?? '') + sep + commentLines };
+  }
+
+  async step(
+    _goal: Goal,
+    _transcript: StepTranscript,
+    _tools: ToolDef[],
+    _ctx: BrainContext,
+  ): Promise<StepOutput> {
+    throw new Error('step not implemented — lands with F-32/F-36');
   }
 }

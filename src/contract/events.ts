@@ -5,7 +5,7 @@
  * metrics, the human surfaces, replay — is a projection of this log.
  */
 
-import type { Budget, MemoryPointer, Tier, Goal } from './goal.js';
+import type { Budget, MemoryPointer, Tier, Goal, Usage } from './goal.js';
 import type { Decision, DecisionBrief } from './decision.js';
 import type { Report } from './report.js';
 import type { Verdict } from './verdict.js';
@@ -22,15 +22,15 @@ export type FactoryEvent =
   /** The split gate's coverage pre-check ran: do we have enough to decompose? */
   | { type: 'gate-checked'; at: number; goalId: string; ok: boolean; missing: string[] }
   /** The node decided: satisfy, split, or block. */
-  | { type: 'decided'; at: number; goalId: string; decision: Decision }
+  | { type: 'decided'; at: number; goalId: string; decision: Decision; usage?: Usage }
   /** A child harness was spawned on a sub-goal, with its hard dependencies. */
   | { type: 'child-spawned'; at: number; goalId: string; childId: string; childType: string; dependsOn: string[] }
   /** The deterministic gate ran (compile, lint, types, impacted tests, scope, secret scan). */
   | { type: 'deterministic-checked'; at: number; goalId: string; verdict: Verdict }
   /** A judge rendered a verdict at the parent's integrate edge, at a given tier. */
-  | { type: 'judge-verdict'; at: number; goalId: string; judgeType: string; verdict: Verdict; tier: Tier }
+  | { type: 'judge-verdict'; at: number; goalId: string; judgeType: string; verdict: Verdict; tier: Tier; usage?: Usage }
   /** A cheap fixer applied the judge's prescriptions — the repair rung. */
-  | { type: 'repair-applied'; at: number; goalId: string; prescriptions: string[] }
+  | { type: 'repair-applied'; at: number; goalId: string; prescriptions: string[]; usage?: Usage }
   /** The control loop escalated to a higher model tier, carrying the failed attempt. */
   | { type: 'tier-escalated'; at: number; goalId: string; from: Tier; to: Tier }
   /** A human was asked via a decision brief, and how it resolved. */
@@ -54,7 +54,27 @@ export type FactoryEvent =
   /** The split-memo flywheel was consulted for a structural shape and its trust state. */
   | { type: 'pattern-consulted'; at: number; goalId: string; shape: string; status: 'none' | 'provisional' | 'trusted' }
   /** A split's outcome was recorded against its shape — the flywheel's write. */
-  | { type: 'pattern-recorded'; at: number; goalId: string; shape: string; outcome: 'success' | 'failure' };
+  | { type: 'pattern-recorded'; at: number; goalId: string; shape: string; outcome: 'success' | 'failure' }
+  /** The broker mediated a tool call: it ran, or it was refused with a reason. */
+  | { type: 'tool-call'; at: number; goalId: string; tool: string; callId: string; outcome: 'ran' | 'refused'; reason?: string }
+  /** One step of the engine-owned tool loop resolved to tool calls or an artifact. */
+  | { type: 'step'; at: number; goalId: string; index: number; outputKind: 'tool-calls' | 'artifact'; usage?: Usage }
+  /** A repo-declared script ran in the tree's sandbox; output retained by ref. */
+  | { type: 'script-ran'; at: number; goalId: string; command: string; exitStatus: number | null; durationMs: number; outputRef: string }
+  /** A per-tree worktree was created for sandboxed execution. */
+  | { type: 'worktree-created'; at: number; goalId: string; treeId: string; branch: string; path: string }
+  /** A tree's worktree was collected — its commits folded back — and torn down. */
+  | { type: 'worktree-collected'; at: number; goalId: string; treeId: string; branch: string; commits: string[] }
+  /** A tree's worktree was preserved (not torn down) for the stated reason. */
+  | { type: 'worktree-preserved'; at: number; goalId: string; treeId: string; branch: string; path: string; reason: string }
+  /** A produce call completed, carrying its provider-reported usage. */
+  | { type: 'produced'; at: number; goalId: string; usage: Usage }
+  /** Measured tree spend reached the dollar ceiling — the tree halts. */
+  | { type: 'ceiling-reached'; at: number; goalId: string; spentUsd: number; ceilingUsd: number }
+  /** A bounded transport retry fired on a provider failure (not attempt-consuming). */
+  | { type: 'transport-retry'; at: number; goalId: string; detail: string }
+  /** A single corrective re-prompt fired on malformed model output. */
+  | { type: 'malformation-reprompt'; at: number; goalId: string; detail: string };
 
 /**
  * The append-only event store. The append is the serialization point — the

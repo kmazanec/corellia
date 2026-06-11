@@ -140,7 +140,7 @@ describe('LlmBrain.decide', () => {
     const { fetch } = stubFetch(chatResponse(JSON.stringify({ kind: 'satisfy' })));
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
     const result = await brain.decide(baseGoal, ctxSonnet);
-    expect(result.kind).toBe('satisfy');
+    expect(result.value.kind).toBe('satisfy');
   });
 
   it('parses a split decision', async () => {
@@ -149,7 +149,7 @@ describe('LlmBrain.decide', () => {
     );
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
     const result = await brain.decide(baseGoal, ctxSonnet);
-    expect(result.kind).toBe('split');
+    expect(result.value.kind).toBe('split');
   });
 
   it('retries once on JSON parse failure and succeeds on second attempt', async () => {
@@ -159,7 +159,7 @@ describe('LlmBrain.decide', () => {
     );
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
     const result = await brain.decide(baseGoal, ctxSonnet);
-    expect(result.kind).toBe('satisfy');
+    expect(result.value.kind).toBe('satisfy');
     expect(calls).toHaveLength(2);
   });
 
@@ -220,18 +220,18 @@ describe('LlmBrain.produce', () => {
     const { fetch } = stubFetch(chatResponse(rawContent));
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
     const result = await brain.produce(baseGoal, ctxSonnet);
-    expect(result.kind).toBe('files');
-    expect(result.files).toHaveLength(1);
-    expect(result.files?.[0]?.path).toBe('src/widget.ts');
-    expect(result.files?.[0]?.content).toContain('export const x = 1;');
+    expect(result.value.kind).toBe('files');
+    expect(result.value.files).toHaveLength(1);
+    expect(result.value.files?.[0]?.path).toBe('src/widget.ts');
+    expect(result.value.files?.[0]?.content).toContain('export const x = 1;');
   });
 
   it('falls back to text artifact when no file blocks are present', async () => {
     const { fetch } = stubFetch(chatResponse('Here is the plain text answer.'));
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
     const result = await brain.produce(baseGoal, ctxSonnet);
-    expect(result.kind).toBe('text');
-    expect(result.text).toContain('plain text answer');
+    expect(result.value.kind).toBe('text');
+    expect(result.value.text).toContain('plain text answer');
   });
 
   it('parses multiple file blocks', async () => {
@@ -240,8 +240,8 @@ describe('LlmBrain.produce', () => {
     const { fetch } = stubFetch(chatResponse(rawContent));
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
     const result = await brain.produce(baseGoal, ctxSonnet);
-    expect(result.kind).toBe('files');
-    expect(result.files).toHaveLength(2);
+    expect(result.value.kind).toBe('files');
+    expect(result.value.files).toHaveLength(2);
   });
 
   it('uses json_object=false for produce (plain text mode)', async () => {
@@ -268,8 +268,8 @@ describe('LlmBrain.judge', () => {
     const { fetch } = stubFetch(chatResponse(JSON.stringify(verdict)));
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
     const result = await brain.judge(baseGoal, subject, 'Be strict.', ctxSonnet);
-    expect(result.pass).toBe(true);
-    expect(result.findings).toHaveLength(0);
+    expect(result.value.pass).toBe(true);
+    expect(result.value.findings).toHaveLength(0);
   });
 
   it('parses a failing verdict with findings', async () => {
@@ -280,9 +280,9 @@ describe('LlmBrain.judge', () => {
     const { fetch } = stubFetch(chatResponse(JSON.stringify(verdict)));
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
     const result = await brain.judge(baseGoal, subject, 'Be strict.', ctxSonnet);
-    expect(result.pass).toBe(false);
-    expect(result.findings[0]?.title).toBe('Bad name');
-    expect(result.findings[0]?.dimension).toBe('convention');
+    expect(result.value.pass).toBe(false);
+    expect(result.value.findings[0]?.title).toBe('Bad name');
+    expect(result.value.findings[0]?.dimension).toBe('convention');
   });
 
   it('includes failureSignature when present', async () => {
@@ -290,7 +290,7 @@ describe('LlmBrain.judge', () => {
     const { fetch } = stubFetch(chatResponse(JSON.stringify(verdict)));
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
     const result = await brain.judge(baseGoal, subject, 'rubric', ctxSonnet);
-    expect(result.failureSignature).toBe('sig-abc');
+    expect(result.value.failureSignature).toBe('sig-abc');
   });
 
   it('retries on parse failure and succeeds', async () => {
@@ -301,7 +301,7 @@ describe('LlmBrain.judge', () => {
     );
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
     const result = await brain.judge(baseGoal, subject, 'rubric', ctxSonnet);
-    expect(result.pass).toBe(true);
+    expect(result.value.pass).toBe(true);
     expect(calls).toHaveLength(2);
   });
 
@@ -346,8 +346,8 @@ describe('LlmBrain.repair', () => {
     const { fetch } = stubFetch(chatResponse(rawContent));
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
     const result = await brain.repair(baseGoal, artifact, ['Use 2 instead of 1.'], ctxSonnet);
-    expect(result.kind).toBe('files');
-    expect(result.files?.[0]?.content).toContain('// fixed');
+    expect(result.value.kind).toBe('files');
+    expect(result.value.files?.[0]?.content).toContain('// fixed');
   });
 
   it('includes prescriptions in the user message', async () => {

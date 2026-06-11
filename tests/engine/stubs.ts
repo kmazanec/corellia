@@ -3,12 +3,14 @@
  * These never import from features being built concurrently.
  */
 
-import type { Goal, MemoryPointer } from '../../src/contract/goal.js';
+import type { Goal, MemoryPointer, Metered } from '../../src/contract/goal.js';
+import { ZERO_USAGE } from '../../src/contract/goal.js';
 import type { Decision } from '../../src/contract/decision.js';
 import type { Artifact, Report } from '../../src/contract/report.js';
+import type { ToolDef } from '../../src/contract/tool.js';
 import type { Verdict } from '../../src/contract/verdict.js';
 import type { FactoryEvent, EventStore } from '../../src/contract/events.js';
-import type { Brain, BrainContext } from '../../src/contract/brain.js';
+import type { Brain, BrainContext, StepOutput, StepTranscript } from '../../src/contract/brain.js';
 import type { DeterministicCheck, GoalTypeDef, Registry } from '../../src/contract/goal-type.js';
 import type { MemoryView } from '../../src/contract/memory.js';
 
@@ -134,6 +136,40 @@ export function failThenPassCheck(name = 'fail-once'): DeterministicCheck {
 
 // ── Brain stubs ───────────────────────────────────────────────────────────
 
+/**
+ * The raw, un-metered shape a test brain may declare: classic methods return
+ * their plain values. {@link rawBrain} wraps each return in a zero-usage
+ * {@link Metered} envelope and supplies a throwing `step`, so a test can author
+ * brain behavior without repeating the metering boilerplate.
+ */
+export interface RawBrain {
+  decide(goal: Goal, ctx: BrainContext): Promise<Decision>;
+  produce(goal: Goal, ctx: BrainContext): Promise<Artifact>;
+  judge(goal: Goal, subject: Artifact, rubric: string, ctx: BrainContext): Promise<Verdict>;
+  repair(goal: Goal, artifact: Artifact, prescriptions: string[], ctx: BrainContext): Promise<Artifact>;
+}
+
+/** Adapt a raw-returning test brain into the metered {@link Brain} contract. */
+export function rawBrain(raw: RawBrain): Brain {
+  return {
+    async decide(goal, ctx) {
+      return { value: await raw.decide(goal, ctx), usage: ZERO_USAGE };
+    },
+    async produce(goal, ctx) {
+      return { value: await raw.produce(goal, ctx), usage: ZERO_USAGE };
+    },
+    async judge(goal, subject, rubric, ctx) {
+      return { value: await raw.judge(goal, subject, rubric, ctx), usage: ZERO_USAGE };
+    },
+    async repair(goal, artifact, prescriptions, ctx) {
+      return { value: await raw.repair(goal, artifact, prescriptions, ctx), usage: ZERO_USAGE };
+    },
+    async step(): Promise<StepOutput> {
+      throw new Error('rawBrain.step: not used in these tests');
+    },
+  };
+}
+
 export class ScriptedBrain implements Brain {
   private decideQueue: Decision[] = [];
   private produceQueue: Artifact[] = [];
@@ -160,28 +196,37 @@ export class ScriptedBrain implements Brain {
     return this;
   }
 
-  async decide(_goal: Goal, _ctx: BrainContext): Promise<Decision> {
+  async decide(_goal: Goal, _ctx: BrainContext): Promise<Metered<Decision>> {
     const d = this.decideQueue.shift();
     if (!d) throw new Error('ScriptedBrain: no more decide results queued');
-    return d;
+    return { value: d, usage: ZERO_USAGE };
   }
 
-  async produce(_goal: Goal, _ctx: BrainContext): Promise<Artifact> {
+  async produce(_goal: Goal, _ctx: BrainContext): Promise<Metered<Artifact>> {
     const a = this.produceQueue.shift();
     if (!a) throw new Error('ScriptedBrain: no more produce results queued');
-    return a;
+    return { value: a, usage: ZERO_USAGE };
   }
 
-  async judge(_goal: Goal, _subject: Artifact, _rubric: string, _ctx: BrainContext): Promise<Verdict> {
+  async judge(_goal: Goal, _subject: Artifact, _rubric: string, _ctx: BrainContext): Promise<Metered<Verdict>> {
     const v = this.judgeQueue.shift();
     if (!v) throw new Error('ScriptedBrain: no more judge results queued');
-    return v;
+    return { value: v, usage: ZERO_USAGE };
   }
 
-  async repair(_goal: Goal, _artifact: Artifact, _prescriptions: string[], _ctx: BrainContext): Promise<Artifact> {
+  async repair(_goal: Goal, _artifact: Artifact, _prescriptions: string[], _ctx: BrainContext): Promise<Metered<Artifact>> {
     const a = this.repairQueue.shift();
     if (!a) throw new Error('ScriptedBrain: no more repair results queued');
-    return a;
+    return { value: a, usage: ZERO_USAGE };
+  }
+
+  async step(
+    _goal: Goal,
+    _transcript: StepTranscript,
+    _tools: ToolDef[],
+    _ctx: BrainContext,
+  ): Promise<StepOutput> {
+    throw new Error('ScriptedBrain.step: not used in these tests');
   }
 }
 

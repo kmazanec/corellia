@@ -52,13 +52,13 @@ describe('ScriptedBrain.decide', () => {
   it('returns the scripted decision for a goal title', async () => {
     const brain = new ScriptedBrain({ decide: { 'Write the widget': [satisfyDecision] } });
     const result = await brain.decide(baseGoal, ctx);
-    expect(result).toEqual(satisfyDecision);
+    expect(result.value).toEqual(satisfyDecision);
   });
 
   it('falls back to type key when title is absent', async () => {
     const brain = new ScriptedBrain({ decide: { implement: [satisfyDecision] } });
     const result = await brain.decide(baseGoal, ctx);
-    expect(result).toEqual(satisfyDecision);
+    expect(result.value).toEqual(satisfyDecision);
   });
 
   it('prefers title key over type key', async () => {
@@ -70,21 +70,21 @@ describe('ScriptedBrain.decide', () => {
       },
     });
     const result = await brain.decide(baseGoal, ctx);
-    expect(result.kind).toBe('satisfy');
+    expect(result.value.kind).toBe('satisfy');
   });
 
   it('consumes decisions in order', async () => {
     const split: Decision = { kind: 'split', children: [] };
     const brain = new ScriptedBrain({ decide: { 'Write the widget': [satisfyDecision, split] } });
-    expect((await brain.decide(baseGoal, ctx)).kind).toBe('satisfy');
-    expect((await brain.decide(baseGoal, ctx)).kind).toBe('split');
+    expect((await brain.decide(baseGoal, ctx)).value.kind).toBe('satisfy');
+    expect((await brain.decide(baseGoal, ctx)).value.kind).toBe('split');
   });
 
   it('repeats the last element once exhausted', async () => {
     const brain = new ScriptedBrain({ decide: { 'Write the widget': [satisfyDecision] } });
     await brain.decide(baseGoal, ctx);
     const r = await brain.decide(baseGoal, ctx);
-    expect(r.kind).toBe('satisfy');
+    expect(r.value.kind).toBe('satisfy');
   });
 
   it('throws a loud error when neither title nor type are scripted', async () => {
@@ -106,7 +106,7 @@ describe('ScriptedBrain.produce', () => {
   it('returns the scripted artifact', async () => {
     const brain = new ScriptedBrain({ produce: { 'Write the widget': [fileArtifact] } });
     const result = await brain.produce(baseGoal, ctx);
-    expect(result).toEqual(fileArtifact);
+    expect(result.value).toEqual(fileArtifact);
   });
 
   it('throws when key is missing', async () => {
@@ -119,11 +119,11 @@ describe('ScriptedBrain.produce', () => {
     const brain = new ScriptedBrain({ produce: { 'Write the widget': [fileArtifact, a2] } });
     const r1 = await brain.produce(baseGoal, ctx);
     const r2 = await brain.produce(baseGoal, ctx);
-    expect(r1.kind).toBe('files');
-    expect(r2.kind).toBe('text');
+    expect(r1.value.kind).toBe('files');
+    expect(r2.value.kind).toBe('text');
     // Third call should repeat last.
     const r3 = await brain.produce(baseGoal, ctx);
-    expect(r3.kind).toBe('text');
+    expect(r3.value.kind).toBe('text');
   });
 });
 
@@ -135,7 +135,7 @@ describe('ScriptedBrain.judge', () => {
   it('returns the scripted verdict', async () => {
     const brain = new ScriptedBrain({ judge: { 'Write the widget': [passVerdict] } });
     const result = await brain.judge(baseGoal, fileArtifact, 'rubric', ctx);
-    expect(result.pass).toBe(true);
+    expect(result.value.pass).toBe(true);
   });
 
   it('models a fail-then-pass sequence', async () => {
@@ -144,8 +144,8 @@ describe('ScriptedBrain.judge', () => {
     });
     const r1 = await brain.judge(baseGoal, fileArtifact, 'rubric', ctx);
     const r2 = await brain.judge(baseGoal, fileArtifact, 'rubric', ctx);
-    expect(r1.pass).toBe(false);
-    expect(r2.pass).toBe(true);
+    expect(r1.value.pass).toBe(false);
+    expect(r2.value.pass).toBe(true);
   });
 
   it('throws when key is absent', async () => {
@@ -166,7 +166,7 @@ describe('ScriptedBrain.repair (scripted)', () => {
     };
     const brain = new ScriptedBrain({ repair: { 'Write the widget': [repaired] } });
     const result = await brain.repair(baseGoal, fileArtifact, ['fix x'], ctx);
-    expect(result).toEqual(repaired);
+    expect(result.value).toEqual(repaired);
   });
 });
 
@@ -183,8 +183,8 @@ describe('ScriptedBrain.repair (naive default)', () => {
       ['Add a test.', 'Use strict equality.'],
       ctx,
     );
-    expect(result.kind).toBe('files');
-    const first = result.files?.[0];
+    expect(result.value.kind).toBe('files');
+    const first = result.value.files?.[0];
     expect(first?.content).toContain('// Add a test.');
     expect(first?.content).toContain('// Use strict equality.');
     // Original content is preserved.
@@ -194,16 +194,16 @@ describe('ScriptedBrain.repair (naive default)', () => {
   it('appends prescriptions to text artifacts', async () => {
     const brain = new ScriptedBrain({});
     const result = await brain.repair(baseGoal, textArtifact, ['Say world instead.'], ctx);
-    expect(result.kind).toBe('text');
-    expect(result.text).toContain('hello');
-    expect(result.text).toContain('// Say world instead.');
+    expect(result.value.kind).toBe('text');
+    expect(result.value.text).toContain('hello');
+    expect(result.value.text).toContain('// Say world instead.');
   });
 
   it('handles an empty prescriptions list gracefully', async () => {
     const brain = new ScriptedBrain({});
     const result = await brain.repair(baseGoal, fileArtifact, [], ctx);
-    expect(result.kind).toBe('files');
+    expect(result.value.kind).toBe('files');
     // Content should not have trailing comment lines but the file is preserved.
-    expect(result.files?.[0]?.content).toContain('export const x = 1;');
+    expect(result.value.files?.[0]?.content).toContain('export const x = 1;');
   });
 });

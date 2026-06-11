@@ -5,11 +5,12 @@
  * goal-type bound to the work, never the brain.
  */
 
-import type { Goal, MemoryPointer, Tier } from './goal.js';
+import type { Goal, MemoryPointer, Tier, Metered, Usage, TransportIncident } from './goal.js';
 import type { Decision } from './decision.js';
 import type { Artifact } from './report.js';
 import type { Verdict } from './verdict.js';
 import type { SplitMemo } from './pattern.js';
+import type { ToolCall, ToolDef } from './tool.js';
 
 /**
  * What the brain is given for a single call, beyond the goal itself: the tier it
@@ -43,28 +44,64 @@ export interface BrainContext {
 }
 
 /**
- * The brain interface. The four methods are the four LLM-driven moments of the
- * factory: decide what to do with a goal, produce an artifact, judge an artifact
- * against a rubric, and repair an artifact from prescriptions. Every harness —
- * for every goal-type — performs its work through exactly these.
+ * One message in a tool-loop transcript, mirroring the standard chat
+ * tool-calling wire shape so a provider adapter is a thin translation and the
+ * byte-identical prefix keeps prompt caching effective (ADR-015):
+ *
+ * - `context`   — harness/system framing or an observation the engine injects.
+ * - `assistant` — the model's turn: free text and/or a batch of tool-call requests.
+ * - `tool`      — the broker's result for one prior tool call, by `callId`.
+ */
+export type StepMessage =
+  | { role: 'context'; content: string }
+  | { role: 'assistant'; content: string; toolCalls?: ToolCall[] }
+  | { role: 'tool'; callId: string; content: string };
+
+/** The transcript so far for an in-progress tool loop, in order. */
+export type StepTranscript = StepMessage[];
+
+/**
+ * The outcome of one brain step: either a batch of tool calls to route through
+ * the broker, or the final artifact ending the loop. Carries the step's usage
+ * (ADR-017) and any transport incidents the adapter encountered (ADR-018), which
+ * the engine turns into log events — the adapter never holds the store.
+ */
+export type StepOutput =
+  | { kind: 'tool-calls'; calls: ToolCall[]; usage: Usage; incidents?: TransportIncident[] }
+  | { kind: 'artifact'; artifact: Artifact; usage: Usage; incidents?: TransportIncident[] };
+
+/**
+ * The brain interface. Four classic methods are the LLM-driven moments of the
+ * factory — decide, produce, judge, repair — each returning its value paired
+ * with provider-reported {@link Metered} usage. The fifth, `step`, is the pure
+ * per-step function the engine drives for tool-using leaves: the engine owns the
+ * loop and gates each step on budget; the brain only thinks one step forward.
+ * Every harness — for every goal-type — performs its work through exactly these.
  */
 export interface Brain {
   /**
    * Decide what to do with a goal: satisfy it directly, split it into sub-goals
    * with a dependency structure, or block on a decision brief.
    */
-  decide(goal: Goal, ctx: BrainContext): Promise<Decision>;
+  decide(goal: Goal, ctx: BrainContext): Promise<Metered<Decision>>;
   /** Produce the goal's artifact directly — the leaf-builder path. */
-  produce(goal: Goal, ctx: BrainContext): Promise<Artifact>;
+  produce(goal: Goal, ctx: BrainContext): Promise<Metered<Artifact>>;
   /**
    * Judge a subject artifact against a rubric, rendering a verdict with findings.
    * A delegated judge carries a different lens than the maker — a second taste.
    */
-  judge(goal: Goal, subject: Artifact, rubric: string, ctx: BrainContext): Promise<Verdict>;
+  judge(goal: Goal, subject: Artifact, rubric: string, ctx: BrainContext): Promise<Metered<Verdict>>;
   /**
    * Apply a judge's prescriptions to an artifact — the repair rung. The expensive
    * model judges; the cheap model types. Repair is `produce` constrained to the
    * prescribed localized edits, not a fresh attempt.
    */
-  repair(goal: Goal, artifact: Artifact, prescriptions: string[], ctx: BrainContext): Promise<Artifact>;
+  repair(goal: Goal, artifact: Artifact, prescriptions: string[], ctx: BrainContext): Promise<Metered<Artifact>>;
+  /**
+   * Advance a tool loop by one step: given the transcript so far and the tools
+   * the goal-type grants, return either the next batch of tool calls or the final
+   * artifact. Pure per step — the engine routes calls through the broker, appends
+   * events, and gates the next step on remaining budget.
+   */
+  step(goal: Goal, transcript: StepTranscript, tools: ToolDef[], ctx: BrainContext): Promise<StepOutput>;
 }

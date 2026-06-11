@@ -6,6 +6,20 @@
 
 import type { Goal, Kind, Tier } from './goal.js';
 import type { Artifact } from './report.js';
+import type { ScriptResult } from './tool.js';
+
+/**
+ * The runtime context an executing check needs: where the tree's sandbox lives
+ * and how to run a repo-declared script in it. Supplied per invocation because a
+ * static type definition cannot close over per-tree runtime state. Absent for
+ * artifact-only checks, which ignore it.
+ */
+export interface CheckContext {
+  /** The tree's sandbox root — the working directory executing checks run against. */
+  sandboxRoot?: string;
+  /** Run one repo-declared script by name in the sandbox, returning its result. */
+  runScript?: (name: string) => Promise<ScriptResult>;
+}
 
 /**
  * One deterministic eval — compile, lint, typecheck, impacted tests, the
@@ -19,9 +33,11 @@ export interface DeterministicCheck {
   /**
    * Run the check against a goal and its (possibly null) artifact, yielding a
    * pass/fail plus a human-readable detail. Takes no `intent` input by
-   * construction: deterministic gates are intent-blind.
+   * construction: deterministic gates are intent-blind. Executing checks read
+   * the optional {@link CheckContext} for a sandbox root and a script runner;
+   * artifact-only checks ignore it and remain valid unchanged.
    */
-  run(goal: Goal, artifact: Artifact | null): Promise<{ ok: boolean; detail: string }>;
+  run(goal: Goal, artifact: Artifact | null, ctx?: CheckContext): Promise<{ ok: boolean; detail: string }>;
 }
 
 /**
