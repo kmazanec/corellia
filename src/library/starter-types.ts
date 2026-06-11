@@ -15,6 +15,10 @@ import {
   mapRepoCheck,
   diveAnchorCheck,
 } from './knowledge-checks.js';
+import {
+  KNOWLEDGE_ARTIFACT_SCHEMA,
+  REGION_FACTS_SCHEMA,
+} from './knowledge-schemas.js';
 
 /**
  * The ten starter goal-types. Each corresponds directly to a row in the
@@ -177,6 +181,7 @@ export function starterTypes(): GoalTypeDef[] {
       ],
       judgeType: null,
       grants: ['fs.read', 'retrieval.api', 'test.run_scoped'],
+      outputSchema: KNOWLEDGE_ARTIFACT_SCHEMA,
     },
 
     /**
@@ -209,6 +214,7 @@ export function starterTypes(): GoalTypeDef[] {
       deterministic: [artifactPresent, diveAnchorCheck()],
       judgeType: null,
       grants: ['fs.read', 'retrieval.api'],
+      outputSchema: REGION_FACTS_SCHEMA,
     },
   ];
 }
