@@ -479,3 +479,260 @@ describe('failed-loop attempt escalates carrying transcript tail', () => {
     expect(repaired || escalated).toBe(true);
   }, 10_000);
 });
+
+// ── T1: transcript tail reaches next attempt ────────────────────────────────────
+
+describe('T1: transcript tail reaches next attempt', () => {
+  it('priorAttempt seen by brain on next attempt contains step-loop transcript evidence', async () => {
+    const store = new MemoryEventStore();
+
+    // Step loop: make one tool call then produce a bad artifact
+    const badArtifact = textArtifact('bad');
+    const goodArtifact = textArtifact('good');
+
+    let stepIdx = 0;
+    const stepsArr: StepOutput[] = [
+      // First attempt: one tool call then artifact
+      { kind: 'tool-calls', calls: [toolCall('t1', 'read_file')], usage: ZERO_USAGE },
+      { kind: 'artifact', artifact: badArtifact, usage: ZERO_USAGE },
+      // Second attempt (after deterministic fail cycles back): good artifact
+      { kind: 'artifact', artifact: goodArtifact, usage: ZERO_USAGE },
+    ];
+
+    let detCheckCount = 0;
+    const flakyDet: import('../../src/contract/goal-type.js').DeterministicCheck = {
+      name: 'det',
+      async run() {
+        detCheckCount++;
+        return detCheckCount <= 1
+          ? { ok: false, detail: 'fail' }
+          : { ok: true, detail: '' };
+      },
+    };
+
+    // Capture the priorAttempt seen by the brain's step call on the second attempt
+    const capturedPriorAttempts: (typeof undefined | { artifact: unknown; verdict: unknown })[] = [];
+
+    const captureBrain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair(_goal, _artifact) { return { value: goodArtifact, usage: ZERO_USAGE }; },
+      async step(_goal, _transcript, _tools, ctx) {
+        capturedPriorAttempts.push(ctx.priorAttempt);
+        const out = stepsArr[stepIdx++];
+        if (!out) throw new Error('no more steps');
+        return out;
+      },
+    };
+
+    const broker = new FakeBroker([
+      { callId: 't1', ok: true, output: 'file content' },
+    ]);
+
+    const registry = buildRegistry([toolGrantedType({ deterministic: [flakyDet] })]);
+    const engine = new Engine({
+      registry,
+      brain: captureBrain,
+      store,
+      memory: new NoopMemoryView(),
+      broker,
+    });
+
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'transcript tail test',
+      budget: { attempts: 5, tokens: 10000, toolCalls: 20, wallClockMs: 60_000 },
+    });
+
+    const report = await engine.run(goal);
+    // Should have succeeded (repair path or second attempt)
+    expect(report.blockers).toHaveLength(0);
+
+    // The brain's step was called at least three times:
+    // step 0: tool-calls (first loop iteration, no priorAttempt)
+    // step 1: artifact (first loop iteration, no priorAttempt — still inside loop)
+    // step 2+: second attempt after det-fail escalation — priorAttempt has transcript tail
+    expect(capturedPriorAttempts.length).toBeGreaterThanOrEqual(3);
+
+    // Find the first step call that has a priorAttempt (the second loop invocation)
+    const firstWithPrior = capturedPriorAttempts.find((pa) => pa !== undefined);
+    expect(firstWithPrior).toBeDefined();
+    const verdict = firstWithPrior!.verdict as import('../../src/contract/verdict.js').Verdict;
+    // The transcript evidence is folded into the findings (step-loop-transcript: prefix)
+    const transcriptFinding = verdict.findings.find((f) =>
+      f.title.startsWith('step-loop-transcript:'),
+    );
+    expect(transcriptFinding).toBeDefined();
+    // The finding title should contain evidence of the read_file call
+    expect(transcriptFinding!.title).toContain('read_file');
+  }, 10_000);
+});
+
+// ── T3: toolCalls budget 1, step returning 2 calls → exactly 1 brokered ──────────
+
+describe('T3: per-call budget gate', () => {
+  it('budget=1, step returns 2 calls: exactly 1 brokered, exhaustion surfaced, no hang', async () => {
+    const store = new MemoryEventStore();
+
+    const brain = new SrcScriptedBrain({
+      step: {
+        'two-call goal': [
+          {
+            kind: 'tool-calls',
+            calls: [toolCall('c1', 'read_file'), toolCall('c2', 'write_file')],
+            usage: ZERO_USAGE,
+          } satisfies StepOutput,
+        ],
+      },
+    });
+
+    const broker = new FakeBroker([
+      { callId: 'c1', ok: true, output: 'content' },
+    ]);
+
+    const registry = buildRegistry([toolGrantedType()]);
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      broker,
+    });
+
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'two-call goal',
+      budget: { attempts: 3, tokens: 10000, toolCalls: 1, wallClockMs: 60_000 },
+    });
+
+    const report = await engine.run(goal);
+
+    // Must have exhausted (blocked)
+    expect(report.blockers.length).toBeGreaterThan(0);
+
+    // Exactly 1 tool call was brokered
+    expect(broker.calls).toHaveLength(1);
+    expect(broker.calls[0]!.call.id).toBe('c1');
+
+    // budget-exhausted event for toolCalls was emitted
+    const exhaustedEvents = await store.list({ type: 'budget-exhausted' });
+    const tcExhausted = exhaustedEvents.find(
+      (e) => (e as { dimension: string }).dimension === 'toolCalls',
+    );
+    expect(tcExhausted).toBeDefined();
+  }, 10_000);
+});
+
+// ── T4: toolCalls budget 0 at loop entry → immediate exhaustion ────────────────
+
+describe('T4: zero toolCalls budget at loop entry', () => {
+  it('budget toolCalls=0: exhaustion before any brain.step call', async () => {
+    const store = new MemoryEventStore();
+
+    let stepCalled = false;
+    const captureBrain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair() { throw new Error('not used'); },
+      async step() {
+        stepCalled = true;
+        throw new Error('should not be called');
+      },
+    };
+
+    const broker = new FakeBroker([]);
+
+    const registry = buildRegistry([toolGrantedType()]);
+    const engine = new Engine({
+      registry,
+      brain: captureBrain,
+      store,
+      memory: new NoopMemoryView(),
+      broker,
+    });
+
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'zero budget goal',
+      budget: { attempts: 3, tokens: 10000, toolCalls: 0, wallClockMs: 60_000 },
+    });
+
+    const report = await engine.run(goal);
+
+    expect(report.blockers.length).toBeGreaterThan(0);
+    expect(stepCalled).toBe(false);
+
+    const exhaustedEvents = await store.list({ type: 'budget-exhausted' });
+    const tcExhausted = exhaustedEvents.find(
+      (e) => (e as { dimension: string }).dimension === 'toolCalls',
+    );
+    expect(tcExhausted).toBeDefined();
+  }, 10_000);
+});
+
+// ── T5: step event carries usage when StepOutput had usage ──────────────────────
+
+describe('T5: step event carries usage', () => {
+  it('step event includes the usage field reported by the StepOutput', async () => {
+    const store = new MemoryEventStore();
+
+    const nonZeroUsage: import('../../src/contract/goal.js').Usage = {
+      promptTokens: 42,
+      completionTokens: 17,
+      costUsd: 0.001,
+    };
+
+    const finalArtifact = textArtifact('done');
+
+    const brain = new SrcScriptedBrain({
+      step: {
+        'usage goal': [
+          {
+            kind: 'tool-calls',
+            calls: [toolCall('u1', 'read_file')],
+            usage: nonZeroUsage,
+          } satisfies StepOutput,
+          {
+            kind: 'artifact',
+            artifact: finalArtifact,
+            usage: { promptTokens: 10, completionTokens: 5 },
+          } satisfies StepOutput,
+        ],
+      },
+    });
+
+    const broker = new FakeBroker([
+      { callId: 'u1', ok: true, output: 'content' },
+    ]);
+
+    const registry = buildRegistry([toolGrantedType()]);
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      broker,
+    });
+
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'usage goal',
+      budget: { attempts: 3, tokens: 10000, toolCalls: 10, wallClockMs: 60_000 },
+    });
+
+    const report = await engine.run(goal);
+    expect(report.blockers).toHaveLength(0);
+
+    const stepEvents = await store.list({ type: 'step' });
+    expect(stepEvents.length).toBeGreaterThanOrEqual(1);
+
+    // First step event should carry the non-zero usage
+    const firstStep = stepEvents[0] as { usage?: import('../../src/contract/goal.js').Usage };
+    expect(firstStep.usage).toBeDefined();
+    expect(firstStep.usage!.promptTokens).toBe(42);
+    expect(firstStep.usage!.completionTokens).toBe(17);
+    expect(firstStep.usage!.costUsd).toBe(0.001);
+  }, 10_000);
+});

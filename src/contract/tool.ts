@@ -1,8 +1,9 @@
 /**
  * The tool contract: one typed shape per tool, and one broker that mediates
  * every call. Tool definitions are data; execution lives broker-side, keyed by
- * name. The broker is the single point of grant check, scope check, budget
- * debit, and event append — two enforcement points would be zero.
+ * name. The engine's step loop owns budget debiting; the broker enforces grants
+ * and scope, records events, and executes tools — two enforcement points for
+ * budget would be zero.
  *
  * A refusal is data, never an exception: the broker returns a {@link ToolResult}
  * with `ok: false` and a stated reason. The transcript and the event log both
@@ -73,9 +74,10 @@ export interface ToolImpl {
 /**
  * The single mediator for every tool call. One instance per tree, bound to that
  * tree's sandbox root (ADR-016). `execute` checks the goal-type's exact grant,
- * checks write paths against the goal's scope, debits the `toolCalls` budget,
- * appends a tool event, then runs the tool — and returns a refusal as a
- * {@link ToolResult}, never a throw.
+ * checks write paths against the goal's scope, appends a tool event, then runs
+ * the tool — and returns a refusal as a {@link ToolResult}, never a throw. The
+ * engine's step loop is the sole debitor of the toolCalls budget; the broker
+ * enforces grants/scope and records events.
  */
 export interface ToolBroker {
   /** Mediate one tool call for a goal, returning its result or a refusal. */

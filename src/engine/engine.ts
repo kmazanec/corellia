@@ -735,6 +735,12 @@ export class Engine {
       // classic produce path.
       let artifact: Artifact;
       let stepLoopTranscriptTail: StepTranscript | undefined;
+      // FIX 1: when the step loop produces an artifact, carry a compact
+      // serialization of the transcript tail so that any subsequent failure
+      // (deterministic or judge) can thread it into the next attempt's
+      // BrainContext.priorAttempt. Stored as a non-gating advisory finding so
+      // it travels through every priorAttempt assignment that follows.
+      let stepLoopTailFinding: import('../contract/verdict.js').Finding | null = null;
 
       if (isToolGranted(typeDef.grants) && this.broker !== undefined) {
         const loopResult = await this.runStepLoop(goal, typeDef.grants, budget, ctx, priorAttempt, treeState);
@@ -743,6 +749,23 @@ export class Engine {
           artifact = loopResult.artifact;
           budget = loopResult.budget;
           stepLoopTranscriptTail = loopResult.transcript;
+          const tail = stepLoopTranscriptTail.slice(-8).map((m) => {
+            if (m.role === 'assistant') {
+              return { role: m.role, calls: m.toolCalls?.map((c) => c.name) ?? [] };
+            } else if (m.role === 'context') {
+              return { role: m.role, content: m.content };
+            } else {
+              return { role: m.role, content: m.content.slice(0, 120) };
+            }
+          });
+          if (tail.length > 0) {
+            stepLoopTailFinding = {
+              title: `step-loop-transcript:${JSON.stringify(tail)}`,
+              dimension: 'spec',
+              severity: 'low',
+              gating: false,
+            };
+          }
         } else {
           // exhausted or thrown — fail into the control loop
           if (loopResult.kind === 'exhausted') {
@@ -921,7 +944,14 @@ export class Engine {
             tier = resolution.tier;
             tierIndex = tierLadder.indexOf(tier);
             budget = resolution.budget;
-            priorAttempt = { artifact, verdict: deterministicVerdict };
+            // Thread the transcript tail finding into the verdict so the next
+            // attempt's BrainContext carries step-loop evidence (FIX 1).
+            priorAttempt = {
+              artifact,
+              verdict: stepLoopTailFinding !== null
+                ? { ...deterministicVerdict, findings: [stepLoopTailFinding, ...deterministicVerdict.findings] }
+                : deterministicVerdict,
+            };
             continue;
           } else {
             // blocked
@@ -1045,7 +1075,14 @@ export class Engine {
             tier = resolution.tier;
             tierIndex = tierLadder.indexOf(tier);
             budget = resolution.budget;
-            priorAttempt = { artifact, verdict };
+            // Thread the transcript tail finding into the verdict so the next
+            // attempt's BrainContext carries step-loop evidence (FIX 1).
+            priorAttempt = {
+              artifact,
+              verdict: stepLoopTailFinding !== null
+                ? { ...verdict, findings: [stepLoopTailFinding, ...verdict.findings] }
+                : verdict,
+            };
             continue;
           } else {
             return resolution.report;
@@ -1146,7 +1183,11 @@ export class Engine {
         };
       }
 
-      // Tool-calls path: append assistant turn to transcript, then route each call
+      // Tool-calls path: append assistant turn to transcript, then route each call.
+      // FIX 2: check remaining BEFORE dispatching each call so that a step that
+      // returns multiple calls cannot drive the counter negative when only one
+      // slot remains. When the counter hits 0 with calls left, stop routing and
+      // surface exhaustion exactly like the pre-step gate above.
       transcript.push({
         role: 'assistant',
         content: '',
@@ -1154,6 +1195,10 @@ export class Engine {
       });
 
       for (const call of stepOutput.calls) {
+        if (remainingToolCalls <= 0) {
+          return { kind: 'exhausted', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
+        }
+
         const result = await this.broker!.execute(goal, call);
         remainingToolCalls--;
 
