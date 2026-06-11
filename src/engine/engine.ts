@@ -36,6 +36,12 @@ import {
   type SandboxAssembly,
 } from './assembly.js';
 import { diffWithinScope, collectTree, preserveTree } from './worktree.js';
+import type { KnowledgeArtifact } from '../contract/knowledge.js';
+import {
+  coverageCheck,
+  type KnowledgeForCoverage,
+  type MissingRequirement,
+} from '../library/coverage.js';
 
 /**
  * Per-tree spend ceiling default (learning phase, ADR-017).
@@ -126,6 +132,53 @@ export interface EngineOptions {
    * absent, behavior is byte-identical to a plain run.
    */
   sandbox?: SandboxConfig;
+  /**
+   * Optional knowledge wiring (ADR-021/ADR-019). When present, the split gate
+   * runs a mechanical coverage check before any split is executed. On misses,
+   * comprehension ChildPlans are minted and injected as dependencies of every
+   * existing child so the ordinary dependency scheduler sequences them first.
+   * On pass, a gate-checked {ok:true} event is emitted with no extra brain
+   * calls (the check is purely mechanical). At decide/split/integrate
+   * checkpoints, consumed artifacts are verified for SHA drift; a drifted
+   * artifact that fails self-validation spawns a refresh child as a dependency.
+   *
+   * When absent, behavior is byte-identical to a run without this option —
+   * zero new events, no new brain calls (regression guard, AC-6).
+   *
+   * The wiring object is structurally typed so assembly supplies the real
+   * implementations while tests inject synthetic stubs.
+   */
+  knowledge?: {
+    /**
+     * Query the latest knowledge artifacts for a repo and its region facts, plus
+     * the current HEAD SHA. Returns the KnowledgeForCoverage shape consumed by
+     * coverageCheck. Assembly wires the real projectKnowledge projection + git
+     * HEAD; tests inject stubs.
+     */
+    query: (repoRoot: string) => Promise<KnowledgeForCoverage>;
+    /**
+     * Return the current HEAD SHA for the given repoRoot. Used at
+     * decide/split/integrate checkpoints to detect SHA drift. May be the same
+     * implementation as query().headSha, but exposed separately so the engine
+     * can call it cheaply at each checkpoint without re-querying artifacts.
+     */
+    headSha: (repoRoot: string) => Promise<string>;
+    /**
+     * Self-validate a knowledge artifact — the ADR-019 "cheap self-validation"
+     * step. Returns true if the artifact is still trustworthy despite a SHA
+     * mismatch; false if a refresh is needed. Async because spot queries (anchor
+     * existence, scaffold-runs-green) may touch the filesystem.
+     */
+    validate: (artifact: KnowledgeArtifact) => Promise<boolean>;
+    /**
+     * Mint the comprehension ChildPlans the engine should spawn to fill a set
+     * of missing requirements. Returns one or more ChildPlans (typically a
+     * map-repo child for category misses, a deep-dive-region child per missing
+     * region). The engine injects these as dependencies of every existing child
+     * and does NOT call the brain for them.
+     */
+    mintComprehension: (missing: MissingRequirement[]) => ChildPlan[];
+  };
 }
 
 export class Engine {
@@ -146,6 +199,7 @@ export class Engine {
   private readonly patterns: PatternStore | undefined;
   private readonly broker: ToolBroker | undefined;
   private readonly sandbox: SandboxConfig | undefined;
+  private readonly knowledge: EngineOptions['knowledge'];
 
   /**
    * The composed sandbox assembly for the in-flight tree, set by run() at the
@@ -233,6 +287,7 @@ export class Engine {
     this.patterns = opts.patterns;
     this.broker = opts.broker;
     this.sandbox = opts.sandbox;
+    this.knowledge = opts.knowledge;
   }
 
   async run(goal: Goal): Promise<Report> {
@@ -669,7 +724,20 @@ export class Engine {
         return this.runAttemptLoop(goal, currentTier, currentTierIndex, tierLadder, deadline, entryRisk, treeState);
 
       case 'split': {
-        const splitReport = await this.runSplit(goal, decision.children, terracedLoserFindings, treeState);
+        // ── COVERAGE GATE (ADR-021) ────────────────────────────────────────
+        // Mechanical pre-check: do we have enough knowledge to decompose?
+        // Only fires when knowledge wiring is present AND the goal's kind
+        // requires coverage (make-kind non-exempt). The check is a projection
+        // query only — no brain call, no side effect.
+        let childrenToSplit = decision.children;
+        if (this.knowledge !== undefined) {
+          childrenToSplit = await this.runCoverageGate(
+            goal, typeDef.kind as 'make' | 'learn' | 'judge' | 'evolve',
+            decision.children, treeState,
+          );
+        }
+
+        const splitReport = await this.runSplit(goal, childrenToSplit, terracedLoserFindings, treeState);
 
         // ── PATTERN RECORD ────────────────────────────────────────────────
         // Record the outcome of the split against the shape so the flywheel
@@ -1635,6 +1703,199 @@ export class Engine {
     });
     const report = await this.runBlock(goal, brief);
     return { kind: 'blocked', report };
+  }
+
+  // ── COVERAGE GATE (ADR-021) ────────────────────────────────────────────────
+  /**
+   * Run the mechanical coverage check before a split is committed. On pass,
+   * emits gate-checked {ok:true} and returns the original children unchanged.
+   * On miss, mints comprehension ChildPlans (map-repo / deep-dive-region via
+   * knowledge.mintComprehension), injects them as dependencies of every existing
+   * child, emits gate-checked {ok:false, missing}, and returns the augmented
+   * children list so the dependency scheduler sequences comprehension first.
+   *
+   * No brain call on either path. The check is a projection query only.
+   */
+  private async runCoverageGate(
+    goal: Goal,
+    kind: 'make' | 'learn' | 'judge' | 'evolve',
+    children: ChildPlan[],
+    _treeState: TreeState,
+  ): Promise<ChildPlan[]> {
+    const t = this.now;
+    const kw = this.knowledge;
+    if (kw === undefined) return children;
+
+    // Determine repoRoot: prefer the sandbox's repoRoot when available
+    // (the assembly provides the concrete path). For tests and non-sandbox
+    // runs, fall back to an empty string — the synthetic knowledge stub in
+    // tests always returns the pre-built KnowledgeForCoverage regardless.
+    const repoRoot = this._activeAssembly?.worktree.repoRoot ?? '';
+
+    const knowledgeState = await kw.query(repoRoot);
+
+    // ── Checkpoint verify-on-read at split entry (ADR-019) ──────────────────
+    // Before running the coverage check, verify any artifacts the goal's kind
+    // would consume. On drift, validate; pass → stale-validated event + proceed;
+    // fail → invalid event + inject refresh child as a dependency.
+    const { refreshChildren, validatedOk } = await this.checkpointVerifyArtifacts(
+      goal, knowledgeState, repoRoot, kw,
+    );
+
+    // Build a goal model for coverageCheck — use the parent's kind and split status.
+    // For a root split, the check covers architecture + stack.
+    // Additionally, when children are make-kind leaves with scope, check their
+    // regions for deep-dive coverage too (AC-3: region-dive miss for code leaves).
+    const coverageGoal = {
+      kind,
+      isRootSplit: !this.registry.get(goal.type).leafOnly,
+      scope: goal.scope,
+      typeName: goal.type,
+    };
+
+    // Collect all scopes from proposed make-kind leaf children and add them
+    // to the coverage goal's scope so region dives are checked for children too.
+    const childScopeEntries: string[] = [];
+    for (const child of children) {
+      if (!this.registry.has(child.type)) continue;
+      const childDef = this.registry.get(child.type);
+      if (childDef.kind === 'make' && childDef.leafOnly) {
+        childScopeEntries.push(...child.scope);
+      }
+    }
+    const effectiveCoverageGoal = childScopeEntries.length > 0
+      ? { ...coverageGoal, isRootSplit: false, scope: [...goal.scope, ...childScopeEntries] }
+      : coverageGoal;
+
+    const result = coverageCheck(effectiveCoverageGoal, knowledgeState, validatedOk);
+
+    // Emit gate-checked (always, per spec)
+    await this.store.append({
+      type: 'gate-checked',
+      at: t(),
+      goalId: goal.id,
+      ok: result.ok && refreshChildren.length === 0,
+      missing: [
+        ...result.missing.map((m) =>
+          m.region !== undefined
+            ? `${m.category}:${m.region}`
+            : m.category,
+        ),
+        ...refreshChildren.map((rc) => `refresh:${rc.type}:${rc.localId}`),
+      ],
+    });
+
+    if (result.ok && refreshChildren.length === 0) {
+      // Gate passes — no new children, no extra brain calls
+      return children;
+    }
+
+    // Gate failed — mint comprehension children for the misses
+    const comprehensionChildren: ChildPlan[] =
+      result.ok ? [] : kw.mintComprehension(result.missing);
+
+    // Merge all injected children (comprehension + refresh from drift)
+    const allInjected: ChildPlan[] = [...comprehensionChildren, ...refreshChildren];
+
+    if (allInjected.length === 0) return children;
+
+    // Every existing child must depend on ALL injected comprehension children
+    // so the dependency scheduler sequences them first (the contract-children-
+    // first machinery pattern).
+    const injectedLocalIds = allInjected.map((c) => c.localId);
+
+    const augmentedChildren: ChildPlan[] = [
+      ...allInjected,
+      ...children.map((child) => ({
+        ...child,
+        dependsOn: [...child.dependsOn, ...injectedLocalIds],
+      })),
+    ];
+
+    return augmentedChildren;
+  }
+
+  /**
+   * Checkpoint verify-on-read (ADR-019): for each artifact the goal's kind
+   * would consume, check SHA drift. On drift, run self-validation:
+   *   - pass → emit knowledge-checked {stale-validated}, proceed, mark validated
+   *   - fail → emit knowledge-checked {invalid}, return a refresh ChildPlan
+   *
+   * Returns both the refresh children to inject AND the set of categories that
+   * were validated OK — the latter is passed into coverageCheck so validated
+   * stale artifacts are not double-reported as missing.
+   *
+   * This is the minimal honest implementation: runs at the split checkpoint
+   * (before fan-out). The decide checkpoint re-runs this before the first split
+   * decision, and the integration entry re-runs for root goals.
+   */
+  private async checkpointVerifyArtifacts(
+    goal: Goal,
+    knowledge: KnowledgeForCoverage,
+    repoRoot: string,
+    kw: NonNullable<EngineOptions['knowledge']>,
+  ): Promise<{ refreshChildren: ChildPlan[]; validatedOk: Set<import('../contract/knowledge.js').KnowledgeCategory> }> {
+    const t = this.now;
+    const refreshChildren: ChildPlan[] = [];
+    const validatedOk = new Set<import('../contract/knowledge.js').KnowledgeCategory>();
+
+    for (const artifact of knowledge.artifacts) {
+      if (artifact.generatedAtSha === knowledge.headSha) {
+        // Fresh — no verification needed
+        continue;
+      }
+
+      // SHA drift detected — run self-validation
+      // Build a KnowledgeArtifact shape for the validate call
+      const fullArtifact: KnowledgeArtifact = {
+        repoRoot,
+        category: artifact.category,
+        generatedAtSha: artifact.generatedAtSha,
+        confidence: 'medium',
+        status: 'provisional',
+        pointers: [],
+        summary: '',
+      };
+
+      const valid = await kw.validate(fullArtifact);
+
+      if (valid) {
+        // Stale but still trustworthy — record and proceed
+        await this.store.append({
+          type: 'knowledge-checked',
+          at: t(),
+          goalId: goal.id,
+          repoRoot,
+          category: artifact.category,
+          sha: artifact.generatedAtSha,
+          outcome: 'stale-validated',
+        });
+        // Mark this category as validated-OK so coverageCheck does not
+        // re-flag it as stale
+        validatedOk.add(artifact.category);
+      } else {
+        // Invalid — must refresh before this split can proceed
+        await this.store.append({
+          type: 'knowledge-checked',
+          at: t(),
+          goalId: goal.id,
+          repoRoot,
+          category: artifact.category,
+          sha: artifact.generatedAtSha,
+          outcome: 'invalid',
+        });
+
+        // Mint a refresh comprehension child for this category
+        const refreshMissing: MissingRequirement[] = [{
+          category: artifact.category,
+          reason: `SHA-drift validation failed for ${artifact.category} at ${artifact.generatedAtSha}`,
+        }];
+        const minted = kw.mintComprehension(refreshMissing);
+        refreshChildren.push(...minted);
+      }
+    }
+
+    return { refreshChildren, validatedOk };
   }
 
   // ── SPLIT PATH ────────────────────────────────────────────────────────────
