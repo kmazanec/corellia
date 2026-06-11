@@ -284,14 +284,14 @@ describe('assembly — sandbox config present', () => {
 
     // A declared script that exits 0 IFF OPENROUTER_API_KEY is absent AND
     // PATH is present (non-empty) — i.e. the scrub removed the secret but kept
-    // the benign toolchain env (FIX 4+5).
+    // the benign toolchain env.
     const scriptRel = 'check-env.mjs';
     writeFileSync(
       join(repo, scriptRel),
       [
         'const leaked = process.env.OPENROUTER_API_KEY;',
         'if (leaked) { console.error("LEAKED: " + leaked); process.exit(1); }',
-        // FIX 5: also assert PATH survived — over-scrubbing is caught here.
+        // Also assert PATH survived — over-scrubbing is caught here.
         'if (!process.env.PATH) { console.error("PATH missing after scrub"); process.exit(1); }',
         'console.log("clean"); process.exit(0);',
       ].join('\n'),

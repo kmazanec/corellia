@@ -250,7 +250,7 @@ describe('convergence — scripted full-stack composed path', () => {
   });
 });
 
-// ── FIX 7: attribution test — SPLIT tree, script-ran goalId equals child id ──
+// ── attribution: SPLIT tree, script-ran goalId equals child id ──
 //
 // A root goal splits into one tool-granted implement child leaf that calls
 // run_script. The script-ran event's goalId must equal the CHILD leaf's id, not

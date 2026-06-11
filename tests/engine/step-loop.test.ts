@@ -883,7 +883,7 @@ describe('tool-loop ceiling', () => {
   }, 10_000);
 });
 
-// ── T-SCHEMA: real tool schemas reach the brain ───────────────────────────────
+// ── real tool schemas reach the brain ───────────────────────────────
 // When the assembly broker (Broker class) is active, the brain's step receives
 // the REAL ToolDef parameter schemas — in particular, run_script must have a
 // 'script' property in its parameters, not the empty synthesized fallback.

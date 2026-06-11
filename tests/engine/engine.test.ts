@@ -986,7 +986,7 @@ describe('cyclic dependency detection', () => {
   });
 });
 
-// ── F-35: Real usage accounting ────────────────────────────────────────────
+// ── Real usage accounting ───────────────────────────────────────────────────
 
 import type { FactoryEvent } from '../../src/contract/events.js';
 import type { Usage } from '../../src/contract/goal.js';

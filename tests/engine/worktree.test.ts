@@ -57,7 +57,7 @@ function readExclude(repoRoot: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Chunk 1: open worktree
+// open worktree
 // ---------------------------------------------------------------------------
 
 describe('open worktree', () => {
@@ -157,7 +157,7 @@ describe('open worktree', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Chunk 2: diff vs scope
+// diff vs scope
 // ---------------------------------------------------------------------------
 
 describe('diff vs scope', () => {
@@ -236,7 +236,7 @@ describe('diff vs scope', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Chunk 4: collect completed tree
+// collect completed tree
 // ---------------------------------------------------------------------------
 
 describe('collect completed tree', () => {
@@ -323,7 +323,7 @@ describe('collect completed tree', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Chunk 4: preserve failed tree
+// preserve failed tree
 // ---------------------------------------------------------------------------
 
 describe('preserve failed tree', () => {
@@ -402,7 +402,7 @@ describe('preserve failed tree', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Chunk 5: concurrent trees on one repo
+// concurrent trees on one repo
 // ---------------------------------------------------------------------------
 
 describe('concurrent trees', () => {

@@ -139,7 +139,7 @@ describe('fix 2 — validateSplit fan-out guard via engine', () => {
   });
 });
 
-// ── F-35: debit-equality unit ────────────────────────────────────────────────
+// ── debit-equality unit ──────────────────────────────────────────────────────
 
 describe('debit equality — tokens budget decrements by reported token count', () => {
   it('consuming reported tokens matches consumeN(budget, tokens, promptTokens+completionTokens)', async () => {
