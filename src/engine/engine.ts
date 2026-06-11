@@ -289,9 +289,10 @@ export class Engine {
   constructor(opts: EngineOptions) {
     // CONSTITUTION AT THE BOUNDARY: an engine cannot be constructed over an
     // unconstitutional library — violations are caught here, not at runtime.
-    // Structural checks only: skill-file coverage is a CI/production lint gate
-    // (run lintLibrary with defaults), not a runtime guard. Synthetic test types
-    // with stub families would fail the skill check needlessly.
+    // Structural checks only: skill-file coverage is enforced by the npm test
+    // chain (npm run lint, which runs scripts/lint-library.ts with defaults), not
+    // at runtime. Synthetic test types with stub families would fail the skill
+    // check needlessly.
     const defs = opts.registry.names().map((n) => opts.registry.get(n));
     const violations = lintLibrary(defs, { checkSkills: false });
     if (violations.length > 0) {

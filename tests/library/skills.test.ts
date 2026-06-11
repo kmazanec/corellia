@@ -120,6 +120,19 @@ describe('sectionFor', () => {
     expect(skill.sectionFor('implement')).not.toBeNull();
     expect(skill.sectionFor('characterize')).not.toBeNull();
   });
+
+  it('last section in a file extracts correctly when terminated by EOF (deep-dive-region)', () => {
+    // deep-dive-region is the LAST section in comprehend.md — there is no
+    // following ## heading, so the extractor must terminate at EOF.
+    const skill = loadFamilySkill('comprehend')!;
+    const section = skill.sectionFor('deep-dive-region')!;
+    expect(section).not.toBeNull();
+    expect(section).toContain('## deep-dive-region');
+    // The section must include substantive body content from the file
+    expect(section).toContain('RegionFacts');
+    // And it must NOT contain the map-repo heading (no bleeding backward)
+    expect(section).not.toContain('## map-repo');
+  });
 });
 
 // ── Constitution lint: missing file / missing section ────────────────────────
