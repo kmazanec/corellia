@@ -167,7 +167,10 @@ export function starterTypes(): GoalTypeDef[] {
       kind: 'learn',
       family: 'comprehend',
       leafOnly: true,
-      tier: { default: 'haiku', ladder: ['haiku', 'sonnet'] },
+      // Live traces (2026-06-11, four mapping runs on a real repo): haiku-tier
+      // first attempts burn the shared token budget exploring before the sonnet
+      // retry starts — sonnet default is the instrumented call, not a decree.
+      tier: { default: 'sonnet', ladder: ['sonnet', 'opus'] },
       deterministic: [
         artifactPresent,
         mapRepoCheck(async () => []),

@@ -218,10 +218,10 @@ describe('starterTypes', () => {
       expect(createRegistry(starterTypes()).get('map-repo').family).toBe('comprehend');
     });
 
-    it('uses haiku as default tier, escalates to sonnet', () => {
+    it('uses sonnet as default tier, escalates to opus', () => {
       const def = createRegistry(starterTypes()).get('map-repo');
-      expect(def.tier.default).toBe('haiku');
-      expect(def.tier.ladder).toEqual(['haiku', 'sonnet']);
+      expect(def.tier.default).toBe('sonnet');
+      expect(def.tier.ladder).toEqual(['sonnet', 'opus']);
     });
 
     it('has null judgeType', () => {
