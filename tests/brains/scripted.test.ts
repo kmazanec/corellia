@@ -207,3 +207,65 @@ describe('ScriptedBrain.repair (naive default)', () => {
     expect(result.value.files?.[0]?.content).toContain('export const x = 1;');
   });
 });
+
+// ---------------------------------------------------------------------------
+// step
+// ---------------------------------------------------------------------------
+
+import type { ToolCall } from '../../src/contract/tool.js';
+import type { StepOutput } from '../../src/contract/brain.js';
+import { ZERO_USAGE } from '../../src/contract/goal.js';
+
+const toolCallReq: ToolCall = { id: 'tc1', name: 'write_file', args: { path: 'x', content: 'y' } };
+
+const toolCallsStep: StepOutput = {
+  kind: 'tool-calls',
+  calls: [toolCallReq],
+  usage: ZERO_USAGE,
+};
+
+const artifactStep: StepOutput = {
+  kind: 'artifact',
+  artifact: fileArtifact,
+  usage: ZERO_USAGE,
+};
+
+describe('ScriptedBrain.step', () => {
+  it('returns scripted tool-call requests in order then the artifact', async () => {
+    const brain = new ScriptedBrain({
+      step: {
+        'Write the widget': [toolCallsStep, artifactStep],
+      },
+    });
+    const r1 = await brain.step(baseGoal, [], [], ctx);
+    expect(r1.kind).toBe('tool-calls');
+    expect((r1 as Extract<StepOutput, { kind: 'tool-calls' }>).calls).toHaveLength(1);
+
+    const r2 = await brain.step(baseGoal, [], [], ctx);
+    expect(r2.kind).toBe('artifact');
+    expect((r2 as Extract<StepOutput, { kind: 'artifact' }>).artifact).toEqual(fileArtifact);
+  });
+
+  it('repeats the last step element once exhausted (clamping)', async () => {
+    const brain = new ScriptedBrain({ step: { 'Write the widget': [artifactStep] } });
+    await brain.step(baseGoal, [], [], ctx);
+    const r2 = await brain.step(baseGoal, [], [], ctx);
+    expect(r2.kind).toBe('artifact');
+  });
+
+  it('falls back to type key when title is absent', async () => {
+    const brain = new ScriptedBrain({ step: { implement: [artifactStep] } });
+    const r = await brain.step(baseGoal, [], [], ctx);
+    expect(r.kind).toBe('artifact');
+  });
+
+  it('throws a loud error when neither title nor type are scripted', async () => {
+    const brain = new ScriptedBrain({ step: {} });
+    await expect(brain.step(baseGoal, [], [], ctx)).rejects.toThrow('Write the widget');
+  });
+
+  it('throws when the step script is absent entirely', async () => {
+    const brain = new ScriptedBrain({});
+    await expect(brain.step(baseGoal, [], [], ctx)).rejects.toThrow('step');
+  });
+});

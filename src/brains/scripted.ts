@@ -26,6 +26,7 @@ export interface Script {
   produce?: Record<string, Artifact[]>;
   judge?: Record<string, Verdict[]>;
   repair?: Record<string, Artifact[]>;
+  step?: Record<string, StepOutput[]>;
 }
 
 /** Mutable state tracking how many times each key has been consumed. */
@@ -144,11 +145,12 @@ export class ScriptedBrain implements Brain {
   }
 
   async step(
-    _goal: Goal,
+    goal: Goal,
     _transcript: StepTranscript,
     _tools: ToolDef[],
     _ctx: BrainContext,
   ): Promise<StepOutput> {
-    throw new Error('step not implemented — lands with F-32/F-36');
+    const value = nextFrom(this.script.step, 'step', goal.title, goal.type, this.counters);
+    return value;
   }
 }
