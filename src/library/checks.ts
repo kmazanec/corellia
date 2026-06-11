@@ -5,7 +5,7 @@
  */
 
 import { normalize, isAbsolute } from 'node:path';
-import type { DeterministicCheck } from '../contract/goal-type.js';
+import type { DeterministicCheck, CheckContext } from '../contract/goal-type.js';
 import type { Goal } from '../contract/goal.js';
 import type { Artifact } from '../contract/report.js';
 
@@ -92,6 +92,45 @@ export function fileContains(path: string, needle: string): DeterministicCheck {
         return { ok: true, detail: `File "${path}" contains "${needle}".` };
       }
       return { ok: false, detail: `File "${path}" does not contain "${needle}".` };
+    },
+  };
+}
+
+/**
+ * Returns a check that runs a repo-declared script by name via the
+ * CheckContext's runScript function and gates on the exit status.
+ *
+ * Absent ctx (or absent ctx.runScript) → always fails with "no exec context".
+ * This is a deliberate fail-safe: a missing context is a configuration error,
+ * never a silent pass.
+ */
+export function runScriptCheck(scriptName: string): DeterministicCheck {
+  return {
+    name: `run-script:${scriptName}`,
+    async run(
+      _goal: Goal,
+      _artifact: Artifact | null,
+      ctx?: CheckContext,
+    ): Promise<{ ok: boolean; detail: string }> {
+      if (ctx?.runScript === undefined) {
+        return { ok: false, detail: 'no exec context' };
+      }
+      const result = await ctx.runScript(scriptName);
+      if (!result.ok) {
+        const reason = result.timedOut
+          ? 'timed out'
+          : result.exitStatus === null
+            ? 'error'
+            : `exit ${result.exitStatus}`;
+        return {
+          ok: false,
+          detail: `Script "${scriptName}" failed (${reason}): ${result.output}`,
+        };
+      }
+      return {
+        ok: true,
+        detail: `Script "${scriptName}" passed (exit 0).`,
+      };
     },
   };
 }

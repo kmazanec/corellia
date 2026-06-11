@@ -8,9 +8,12 @@ import {
   filesWithinScope,
   fileContains,
   processClean,
+  runScriptCheck,
 } from '../../src/library/checks.js';
 import type { Goal } from '../../src/contract/goal.js';
 import type { Artifact } from '../../src/contract/report.js';
+import type { CheckContext } from '../../src/contract/goal-type.js';
+import type { ScriptResult } from '../../src/contract/tool.js';
 
 const baseGoal: Goal = {
   id: 'g1',
@@ -247,5 +250,94 @@ describe('processClean', () => {
     );
     expect(r.ok).toBe(false);
     expect(r.detail).toContain('src/dirty.ts');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runScriptCheck
+// ---------------------------------------------------------------------------
+
+function makeGreenCtx(): CheckContext {
+  const result: ScriptResult = {
+    ok: true,
+    exitStatus: 0,
+    output: 'all tests passed',
+    fullOutput: 'all tests passed',
+    durationMs: 42,
+    timedOut: false,
+  };
+  return { runScript: async () => result };
+}
+
+function makeRedCtx(exitCode = 1, output = 'FAIL: assertion failed'): CheckContext {
+  const result: ScriptResult = {
+    ok: false,
+    exitStatus: exitCode,
+    output,
+    fullOutput: output,
+    durationMs: 100,
+    timedOut: false,
+  };
+  return { runScript: async () => result };
+}
+
+function makeRefusalCtx(): CheckContext {
+  const result: ScriptResult = {
+    ok: false,
+    exitStatus: null,
+    output: '"missing-script" is not in the declared set.',
+    fullOutput: '"missing-script" is not in the declared set.',
+    durationMs: 0,
+    timedOut: false,
+  };
+  return { runScript: async () => result };
+}
+
+describe('runScriptCheck', () => {
+  it('returns ok:true when the script exits 0', async () => {
+    const check = runScriptCheck('test');
+    const r = await check.run(baseGoal, null, makeGreenCtx());
+    expect(r.ok).toBe(true);
+    expect(r.detail).toContain('test');
+  });
+
+  it('returns ok:false when the script exits non-zero, detail includes exit status and output', async () => {
+    const check = runScriptCheck('test');
+    const r = await check.run(baseGoal, null, makeRedCtx(1, 'FAIL: assertion failed'));
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('exit 1');
+    expect(r.detail).toContain('FAIL: assertion failed');
+  });
+
+  it('returns ok:false for a refused (undeclared) name with reason in detail', async () => {
+    const check = runScriptCheck('missing-script');
+    const r = await check.run(baseGoal, null, makeRefusalCtx());
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('missing-script');
+  });
+
+  it('returns ok:false with "no exec context" when ctx is absent', async () => {
+    const check = runScriptCheck('test');
+    const r = await check.run(baseGoal, null);
+    expect(r.ok).toBe(false);
+    expect(r.detail).toBe('no exec context');
+  });
+
+  it('returns ok:false with "no exec context" when ctx.runScript is absent', async () => {
+    const check = runScriptCheck('test');
+    const r = await check.run(baseGoal, null, { sandboxRoot: '/some/path' });
+    expect(r.ok).toBe(false);
+    expect(r.detail).toBe('no exec context');
+  });
+
+  it('name follows run-script:<scriptName> convention', () => {
+    const check = runScriptCheck('my-tests');
+    expect(check.name).toBe('run-script:my-tests');
+  });
+
+  it('existing artifact-only checks still accept the new optional ctx param', async () => {
+    const r = await artifactPresent.run(baseGoal, null, makeGreenCtx());
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('No artifact');
   });
 });
