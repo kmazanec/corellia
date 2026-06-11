@@ -1,77 +1,65 @@
 # Roadmap — Corellia
 
-**Status:** agreed · **Source:** [DESIGN.md](../DESIGN.md) · [GOAL-TYPES.md](../GOAL-TYPES.md) ·
-[prototype-build-notes.md](./prototype-build-notes.md)
+**Status:** agreed · **Updated:** 2026-06-10
+**Sources:** [PRD.md](./PRD.md) (WHAT/WHY + acceptance criteria) ·
+[ARCHITECTURE.md](./ARCHITECTURE.md) + [adrs/](./adrs/) (implementation
+decisions) · [DESIGN.md](../DESIGN.md) (locked domain architecture) ·
+[GOAL-TYPES.md](../GOAL-TYPES.md) (type library) ·
+[prototype-build-notes.md](./prototype-build-notes.md) (build history)
 
 ## Where the prototype stands
 
 Iterations 1–2 built and live-verified the **coordination machinery**: the
-recursive engine (decide / split / block, dependency scheduling, contract
-children first), the three evals with the repair → escalate → block control
-loop, four-dimension subdivided budgets, the event log with memory as a
-projection, the flywheel (provisional memos, trusted-walk, lens-diverse
-terraced scan), risk gates with the constitution enforced at construction,
-the listener with scope-disjoint admission and park/TTL, a Postgres
-substrate, and a provider-agnostic live brain — 300+ tests, and a real
-end-to-end run against live models.
+recursive engine, the three evals with the repair → escalate → block control
+loop, subdivided budgets, the event log with memory as a projection, the
+flywheel, risk gates, the listener, a Postgres substrate, and a
+provider-agnostic live brain — 300+ tests and a real end-to-end run.
 
-Measured against the design's purpose — *ship real software on real repos* —
-the honest gap: **the factory thinks, but it doesn't yet have hands or
-eyes.** Leaves emit artifacts as one-shot text; nothing executes tests or
-uses a tool, and the factory knows nothing about codebases it didn't create.
+Measured against the PRD's success bar (a self-hosted PR **and** a
+foreign-repo PR): **the factory thinks, but doesn't yet have hands or
+eyes.** Nothing executes a test or uses a tool; the factory knows nothing
+about codebases it didn't create.
 
 ## The iteration arc
 
-Each iteration is a shippable state; each unblocks the next.
+Each iteration is a shippable state; each unblocks the next. Iteration 3 is
+fully specified (specs in [iterations/03-hands/](./iterations/03-hands/));
+4–6 stay arc-level deliberately — their right decomposition depends on what
+the prior iteration teaches (the JIT rule applied to planning itself). Each
+gets its gate brief + specs when it's next.
 
-### Iteration 3 — Hands: agentic leaf execution
+### Iteration 3 — Hands: agentic leaf execution *(specified, ready to plan)*
 
-Leaf goals (`implement`, `characterize`, `freeze-contract`) become real
-tool-using loops in sandboxed worktrees.
+Leaves become real tool-using loops in sandboxed worktrees. Decisions
+locked in ADR-014–018.
 
-- A **tool broker**: leaves call granted tools only (fs read/write within
-  scope, run-impacted-tests, search); ungranted calls are refused — "the
-  contract is the capability" becomes true at runtime.
-- The `toolCalls` budget debited per real call; the batching rhythm
-  (write → run once → fix all → run once) enforced by budget, not prompt
-  hope.
-- Deterministic checks that **execute**: compile the artifact, run its
-  tests — replacing string inspection.
-- Brain tool-calling support in `LlmBrain` (or an agentic leaf harness
-  looping tool calls until the chunk is done).
-
-*Done when:* an `implement` leaf builds a small module test-first in a
-sandbox, its checks run for real, and a scope-violating tool call is refused
-and surfaced.
+*Done when:* the convergence check in
+[06-live-step-adapter.md](./iterations/03-hands/06-live-step-adapter.md)
+passes — a live sonnet-class `implement` leaf builds a small module
+test-first in a tree worktree, its declared test script actually runs red
+then green, a scope-violating call is refused and visible, and the run
+report prints real token + dollar totals (AC-7/8/11/12 observed live).
 
 ### Iteration 4 — Eyes: brownfield comprehension
 
-The learn kind, made real, so the factory can work on code it didn't write.
+`map-repo` / `deep-dive-region` producing SHA-stamped self-validating
+knowledge artifacts (pointers, not bodies); the typed retrieval API
+(`find_symbol`, `find_exemplar`, `impact`, `conventions_for`,
+`stack_versions`) as granted tools; verify-on-read; the split gate's
+coverage check made mechanical. **Gate-brief candidates:** knowledge
+artifact schema + storage home; retrieval implementation (the contract
+barrier of this iteration).
 
-- `map-repo` (per-category) and `deep-dive-region` goal types producing
-  SHA-stamped, self-validating knowledge artifacts (pointers, not bodies).
-- The typed retrieval API as granted tools: `find_symbol`,
-  `find_exemplar`, `impact`, `conventions_for`, `stack_versions`.
-- Verify-on-read: stale facts trigger a fresh dive, never a silent wrong
-  answer. JIT only — no bootstrap ceremony.
-- The split gate's coverage check becomes mechanical (spawn comprehension
-  children for missing knowledge).
-
-*Done when:* pointed at an existing repo (natural target: corellia itself),
-the factory maps what it needs, splits sensibly, and a leaf consults
-`impact()` before touching code.
+*Done when:* pointed at an existing repo, the factory maps what it needs,
+splits sensibly, and a leaf consults `impact()` before touching code
+(AC-15/16/17).
 
 ### Iteration 5 — Taste: the library at full strength
 
-- Expand the library 8 → 19 types (write-prd, design-arch,
-  research-external, investigate, the remaining judges, the evolve family).
-- **Per-type/family skill bundles** as harness prompts — the seed content
-  GOAL-TYPES.md names (interview structure, ADR format, six-dimension
-  rubric, vertical-slice discipline). Generic prompts are the current
-  quality ceiling; this removes it.
-- The intent dial wired through judges (spike/characterization bars).
-- Golden-set capture from live runs — judge calibration data starts
-  accruing.
+8 → 19 types; per-type/family skill bundles as harness content (the current
+generic-prompt quality ceiling removed); the intent dial wired through
+judges; golden-set capture from live runs. **Gate-brief candidates:**
+skill-bundle format; golden-set schema.
 
 *Done when:* a commissioned intent flows research → PRD → architecture →
 implementation with type-appropriate harnesses, and judges cite their
@@ -79,42 +67,83 @@ rubrics.
 
 ### Iteration 6 — The loop closes: self-hosting
 
-- The factory builds a real feature **on its own repo**, end to end,
-  output: a PR a human reviews. The integration test of everything above.
-- Improvement loop v1: blocker reports → improvement goals → a
-  factory-repo PR, human-reviewed; generalize-don't-cache; the
-  architecture stays locked.
-- Daemonized listener: a persistent front door (start with
-  GitHub-issues-as-intents or a watched directory).
+The PR-opening boundary (branch → push → PR with proof artifacts +
+`learned`); the factory builds a real feature on its own repo (PRD AC-2)
+and on a foreign repo (AC-3); improvement loop v1 (blockers → factory-repo
+PRs); daemonized listener front door.
 
-*Done when:* a corellia feature ships via a corellia-opened PR, and a
-blocker report from that run lands as a reviewable improvement PR.
+*Done when:* the PRD's Desired Outcome — both halves.
+
+## Features index — iteration 3
+
+| ID | Feature | Spec | Before → After (one line) | Depends on (hard) |
+|----|---------|------|---------------------------|--------------------|
+| F-31 | Tool broker + core tools | [01](./iterations/03-hands/01-tool-broker-core.md) | grants inert → enforced at one mediating point | — |
+| F-32 | Engine-owned step loop | [02](./iterations/03-hands/02-step-loop.md) | one-shot text leaves → bounded think/act/observe loop | — |
+| F-33 | run_script + executed checks | [03](./iterations/03-hands/03-executed-checks.md) | checks inspect strings → checks gate on real exit status | — |
+| F-34 | Tree worktree lifecycle | [04](./iterations/03-hands/04-tree-worktree.md) | in-memory artifacts → isolated branch with real diffs | — |
+| F-35 | Usage accounting + ceiling | [05](./iterations/03-hands/05-real-accounting.md) | chars/4 guess → provider-reported usage, $15 halt | — |
+| F-36 | Live step adapter | [06](./iterations/03-hands/06-live-step-adapter.md) | one-shot completions → live model drives the loop | — |
+
+**Zero hard edges** — every feature builds against the frozen barrier
+(ADR-002 discipline), so all six fan out once contracts land.
+**Overlap note for the build:** F-32/F-34/F-35 all modify
+`src/engine/engine.ts` — schedule them in worktrees folded back by
+cherry-pick, or serialize just those three on one trunk; the other three are
+collision-free.
+
+## Cross-cutting contracts — iteration 3's barrier
+
+What the plan stage freezes (concrete signatures), consistent with the cited
+ADRs, before any feature work:
+
+| Contract | Source of truth | Introduced by | Consumed by |
+|----------|-----------------|---------------|-------------|
+| Tool shapes (`ToolDef`/`ToolCall`/`ToolResult`) + `ToolBroker` | ADR-014 | barrier | F-31..F-34, F-36 |
+| `Brain.step` + step/transcript protocol | ADR-015 | barrier | F-32, F-36 |
+| Usage fields on brain-call events; tool/retry/lifecycle event members | ADR-017, ADR-018, ADR-003 | barrier | F-31, F-35, F-36 |
+| Tree spend ceiling on the root contract | ADR-017 | barrier | F-35 |
+| Sandbox-root binding of the broker | ADR-016, ADR-014 | barrier | F-31, F-34 |
+
+## Risk-weighted ordering
+
+1. **Can lower-power models drive the loop?** (PRD risk #1, existential for
+   the whole tier thesis.) De-risked by iteration 3's convergence check —
+   the earliest possible live evidence. If sonnet-class fails it, the
+   fallback is tier policy (default leaves up a tier), not architecture.
+2. **Executing model-influenced commands safely** (PRD risk #3) — contained
+   by ADR-016's scripts-by-name posture; the riskiest code path lands while
+   the operator is watching closest.
+3. **Comprehension quality on foreign repos** (PRD risk #5) — deliberately
+   *after* hands: comprehension artifacts are consumed by tools, so the tool
+   layer must exist to validate them.
+4. **Judge calibration cold start** (PRD risk #2) — golden-set capture in
+   iteration 5; the operator's PR reviews are the exogenous ground truth
+   until then.
 
 ## Ride-along items (small, any iteration)
 
-- Pattern-trust ceremony CLI (`patterns list / promote`) — the human
-  signoff surface for the flywheel.
-- Risk-sensitivity tuning (segment-boundary matching; the
-  `author.md`-matches-`auth` sharp edge).
-- pgvector / sqlite-vec relevance retrieval for memory (replacing
-  substring match).
-- Decision-brief notification surface (terminal → Slack/issue comment).
-- Replay harness over the event log (golden-set replay, point-in-time
-  memory reconstruction).
-- Decide-phase budget metering (the scan's k candidates are currently
-  unmetered — documented gap).
+Pattern-trust ceremony CLI · risk-sensitivity segment matching ·
+pgvector/relevance retrieval · decision-brief notification surface · replay
+harness over the event log. (Decide-phase metering graduated into F-35.)
 
 ## Why this order
 
-Hands before eyes: comprehension artifacts are *consumed by tools*, so the
-tool layer comes first. Both before library expansion: per-type skills are
-only testable against real execution. Self-hosting last because it is not a
-feature — it is the integration test of the whole design, and the strange
-loop's first closure.
+Hands before eyes: comprehension artifacts are consumed by tools. Both
+before library expansion: per-type skills are only testable against real
+execution. Self-hosting last: it is the integration test of the whole
+design, and the strange loop's first closure.
+
+## Non-goals and deferred
+
+Mirror the PRD §4 (out of scope: team surfaces, hosted operation,
+dashboards, factory-factory, dangerous grants; deferred: per-language
+adapters, signal-minted roots, semantic retrieval, full replay tooling).
 
 ## Sources of truth
 
-Architecture: DESIGN.md (locked; changes are human design decisions).
-Type library: GOAL-TYPES.md. Build history + decisions: prototype-build-notes.md.
-This file: the arc and what "done" means per iteration — updated as
-iterations ship.
+PRD: WHAT/WHY + acceptance criteria. DESIGN.md: locked domain architecture.
+ARCHITECTURE.md + ADRs: implementation decisions (contracts cite ADRs, never
+restate them). GOAL-TYPES.md: the type library. This file: the arc, the
+features index, and what "done" means per iteration — updated as iterations
+ship. STATUS.md: the rolling re-entry point.
