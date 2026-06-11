@@ -5,11 +5,12 @@
 import { describe, it, expect } from 'vitest';
 import { starterTypes } from '../../src/library/starter-types.js';
 import { createRegistry } from '../../src/library/registry.js';
+import { lintLibrary } from '../../src/library/constitution.js';
 
 describe('starterTypes', () => {
-  it('returns an array with the eight defined types', () => {
+  it('returns an array with the ten defined types', () => {
     const types = starterTypes();
-    expect(types.length).toBe(8);
+    expect(types.length).toBe(10);
   });
 
   it('all types are loadable into a registry without error', () => {
@@ -27,6 +28,8 @@ describe('starterTypes', () => {
       'judge-integration',
       'critique-code',
       'promote-memory',
+      'map-repo',
+      'deep-dive-region',
     ];
     for (const name of expectedNames) {
       expect(() => reg.get(name)).not.toThrow();
@@ -201,6 +204,90 @@ describe('starterTypes', () => {
     it('holds the memory.write grant', () => {
       const grants = createRegistry(starterTypes()).get('promote-memory').grants;
       expect(grants).toContain('memory.write');
+    });
+  });
+
+  describe('map-repo', () => {
+    it('has kind learn and IS leafOnly', () => {
+      const def = createRegistry(starterTypes()).get('map-repo');
+      expect(def.kind).toBe('learn');
+      expect(def.leafOnly).toBe(true);
+    });
+
+    it('belongs to the comprehend family', () => {
+      expect(createRegistry(starterTypes()).get('map-repo').family).toBe('comprehend');
+    });
+
+    it('uses haiku as default tier, escalates to sonnet', () => {
+      const def = createRegistry(starterTypes()).get('map-repo');
+      expect(def.tier.default).toBe('haiku');
+      expect(def.tier.ladder).toEqual(['haiku', 'sonnet']);
+    });
+
+    it('has null judgeType', () => {
+      expect(createRegistry(starterTypes()).get('map-repo').judgeType).toBeNull();
+    });
+
+    it('has read-only + run-scoped grants (no write grants)', () => {
+      const grants = createRegistry(starterTypes()).get('map-repo').grants;
+      expect(grants).toContain('fs.read');
+      expect(grants).toContain('retrieval.api');
+      expect(grants).toContain('test.run_scoped');
+      expect(grants.some((g) => g.includes('write'))).toBe(false);
+    });
+
+    it('has deterministic checks including artifact-present and knowledge:map-repo', () => {
+      const checks = createRegistry(starterTypes()).get('map-repo').deterministic;
+      const names = checks.map((c) => c.name);
+      expect(names).toContain('artifact-present');
+      expect(names).toContain('knowledge:map-repo');
+    });
+
+    it('passes constitution lint', () => {
+      expect(lintLibrary(starterTypes())).toHaveLength(0);
+    });
+  });
+
+  describe('deep-dive-region', () => {
+    it('has kind learn and IS leafOnly', () => {
+      const def = createRegistry(starterTypes()).get('deep-dive-region');
+      expect(def.kind).toBe('learn');
+      expect(def.leafOnly).toBe(true);
+    });
+
+    it('belongs to the comprehend family', () => {
+      expect(createRegistry(starterTypes()).get('deep-dive-region').family).toBe('comprehend');
+    });
+
+    it('uses sonnet as default tier, escalates to opus', () => {
+      const def = createRegistry(starterTypes()).get('deep-dive-region');
+      expect(def.tier.default).toBe('sonnet');
+      expect(def.tier.ladder).toEqual(['sonnet', 'opus']);
+    });
+
+    it('has null judgeType', () => {
+      expect(createRegistry(starterTypes()).get('deep-dive-region').judgeType).toBeNull();
+    });
+
+    it('has read-only grants only (no write, no run)', () => {
+      const grants = createRegistry(starterTypes()).get('deep-dive-region').grants;
+      expect(grants).toContain('fs.read');
+      expect(grants).toContain('retrieval.api');
+      expect(grants.some((g) => g.includes('write'))).toBe(false);
+      expect(grants).not.toContain('test.run_scoped');
+    });
+
+    it('has deterministic checks including artifact-present and knowledge:dive-anchor', () => {
+      const checks = createRegistry(starterTypes()).get('deep-dive-region').deterministic;
+      const names = checks.map((c) => c.name);
+      expect(names).toContain('artifact-present');
+      expect(names).toContain('knowledge:dive-anchor');
+    });
+  });
+
+  describe('learn-kind constitution compliance', () => {
+    it('lintLibrary passes with all ten types registered', () => {
+      expect(lintLibrary(starterTypes())).toHaveLength(0);
     });
   });
 });
