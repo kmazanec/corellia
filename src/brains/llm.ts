@@ -18,13 +18,13 @@
  */
 
 import type { Brain, BrainContext, StepOutput, StepTranscript } from '../contract/brain.js';
-import type { Goal, Metered, Usage } from '../contract/goal.js';
+import type { Goal, Metered, TransportIncident, Usage } from '../contract/goal.js';
 import { ZERO_USAGE } from '../contract/goal.js';
 import type { Tier } from '../contract/goal.js';
 import type { MemoryPointer } from '../contract/goal.js';
 import type { Decision } from '../contract/decision.js';
 import type { Artifact } from '../contract/report.js';
-import type { ToolDef } from '../contract/tool.js';
+import type { ToolDef, ToolCall } from '../contract/tool.js';
 import type { Verdict, Finding } from '../contract/verdict.js';
 
 // ---------------------------------------------------------------------------
@@ -45,6 +45,12 @@ export interface LlmBrainConfig {
    * in tests so no network calls are made.
    */
   fetchImpl?: typeof fetch;
+  /**
+   * Injectable sleep function for tests: receives delay in milliseconds, resolves
+   * when done. Defaults to a real setTimeout-based promise. Inject a fake in tests
+   * so retry backoff does not spend real wall-clock time.
+   */
+  sleepFn?: (ms: number) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +98,238 @@ export function readUsage(data: ChatResponse): Usage {
   const completionTokens = u.completion_tokens ?? 0;
   const base: Usage = { promptTokens, completionTokens };
   return u.cost !== undefined ? { ...base, costUsd: u.cost } : base;
+}
+
+// ---------------------------------------------------------------------------
+// OpenAI tool-calling wire types (used by step())
+// ---------------------------------------------------------------------------
+
+interface WireToolParam {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+interface WireToolCallFunction {
+  name: string;
+  arguments: string;
+}
+
+interface WireToolCall {
+  id: string;
+  type: 'function';
+  function: WireToolCallFunction;
+}
+
+interface WireToolCallMessage {
+  role: 'assistant';
+  content: string | null;
+  tool_calls: WireToolCall[];
+}
+
+interface WireToolResultMessage {
+  role: 'tool';
+  tool_call_id: string;
+  content: string;
+}
+
+type WireMessage =
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: string }
+  | { role: 'assistant'; content: string }
+  | WireToolCallMessage
+  | WireToolResultMessage;
+
+interface StepRequest {
+  model: string;
+  messages: WireMessage[];
+  tools: WireToolParam[];
+}
+
+interface WireUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  cost?: number;
+}
+
+interface StepChoiceMessage {
+  role: string;
+  content: string | null;
+  tool_calls?: WireToolCall[];
+}
+
+interface StepChoice {
+  message: StepChoiceMessage;
+}
+
+interface StepResponse {
+  choices: StepChoice[];
+  usage?: WireUsage;
+}
+
+// ---------------------------------------------------------------------------
+// Terminal classification table (ADR-018)
+// ---------------------------------------------------------------------------
+
+type ErrorClass = 'retryable' | 'terminal';
+
+/**
+ * Classify an HTTP status code as retryable or terminal.
+ * Conservative default: unknown status codes are terminal (ADR-018).
+ */
+function classifyStatus(status: number): ErrorClass {
+  if (status === 429) return 'retryable';
+  if (status >= 500 && status < 600) return 'retryable';
+  // 401, 403 are always terminal — a revoked key or forbidden model cannot be fixed by retrying.
+  if (status === 401) return 'terminal';
+  if (status === 403) return 'terminal';
+  // 404 (invalid model id) is terminal.
+  if (status === 404) return 'terminal';
+  // Unknown status codes default to terminal (conservative, ADR-018).
+  return 'terminal';
+}
+
+/** Transport error carrying classification context. */
+class TransportError extends Error {
+  readonly status: number;
+  readonly errorClass: ErrorClass;
+  constructor(status: number, body: string) {
+    super(`LLM step request failed (${status}): ${body}`);
+    this.status = status;
+    this.errorClass = classifyStatus(status);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Request shaping: pure function (StepTranscript, ToolDef[], model) -> wire body
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the OpenAI-compatible chat-completions request body for one step.
+ * Pure and deterministic: given the same inputs in the same order, produces
+ * byte-identical JSON serialization (prefix stability, AC-6).
+ *
+ * Transcript mapping:
+ * - 'context' role: first message → system; subsequent → user
+ * - 'assistant' with toolCalls → assistant with tool_calls[]
+ * - 'assistant' with no toolCalls → plain assistant content message
+ * - 'tool' → role:'tool' with tool_call_id
+ */
+function buildStepRequest(
+  transcript: StepTranscript,
+  tools: ToolDef[],
+  model: string,
+): StepRequest {
+  let contextCount = 0;
+  const messages: WireMessage[] = [];
+
+  for (const msg of transcript) {
+    if (msg.role === 'context') {
+      if (contextCount === 0) {
+        messages.push({ role: 'system', content: msg.content });
+      } else {
+        messages.push({ role: 'user', content: msg.content });
+      }
+      contextCount++;
+    } else if (msg.role === 'assistant') {
+      if (msg.toolCalls && msg.toolCalls.length > 0) {
+        const wireCalls: WireToolCall[] = msg.toolCalls.map((tc) => ({
+          id: tc.id,
+          type: 'function' as const,
+          function: {
+            name: tc.name,
+            arguments: JSON.stringify(tc.args),
+          },
+        }));
+        messages.push({
+          role: 'assistant',
+          content: msg.content,
+          tool_calls: wireCalls,
+        });
+      } else {
+        messages.push({ role: 'assistant', content: msg.content });
+      }
+    } else {
+      messages.push({
+        role: 'tool',
+        tool_call_id: msg.callId,
+        content: msg.content,
+      });
+    }
+  }
+
+  const wireTools: WireToolParam[] = tools.map((t) => ({
+    type: 'function',
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters,
+    },
+  }));
+
+  return { model, messages, tools: wireTools };
+}
+
+// ---------------------------------------------------------------------------
+// Response translation: wire StepResponse -> StepOutput
+// ---------------------------------------------------------------------------
+
+/**
+ * Read usage from the wire response; falls back to ZERO_USAGE when absent.
+ */
+function readUsage(response: StepResponse): Usage {
+  if (!response.usage) return ZERO_USAGE;
+  const u = response.usage;
+  const usage: Usage = {
+    promptTokens: u.prompt_tokens ?? 0,
+    completionTokens: u.completion_tokens ?? 0,
+  };
+  if (typeof u.cost === 'number') {
+    usage.costUsd = u.cost;
+  }
+  return usage;
+}
+
+/**
+ * Translate a wire step response into a StepOutput.
+ * Returns null when the tool_calls are malformed (caller issues re-prompt).
+ */
+function translateStepResponse(
+  response: StepResponse,
+  incidents?: TransportIncident[],
+): StepOutput | null {
+  const choice = response.choices[0];
+  if (!choice) throw new Error('LLM step returned no choices');
+
+  const usage = readUsage(response);
+  const incidentField = incidents && incidents.length > 0 ? { incidents } : {};
+
+  const toolCalls = choice.message.tool_calls;
+  if (toolCalls && toolCalls.length > 0) {
+    const calls: ToolCall[] = [];
+    for (const wc of toolCalls) {
+      let args: Record<string, unknown>;
+      try {
+        args = JSON.parse(wc.function.arguments) as Record<string, unknown>;
+      } catch (e) {
+        return null;
+      }
+      if (typeof args !== 'object' || args === null || Array.isArray(args)) {
+        return null;
+      }
+      calls.push({ id: wc.id, name: wc.function.name, args });
+    }
+    return { kind: 'tool-calls', calls, usage, ...incidentField };
+  }
+
+  const content = choice.message.content ?? '';
+  const files = parseFileBlocks(content);
+  const artifact: Artifact =
+    files.length > 0 ? { kind: 'files', files } : { kind: 'text', text: content };
+  return { kind: 'artifact', artifact, usage, ...incidentField };
 }
 
 // ---------------------------------------------------------------------------
@@ -461,10 +699,154 @@ export class LlmBrain implements Brain {
 
   async step(
     _goal: Goal,
-    _transcript: StepTranscript,
-    _tools: ToolDef[],
-    _ctx: BrainContext,
+    transcript: StepTranscript,
+    tools: ToolDef[],
+    ctx: BrainContext,
   ): Promise<StepOutput> {
-    throw new Error('step not implemented — lands with F-32/F-36');
+    const model = this.config.modelByTier[ctx.tier];
+    const fetchFn = this.config.fetchImpl ?? globalThis.fetch;
+    const sleepFn = this.config.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    const MAX_RETRIES = 3;
+    const transportIncidents: TransportIncident[] = [];
+
+    /**
+     * Perform one fetch of the step endpoint with bounded transport retries.
+     * 429/5xx/timeout → retry up to MAX_RETRIES with exponential backoff + jitter.
+     * Terminal status codes (401/403/404/unknown) → throw immediately (no retries).
+     * Retried calls contribute no usage; each retry is recorded as an incident.
+     */
+    const fetchWithRetry = async (): Promise<StepResponse> => {
+      const requestBody = buildStepRequest(transcript, tools, model);
+      let attempt = 0;
+      while (true) {
+        let response: Response;
+        try {
+          response = await fetchFn(`${this.config.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${this.config.apiKey}`,
+              ...this.config.headers,
+            },
+            body: JSON.stringify(requestBody),
+          });
+        } catch (networkErr) {
+          const isTimeout =
+            networkErr instanceof Error &&
+            (networkErr.name === 'AbortError' || networkErr.message.includes('timeout'));
+          if (attempt < MAX_RETRIES) {
+            const delay = Math.pow(2, attempt) * 200 + Math.random() * 100;
+            transportIncidents.push({
+              kind: 'transport-retry',
+              detail: isTimeout ? 'network timeout' : String(networkErr),
+              at: Date.now(),
+            });
+            await sleepFn(delay);
+            attempt++;
+            continue;
+          }
+          throw networkErr;
+        }
+
+        if (response.ok) {
+          return (await response.json()) as StepResponse;
+        }
+
+        const errorText = await response.text();
+        const err = new TransportError(response.status, errorText);
+
+        if (err.errorClass === 'terminal') {
+          throw err;
+        }
+
+        if (attempt < MAX_RETRIES) {
+          const delay = Math.pow(2, attempt) * 200 + Math.random() * 100;
+          transportIncidents.push({
+            kind: 'transport-retry',
+            detail: `HTTP ${response.status}: ${errorText.slice(0, 200)}`,
+            at: Date.now(),
+          });
+          await sleepFn(delay);
+          attempt++;
+          continue;
+        }
+
+        throw err;
+      }
+    };
+
+    /**
+     * Attempt one step fetch + translate. On malformed tool-call output, issue
+     * exactly one corrective re-prompt carrying the parse error. A second
+     * consecutive malformation fails the step. Records malformation as an
+     * incident on the envelope.
+     */
+    const fetchAndTranslate = async (): Promise<StepOutput> => {
+      const wireResponse = await fetchWithRetry();
+      const incidents = transportIncidents.slice();
+      const result = translateStepResponse(wireResponse, incidents);
+
+      if (result !== null) {
+        return result;
+      }
+
+      const malformDetail = 'Tool call arguments could not be parsed as a JSON object';
+      incidents.push({ kind: 'malformation-reprompt', detail: malformDetail, at: Date.now() });
+
+      const correctedTranscript: StepTranscript = [
+        ...transcript,
+        {
+          role: 'context',
+          content:
+            `Your previous response contained tool calls with unparseable arguments. ` +
+            `Parse error: ${malformDetail}. ` +
+            `Please respond again with valid tool calls or a final artifact.`,
+        },
+      ];
+
+      const repromptBody = buildStepRequest(correctedTranscript, tools, model);
+      const repromptResponse = await fetchFn(`${this.config.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.config.apiKey}`,
+          ...this.config.headers,
+        },
+        body: JSON.stringify(repromptBody),
+      });
+
+      if (!repromptResponse.ok) {
+        const errorText = await repromptResponse.text();
+        throw new TransportError(repromptResponse.status, errorText);
+      }
+
+      const repromptWire = (await repromptResponse.json()) as StepResponse;
+      const repromptUsage = readUsage(repromptWire);
+      const repromptResult = translateStepResponse(repromptWire, incidents);
+
+      if (repromptResult === null) {
+        throw new Error(
+          `Step failed: two consecutive malformed tool-call responses. ` +
+            `Second parse error: tool call arguments could not be parsed as a JSON object`,
+        );
+      }
+
+      const firstUsage = readUsage(wireResponse);
+      const mergedUsage: Usage = {
+        promptTokens: firstUsage.promptTokens + repromptUsage.promptTokens,
+        completionTokens: firstUsage.completionTokens + repromptUsage.completionTokens,
+      };
+      if (firstUsage.costUsd !== undefined || repromptUsage.costUsd !== undefined) {
+        mergedUsage.costUsd = (firstUsage.costUsd ?? 0) + (repromptUsage.costUsd ?? 0);
+      }
+
+      const incidentField = incidents.length > 0 ? { incidents } : {};
+      if (repromptResult.kind === 'tool-calls') {
+        return { kind: 'tool-calls', calls: repromptResult.calls, usage: mergedUsage, ...incidentField };
+      }
+      return { kind: 'artifact', artifact: repromptResult.artifact, usage: mergedUsage, ...incidentField };
+    };
+
+    return fetchAndTranslate();
   }
 }
