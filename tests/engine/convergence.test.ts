@@ -35,7 +35,7 @@ import { costSummary } from '../../src/eventlog/projections.js';
 import type { Brain, BrainContext, StepOutput, StepTranscript } from '../../src/contract/brain.js';
 import type { Goal, Metered, Usage } from '../../src/contract/goal.js';
 import { ZERO_USAGE } from '../../src/contract/goal.js';
-import type { Decision } from '../../src/contract/decision.js';
+import type { Decision, ChildPlan } from '../../src/contract/decision.js';
 import type { Artifact } from '../../src/contract/report.js';
 import type { Verdict } from '../../src/contract/verdict.js';
 import type { ToolDef } from '../../src/contract/tool.js';
@@ -246,6 +246,158 @@ describe('convergence — scripted full-stack composed path', () => {
         { encoding: 'utf-8' },
       ).trim();
       expect(log).toContain(collectedEvent.commits[0]);
+    }
+  });
+});
+
+// ── FIX 7: attribution test — SPLIT tree, script-ran goalId equals child id ──
+//
+// A root goal splits into one tool-granted implement child leaf that calls
+// run_script. The script-ran event's goalId must equal the CHILD leaf's id, not
+// the root's. Uses ScriptedBrain with decide-to-split + scripted child steps,
+// against a real git fixture repo with a `test` script (mirroring the convergence
+// pattern above).
+
+describe('FIX 7 — script-ran attribution: SPLIT tree attributes run to CHILD leaf', () => {
+  it('script-ran event goalId equals child leaf id, not root id', async () => {
+    const repo = makeFixtureRepo();
+    const store = new MemoryEventStore();
+
+    // Root type: splits (non-leaf). Child type: tool-granted implement leaf.
+    const rootType: GoalTypeDef = {
+      name: 'splitter',
+      kind: 'make',
+      family: 'build',
+      leafOnly: false,
+      tier: { default: 'sonnet', ladder: ['sonnet'] },
+      deterministic: [],
+      judgeType: null,
+      grants: [],
+    };
+
+    const childLeafType: GoalTypeDef = {
+      name: 'implement',
+      kind: 'make',
+      family: 'build',
+      leafOnly: true,
+      tier: { default: 'sonnet', ladder: ['sonnet'] },
+      // The executing check runs the declared test script via ctx.
+      deterministic: [runScriptCheck('test')],
+      judgeType: null,
+      grants: ['fs.read', 'fs.write', 'test.run_impacted'],
+    };
+
+    // The root brain decides to split into one implement child.
+    const childPlan: ChildPlan = {
+      localId: 'impl',
+      type: 'implement',
+      title: 'write the fix',
+      spec: { description: 'write src/target.txt with CONVERGED' },
+      dependsOn: [],
+      scope: ['src/'],
+      budgetShare: 1.0,
+    };
+
+    // ScriptedBrain: root decides to split; child steps drive the step loop.
+    // The child: write the fix, run_script (GREEN), emit artifact.
+    let decideCount = 0;
+    let stepCount = 0;
+
+    const childSteps: StepOutput[] = [
+      // Write the correct content.
+      {
+        kind: 'tool-calls',
+        calls: [
+          { id: 'f1', name: 'write_file', args: { path: 'src/target.txt', content: RIGHT } },
+        ],
+        usage: USAGE,
+      },
+      // Run the test (GREEN).
+      {
+        kind: 'tool-calls',
+        calls: [{ id: 'rs1', name: 'run_script', args: { script: 'test' } }],
+        usage: USAGE,
+      },
+      // Emit the artifact.
+      {
+        kind: 'artifact',
+        artifact: { kind: 'files', files: [{ path: 'src/target.txt', content: RIGHT }] },
+        usage: USAGE,
+      },
+    ];
+
+    const splitBrain: Brain = {
+      async decide(_goal: Goal, _ctx: BrainContext): Promise<Metered<Decision>> {
+        decideCount++;
+        return { value: { kind: 'split', children: [childPlan] }, usage: ZERO_USAGE };
+      },
+      async produce(): Promise<Metered<Artifact>> {
+        throw new Error('produce not used in split test');
+      },
+      async judge(): Promise<Metered<Verdict>> {
+        return { value: { pass: true, findings: [] }, usage: USAGE };
+      },
+      async repair(): Promise<Metered<Artifact>> {
+        throw new Error('repair not used');
+      },
+      async step(
+        _goal: Goal,
+        _transcript: import('../../src/contract/brain.js').StepTranscript,
+        _tools: ToolDef[],
+        _ctx: BrainContext,
+      ): Promise<StepOutput> {
+        const out = childSteps[stepCount];
+        stepCount++;
+        if (out === undefined) throw new Error('splitBrain: step plan exhausted');
+        return out;
+      },
+    };
+
+    const registry = buildRegistry([rootType, childLeafType]);
+    const engine = new Engine({
+      registry,
+      brain: splitBrain,
+      store,
+      memory: new NoopMemoryView(),
+      sandbox: { repoRoot: repo, declaredScripts: { test: 'check.mjs' } },
+    });
+
+    const rootGoal = makeGoal({
+      id: 'split-root',
+      type: 'splitter',
+      title: 'split and fix',
+      scope: ['src/'],
+      budget: { attempts: 3, tokens: 100_000, toolCalls: 50, wallClockMs: 120_000 },
+    });
+
+    const report = await engine.run(rootGoal);
+    const events = await store.list();
+
+    // The tree must succeed.
+    expect(report.blockers).toHaveLength(0);
+
+    // The expected child leaf id is 'split-root/impl'.
+    const childId = 'split-root/impl';
+
+    // All script-ran events must carry the CHILD's goalId, not the root's.
+    const scriptRanEvents = events.filter((e) => e.type === 'script-ran');
+    expect(scriptRanEvents.length).toBeGreaterThanOrEqual(1);
+    for (const e of scriptRanEvents) {
+      expect(e.goalId).toBe(childId);
+      expect(e.goalId).not.toBe('split-root');
+    }
+
+    // At least one green exit-0 script-ran event exists.
+    const greenRuns = scriptRanEvents.filter(
+      (e) => e.type === 'script-ran' && e.exitStatus === 0,
+    );
+    expect(greenRuns.length).toBeGreaterThanOrEqual(1);
+
+    // The child-spawned event names the child.
+    const spawned = events.filter((e) => e.type === 'child-spawned');
+    expect(spawned).toHaveLength(1);
+    if (spawned[0]?.type === 'child-spawned') {
+      expect(spawned[0].childId).toBe(childId);
     }
   });
 });

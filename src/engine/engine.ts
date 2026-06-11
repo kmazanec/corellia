@@ -152,6 +152,12 @@ export class Engine {
    * root when a SandboxConfig is present and cleared in the finally. While set,
    * it supplies the tree-scoped broker (overriding EngineOptions.broker) and the
    * per-goal CheckContext factory; absent, the engine uses the plain broker.
+   *
+   * Why single-tree-per-instance: Engine.run() is single-tree-per-instance —
+   * concurrent root runs on the same Engine instance are NOT supported. Each
+   * concurrent tree must use its own Engine instance. This field is set once at
+   * the root and cleared in the finally; a second concurrent run() call would
+   * silently clobber it and corrupt the broker/CheckContext of the first tree.
    */
   private _activeAssembly: SandboxAssembly | undefined = undefined;
 
@@ -265,10 +271,29 @@ export class Engine {
       if (report.blockers.length === 0) {
         const diff = diffWithinScope(assembly.worktree.root, goal.scope);
         if (!diff.ok) {
+          // Downgrade: _run already emitted a 'emitted' success event. Rather than
+          // appending a second contradictory 'emitted', replace the in-flight report
+          // with the scope-insufficiency block and let the finally/preserve path handle
+          // it. The existing 'emitted' success from _run is superseded — the store
+          // carries the full history and the returned report is the authoritative one.
           report = blockedReport(
             `Scope insufficiency at tree emission: ${diff.scopeInsufficiency ?? 'diff exceeds declared scope'}`,
           );
-          await this.store.append({ type: 'emitted', at: this.now(), goalId: goal.id, report });
+          // Append a 'blocked' event (not a second 'emitted') to represent the
+          // scope-downgrade so the event log is honest without two 'emitted' entries.
+          await this.store.append({
+            type: 'blocked',
+            at: this.now(),
+            goalId: goal.id,
+            brief: {
+              question: `Scope insufficiency at tree emission: ${diff.scopeInsufficiency ?? 'diff exceeds declared scope'}`,
+              options: ['deny', 'park', 'bounce'],
+              links: [goal.id],
+              deadlineMs: 0,
+              onTimeout: 'deny',
+            },
+            resolution: 'deny',
+          });
         }
       }
       return report;
@@ -1265,7 +1290,9 @@ export class Engine {
     | { kind: 'ceiling'; budget: Budget; transcript: StepTranscript }
   > {
     const t = this.now;
-    const tools = deriveToolDefs(grants);
+    // Pass the concrete broker (if present) so real ToolDef parameter schemas
+    // reach the brain — in particular, run_script's 'script' property.
+    const tools = deriveToolDefs(grants, this.effectiveBroker as { defs?: () => ToolDef[] });
     const transcript: StepTranscript = [];
     let remainingToolCalls = budget.toolCalls;
     let stepIndex = 0;
@@ -1909,16 +1936,36 @@ function isToolGranted(grants: string[]): boolean {
  * Derive the ToolDef array the brain receives for a step, from the intersection
  * of the type's grants and GRANT_TOOL_MAP. The brain uses these as a menu of
  * available tools; the broker's dispatch table is the executor.
+ *
+ * When a broker that exposes a `defs()` method is provided (e.g. the concrete
+ * Broker class), its real ToolDefs are used for the granted tools — giving the
+ * brain the true JSON-Schema parameter shapes (e.g. run_script's `script`
+ * property). Otherwise, the synthesized stub shape is used as a fallback so the
+ * step loop stays functional without a real broker.
  */
-function deriveToolDefs(grants: string[]): ToolDef[] {
+function deriveToolDefs(
+  grants: string[],
+  broker?: { defs?: () => ToolDef[] },
+): ToolDef[] {
+  // Build a lookup from the broker's real defs when available.
+  const brokerDefMap = new Map<string, ToolDef>();
+  if (broker?.defs) {
+    for (const def of broker.defs()) {
+      brokerDefMap.set(def.name, def);
+    }
+  }
+
   const defs: ToolDef[] = [];
   for (const [toolName, toolGrants] of Object.entries(GRANT_TOOL_MAP)) {
     if (toolGrants.some((tg) => grants.includes(tg))) {
-      defs.push({
-        name: toolName,
-        description: `Tool: ${toolName}`,
-        parameters: { type: 'object', properties: {}, additionalProperties: true },
-      });
+      const real = brokerDefMap.get(toolName);
+      defs.push(
+        real ?? {
+          name: toolName,
+          description: `Tool: ${toolName}`,
+          parameters: { type: 'object', properties: {}, additionalProperties: true },
+        },
+      );
     }
   }
   return defs;

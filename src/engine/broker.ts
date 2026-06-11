@@ -9,7 +9,7 @@
  */
 
 import type { Goal } from '../contract/goal.js';
-import type { ToolCall, ToolImpl, ToolResult } from '../contract/tool.js';
+import type { ToolCall, ToolDef, ToolImpl, ToolResult } from '../contract/tool.js';
 import { GRANT_TOOL_MAP } from '../contract/tool.js';
 import type { EventStore } from '../contract/events.js';
 import type { Registry } from '../contract/goal-type.js';
@@ -108,6 +108,15 @@ export class Broker {
 
     const outcome = await impl.execute(goal, call.args);
     return { callId: call.id, ok: outcome.ok, output: outcome.output };
+  }
+
+  /**
+   * Expose the ToolDef for every registered tool implementation.
+   * Used by the engine's deriveToolDefs to obtain real parameter schemas
+   * instead of synthesizing empty ones.
+   */
+  defs(): ToolDef[] {
+    return Array.from(this.#tools.values()).map((impl) => impl.def);
   }
 
   /** Append a refusal event and return a refusal ToolResult. */

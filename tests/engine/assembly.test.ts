@@ -282,16 +282,17 @@ describe('assembly — sandbox config present', () => {
     const repo = makeTempRepo();
     const store = new MemoryEventStore();
 
-    // A declared script that exits 0 IFF OPENROUTER_API_KEY is absent from its
-    // env — i.e. the scrub worked. The script is written into the REPO, which the
-    // worktree shares (it lives under the same git tree), but to be safe we write
-    // it relative to the worktree at run time via the script path resolution.
+    // A declared script that exits 0 IFF OPENROUTER_API_KEY is absent AND
+    // PATH is present (non-empty) — i.e. the scrub removed the secret but kept
+    // the benign toolchain env (FIX 4+5).
     const scriptRel = 'check-env.mjs';
     writeFileSync(
       join(repo, scriptRel),
       [
         'const leaked = process.env.OPENROUTER_API_KEY;',
         'if (leaked) { console.error("LEAKED: " + leaked); process.exit(1); }',
+        // FIX 5: also assert PATH survived — over-scrubbing is caught here.
+        'if (!process.env.PATH) { console.error("PATH missing after scrub"); process.exit(1); }',
         'console.log("clean"); process.exit(0);',
       ].join('\n'),
     );

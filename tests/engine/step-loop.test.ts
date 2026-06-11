@@ -883,6 +883,95 @@ describe('T6: tool-loop ceiling', () => {
   }, 10_000);
 });
 
+// ── T-SCHEMA: real tool schemas reach the brain ───────────────────────────────
+// When the assembly broker (Broker class) is active, the brain's step receives
+// the REAL ToolDef parameter schemas — in particular, run_script must have a
+// 'script' property in its parameters, not the empty synthesized fallback.
+
+describe('T-SCHEMA: real tool schemas reach the brain via assembly broker', () => {
+  it('brain.step receives run_script parameters.properties.script when assembly broker is active', async () => {
+    const store = new MemoryEventStore();
+
+    // Capture the ToolDef array the brain receives on each step call.
+    const capturedToolDefs: ToolDef[][] = [];
+
+    const finalArtifact = textArtifact('done');
+    const stepsArr: StepOutput[] = [
+      { kind: 'artifact', artifact: finalArtifact, usage: ZERO_USAGE },
+    ];
+    let stepIdx = 0;
+
+    const captureBrain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { return { value: { pass: true, findings: [] }, usage: ZERO_USAGE }; },
+      async repair() { throw new Error('not used'); },
+      async step(_goal, _transcript, tools, _ctx) {
+        capturedToolDefs.push(tools);
+        const out = stepsArr[stepIdx++];
+        if (!out) throw new Error('no more steps');
+        return out;
+      },
+    };
+
+    // Use the real Broker (not FakeBroker) so defs() is available.
+    // Import Broker and createFileTools directly to construct a real broker.
+    const { Broker } = await import('../../src/engine/broker.js');
+    const { createFileTools } = await import('../../src/engine/tools.js');
+    // A minimal temp dir for the broker root (it won't be written to in this test).
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join: pathJoin } = await import('node:path');
+    const tmpRoot = mkdtempSync(pathJoin(tmpdir(), 'schema-test-'));
+    try {
+      const { runScriptTool, createScriptRunner } = await import('../../src/library/script-runner.js');
+      const fileTools = createFileTools(tmpRoot);
+      const scriptRunner = createScriptRunner(tmpRoot, {});
+      const runScriptImpl = runScriptTool(scriptRunner);
+
+      const registry = buildRegistry([toolGrantedType({ grants: ['fs.read', 'fs.write', 'test.run_impacted'] })]);
+      const realBroker = new Broker({
+        root: tmpRoot,
+        registry,
+        store,
+        tools: [fileTools.readFile, fileTools.writeFile, fileTools.listDir, fileTools.search, runScriptImpl],
+      });
+
+      const engine = new Engine({
+        registry,
+        brain: captureBrain,
+        store,
+        memory: new NoopMemoryView(),
+        broker: realBroker,
+      });
+
+      const goal = makeGoal({
+        type: 'implement',
+        title: 'schema test',
+        budget: { attempts: 3, tokens: 10000, toolCalls: 10, wallClockMs: 60_000 },
+      });
+
+      const report = await engine.run(goal);
+      expect(report.blockers).toHaveLength(0);
+
+      // At least one step call should have happened.
+      expect(capturedToolDefs.length).toBeGreaterThanOrEqual(1);
+
+      // Find run_script in the tools the brain saw.
+      const firstCallDefs = capturedToolDefs[0]!;
+      const runScriptDef = firstCallDefs.find((d) => d.name === 'run_script');
+      expect(runScriptDef).toBeDefined();
+
+      // The real ToolDef must have parameters.properties.script (not empty).
+      const props = (runScriptDef!.parameters as { properties?: Record<string, unknown> }).properties;
+      expect(props).toBeDefined();
+      expect(props!['script']).toBeDefined();
+    } finally {
+      rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  }, 10_000);
+});
+
 // ── T7: debit equality reads the budget ──────────────────────────────────────
 // After a run, the remaining tokens budget equals initial minus the SUM of all
 // step event token usage — proving debit equals reported, not just behavioral.

@@ -32,6 +32,7 @@ import { InMemoryEventStore } from '../src/eventlog/memory-store.js';
 import { projectMemory, renderTree, costSummary } from '../src/eventlog/projections.js';
 import { createRegistry } from '../src/library/registry.js';
 import { starterTypes } from '../src/library/starter-types.js';
+import { runScriptCheck } from '../src/library/checks.js';
 import { LlmBrain } from '../src/brains/llm.js';
 import { openRouterConfig } from '../src/brains/openrouter.js';
 
@@ -93,14 +94,28 @@ const repoRoot = makeFixtureRepo();
 // Engine, fully assembled
 // ---------------------------------------------------------------------------
 
-const types = starterTypes();
-const brain = new LlmBrain(openRouterConfig(), types.map((t) => t.name));
+// Build the type registry with a live-specific `implement` variant: all starter
+// types, but the `implement` type is replaced with one whose deterministic checks
+// include runScriptCheck('test'). This gates the live leaf on the REAL test
+// script exit status — without it, a "passing" step loop could emit a success
+// report while the declared test is still red.
+const baseTypes = starterTypes();
+const liveImplementType = {
+  ...baseTypes.find((t) => t.name === 'implement')!,
+  deterministic: [
+    ...baseTypes.find((t) => t.name === 'implement')!.deterministic,
+    runScriptCheck('test'),
+  ],
+};
+const liveTypes = baseTypes.map((t) => (t.name === 'implement' ? liveImplementType : t));
+
+const brain = new LlmBrain(openRouterConfig(), liveTypes.map((t) => t.name));
 const store = new InMemoryEventStore();
 const memory = {
   query: async (topic: string, scope: string[]) =>
     projectMemory(await store.list()).query(topic, scope),
 };
-const registry = createRegistry(types);
+const registry = createRegistry(liveTypes);
 
 const engine = new Engine({
   registry,

@@ -42,20 +42,50 @@ export interface SandboxConfig {
 /**
  * Build a child-process environment with the factory's secrets removed. Starts
  * from the current process env and deletes every key that names an LLM provider
- * credential or a database connection, plus anything prefixed OPENROUTER_/
- * POSTGRES_. Benign entries (PATH, HOME, …) are preserved so the toolchain runs.
+ * credential or a database connection, plus anything prefixed OPENROUTER_,
+ * POSTGRES_, GH_TOKEN, GITHUB_TOKEN, NPM_TOKEN, AWS_, GOOGLE_, or STRIPE_, and
+ * any key whose suffix matches _KEY, _SECRET, _TOKEN, _PASSWORD, or _CREDENTIALS
+ * (case-insensitive). Benign entries (PATH, HOME, TMPDIR, LANG, TERM, …) are
+ * preserved so the toolchain still resolves.
  */
 export function scrubEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...source };
-  const exactDeletes = ['DATABASE_URL', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY'];
+
+  // Exact names that must always be removed.
+  const exactDeletes = [
+    'DATABASE_URL',
+    'OPENAI_API_KEY',
+    'ANTHROPIC_API_KEY',
+    'GH_TOKEN',
+    'GITHUB_TOKEN',
+    'NPM_TOKEN',
+  ];
   for (const key of exactDeletes) {
     delete env[key];
   }
+
+  // Suffix pattern: any key ending with these strings (case-insensitive) is a secret.
+  const secretSuffixPattern = /(_KEY|_SECRET|_TOKEN|_PASSWORD|_CREDENTIALS?)$/i;
+
+  // Prefix patterns: any key whose name starts with these prefixes is a secret.
+  const secretPrefixes = [
+    'OPENROUTER_',
+    'POSTGRES_',
+    'AWS_',
+    'GOOGLE_',
+    'STRIPE_',
+  ];
+
   for (const key of Object.keys(env)) {
-    if (key.startsWith('OPENROUTER_') || key.startsWith('POSTGRES_')) {
+    if (secretSuffixPattern.test(key)) {
+      delete env[key];
+      continue;
+    }
+    if (secretPrefixes.some((p) => key.startsWith(p))) {
       delete env[key];
     }
   }
+
   return env;
 }
 
