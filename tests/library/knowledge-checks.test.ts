@@ -113,6 +113,39 @@ const noScanFn: ArchScanFn = async () => [];
 // Common bad-input cases (shared across all checks)
 // ---------------------------------------------------------------------------
 
+describe('artifact JSON packaging tolerance', () => {
+  it('accepts JSON wrapped in a markdown fence', async () => {
+    const repoRoot = makeTmp();
+    const artifact = knowledgeArtifact({ category: 'stack', repoRoot, pointers: [] });
+    const wrapped = textArt('```json\n' + JSON.stringify(artifact) + '\n```');
+    const r = await stackCheck().run(baseGoal, wrapped, { sandboxRoot: repoRoot });
+    expect(r.ok).toBe(true);
+  });
+
+  it('accepts a single-file files artifact carrying the JSON', async () => {
+    const repoRoot = makeTmp();
+    const artifact = knowledgeArtifact({ category: 'stack', repoRoot, pointers: [] });
+    const filesArt: Artifact = {
+      kind: 'files',
+      files: [{ path: 'artifact.json', content: JSON.stringify(artifact) }],
+    };
+    const r = await stackCheck().run(baseGoal, filesArt, { sandboxRoot: repoRoot });
+    expect(r.ok).toBe(true);
+  });
+
+  it('still rejects a multi-file artifact', async () => {
+    const filesArt: Artifact = {
+      kind: 'files',
+      files: [
+        { path: 'a.json', content: '{}' },
+        { path: 'b.json', content: '{}' },
+      ],
+    };
+    const r = await stackCheck().run(baseGoal, filesArt);
+    expect(r.ok).toBe(false);
+  });
+});
+
 describe('check — null artifact', () => {
   it('architectureCheck fails on null artifact', async () => {
     const r = await architectureCheck(noScanFn).run(baseGoal, null);

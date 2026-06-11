@@ -158,8 +158,8 @@ const diveRegion = pickDiveRegion(targetRepo);
 
 const DEFAULT_BUDGET = {
   attempts: 3,
-  tokens: 200_000,
-  toolCalls: 40,
+  tokens: 500_000,
+  toolCalls: 30,
   wallClockMs: 600_000,
 };
 
@@ -173,7 +173,10 @@ function mapGoal(category: KnowledgeCategory): Goal {
       repoRoot: targetRepo,
       category,
       description:
-        `Map the "${category}" knowledge of the repo. Read it through your read-only tools, then emit a ` +
+        `Map the "${category}" knowledge of the repo. Be economical: list_dir the root (and one level ` +
+        `where needed), read AT MOST 4-6 representative files, then emit. You do not need to read ` +
+        `everything — pointers, not bodies. Your final message must be the raw JSON object only: no ` +
+        `code fences, no prose before or after it. Emit a ` +
         `KnowledgeArtifact as JSON: { repoRoot, category: "${category}", generatedAtSha (current HEAD), ` +
         `confidence, status: "provisional", pointers: [{path, line?, note}] (pointers-not-bodies), summary }. ` +
         (category === 'architecture'
@@ -201,7 +204,9 @@ function diveGoal(region: string): Goal {
       repoRoot: targetRepo,
       region,
       description:
-        `Deep-dive the region "${region}". Emit RegionFacts as JSON: { repoRoot, region: "${region}", ` +
+        `Deep-dive the region "${region}". Be economical: read AT MOST 5 files; 4-8 strong facts beat ` +
+        `an exhaustive sweep. Your final message must be the raw JSON object only — no code fences, no prose. ` +
+        `Emit RegionFacts as JSON: { repoRoot, region: "${region}", ` +
         `generatedAtSha (current HEAD), facts: [{ claim, anchors: [{path, line}], sha, confidence }] }. ` +
         `Every anchor path must exist and the line must be within the file at HEAD (verify-on-read).`,
     },

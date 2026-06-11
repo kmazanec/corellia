@@ -40,10 +40,22 @@ function parseArtifactJson(artifact: Artifact | null): { ok: true; value: unknow
   if (artifact === null) {
     return { ok: false, detail: 'No artifact was produced.' };
   }
-  if (artifact.kind !== 'text') {
-    return { ok: false, detail: `Expected a text artifact; got kind "${artifact.kind}".` };
+  // Models often emit the JSON wrapped in a fenced code block, which the
+  // adapter's file-block parser turns into a single-file `files` artifact.
+  // Both forms carry the same payload; accept either rather than failing a
+  // valid artifact on packaging.
+  let text: string;
+  if (artifact.kind === 'text') {
+    text = artifact.text ?? '';
+  } else if (artifact.kind === 'files' && artifact.files.length === 1) {
+    text = artifact.files[0]?.content ?? '';
+  } else {
+    return { ok: false, detail: `Expected a text artifact (or one fenced block); got kind "${artifact.kind}".` };
   }
-  const text = artifact.text ?? '';
+  // Strip a surrounding markdown fence (```json ... ``` or ``` ... ```).
+  const fenced = text.match(/^\s*```[a-zA-Z]*\s*\n([\s\S]*?)\n?```\s*$/);
+  if (fenced?.[1] !== undefined) text = fenced[1];
+  text = text.trim();
   if (text.length === 0) {
     return { ok: false, detail: 'Artifact text is empty.' };
   }
