@@ -13,6 +13,7 @@ import { InMemoryEventStore } from '../../src/eventlog/memory-store.js';
 import { createRegistry } from '../../src/library/registry.js';
 import { starterTypes } from '../../src/library/starter-types.js';
 import { createFileTools } from '../../src/engine/tools.js';
+import { retrievalTools } from '../../src/library/retrieval.js';
 import type { Goal } from '../../src/contract/goal.js';
 import type { ToolCall } from '../../src/contract/tool.js';
 
@@ -324,4 +325,105 @@ describe('unregistered tool', () => {
     expect(result.output).toContain('write_file');
     expect(result.output).toContain('not registered');
   });
+});
+
+// ---------------------------------------------------------------------------
+// Retrieval tool grant allow/refuse (AC-6)
+// ---------------------------------------------------------------------------
+
+describe('retrieval tool grants', () => {
+  // Build a broker with all five retrieval tools registered, plus the standard
+  // file tools. Uses a synthetic repoRoot with a package.json for stack_versions.
+  let retrievalBroker: Broker;
+
+  beforeEach(async () => {
+    await writeFile(
+      join(sandboxRoot, 'package.json'),
+      JSON.stringify({ dependencies: { vitest: '^2.0.0' } }),
+    );
+    const fileTools = createFileTools(sandboxRoot);
+    const retTools = retrievalTools({ repoRoot: sandboxRoot });
+    retrievalBroker = new Broker({
+      root: sandboxRoot,
+      registry,
+      store,
+      tools: [
+        fileTools.readFile,
+        fileTools.listDir,
+        retTools.findSymbol,
+        retTools.findExemplar,
+        retTools.conventionsFor,
+        retTools.stackVersions,
+        retTools.impact,
+      ],
+    });
+  });
+
+  for (const toolName of ['find_symbol', 'find_exemplar', 'conventions_for', 'stack_versions', 'impact'] as const) {
+    it(`grants ${toolName} to a type with retrieval.api`, async () => {
+      // 'deliver-intent' carries retrieval.api — all five tools should be granted.
+      const goal = makeGoal({ type: 'deliver-intent' });
+      const args: Record<string, unknown> =
+        toolName === 'find_symbol' ? { name: 'greet' }
+        : toolName === 'find_exemplar' ? { pattern: 'auth' }
+        : toolName === 'conventions_for' ? { surface: 'api' }
+        : toolName === 'stack_versions' ? {}
+        : { files: [] };
+      const call = makeCall({ name: toolName, args });
+      const result = await retrievalBroker.execute(goal, call);
+      expect(result.ok).toBe(true);
+      expect(result.callId).toBe(call.id);
+    });
+
+    it(`grants ${toolName} to a type with fs.read`, async () => {
+      // 'implement' carries fs.read — all five tools should also be granted via fs.read.
+      const goal = makeGoal({ type: 'implement' });
+      const args: Record<string, unknown> =
+        toolName === 'find_symbol' ? { name: 'greet' }
+        : toolName === 'find_exemplar' ? { pattern: 'auth' }
+        : toolName === 'conventions_for' ? { surface: 'api' }
+        : toolName === 'stack_versions' ? {}
+        : { files: [] };
+      const call = makeCall({ name: toolName, args });
+      const result = await retrievalBroker.execute(goal, call);
+      expect(result.ok).toBe(true);
+    });
+
+    it(`refuses ${toolName} for a type with neither retrieval.api nor fs.read`, async () => {
+      // 'judge-split' has no grants — all five retrieval tools must be refused,
+      // and the refusal must name the missing grant.
+      const goal = makeGoal({ type: 'judge-split' });
+      const args: Record<string, unknown> =
+        toolName === 'find_symbol' ? { name: 'greet' }
+        : toolName === 'find_exemplar' ? { pattern: 'auth' }
+        : toolName === 'conventions_for' ? { surface: 'api' }
+        : toolName === 'stack_versions' ? {}
+        : { files: [] };
+      const call = makeCall({ name: toolName, args });
+      const result = await retrievalBroker.execute(goal, call);
+      expect(result.ok).toBe(false);
+      expect(result.callId).toBe(call.id);
+      expect(result.output).toMatch(/retrieval\.api|fs\.read/);
+    });
+
+    it(`appends a "refused" event naming the grant for ${toolName} when refused`, async () => {
+      const goal = makeGoal({ type: 'judge-split' });
+      const args: Record<string, unknown> =
+        toolName === 'find_symbol' ? { name: 'greet' }
+        : toolName === 'find_exemplar' ? { pattern: 'auth' }
+        : toolName === 'conventions_for' ? { surface: 'api' }
+        : toolName === 'stack_versions' ? {}
+        : { files: [] };
+      const call = makeCall({ name: toolName, args });
+      await retrievalBroker.execute(goal, call);
+      const events = await store.list({ goalId: goal.id, type: 'tool-call' });
+      expect(events).toHaveLength(1);
+      const e = events[0];
+      if (e?.type === 'tool-call') {
+        expect(e.outcome).toBe('refused');
+        expect(e.reason).toMatch(/retrieval\.api|fs\.read/);
+        expect(e.tool).toBe(toolName);
+      }
+    });
+  }
 });
