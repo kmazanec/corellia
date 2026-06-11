@@ -1070,3 +1070,142 @@ describe('F-35 usage accounting — events carry usage and debit equals reported
     expect(report401.blockers).toHaveLength(0);
   });
 });
+
+// ── F-35 Chunks 4+5: Ceiling halt and no-cost fallback ────────────────────
+
+describe('F-35 spend ceiling — tree halts when measured cost reaches ceiling', () => {
+  it('tree halts when cumulative costUsd reaches the ceiling', async () => {
+    const store = new MemoryEventStore();
+    const brain = new ScriptedBrain()
+      .queueProduceWithUsage(textArtifact('output'), { promptTokens: 10, completionTokens: 5, costUsd: 20 });
+    const registry = buildRegistry([leafTypeDef({ judgeType: null })]);
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const goal = makeGoal({
+      budget: { attempts: 5, tokens: 100000, toolCalls: 50, wallClockMs: 60000 },
+      spendCeilingUsd: 15,
+    });
+    const report = await engine.run(goal);
+
+    expect(report.blockers.length).toBeGreaterThan(0);
+    expect(report.blockers[0]).toContain('ceiling');
+    const ceilingEvents = await store.list({ type: 'ceiling-reached' });
+    expect(ceilingEvents).toHaveLength(1);
+    const ev = ceilingEvents[0] as Extract<FactoryEvent, { type: 'ceiling-reached' }>;
+    expect(ev.ceilingUsd).toBe(15);
+    expect(ev.spentUsd).toBeGreaterThanOrEqual(15);
+  });
+
+  it('applies $15 default ceiling at root when spendCeilingUsd is absent', async () => {
+    const store = new MemoryEventStore();
+    const brain = new ScriptedBrain()
+      .queueProduceWithUsage(textArtifact('output'), { promptTokens: 10, completionTokens: 5, costUsd: 16 });
+    const registry = buildRegistry([leafTypeDef({ judgeType: null })]);
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    // No spendCeilingUsd → default $15
+    const goal = makeGoal({ budget: { attempts: 5, tokens: 100000, toolCalls: 50, wallClockMs: 60000 } });
+    const report = await engine.run(goal);
+
+    expect(report.blockers.length).toBeGreaterThan(0);
+    const ceilingEvents = await store.list({ type: 'ceiling-reached' });
+    expect(ceilingEvents).toHaveLength(1);
+    const ev = ceilingEvents[0] as Extract<FactoryEvent, { type: 'ceiling-reached' }>;
+    expect(ev.ceilingUsd).toBe(15);
+  });
+
+  it('ceiling-reached event is emitted and no further brain-call events appear after halt', async () => {
+    const store = new MemoryEventStore();
+    // First produce triggers the ceiling; no second produce should happen
+    const brain = new ScriptedBrain()
+      .queueProduceWithUsage(textArtifact('first output'), { promptTokens: 10, completionTokens: 5, costUsd: 20 })
+      .queueProduce(textArtifact('second output — should never appear'));
+    const registry = buildRegistry([leafTypeDef({ judgeType: null })]);
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const goal = makeGoal({
+      budget: { attempts: 5, tokens: 100000, toolCalls: 50, wallClockMs: 60000 },
+      spendCeilingUsd: 15,
+    });
+    await engine.run(goal);
+
+    const produced = await store.list({ type: 'produced' });
+    // Only one produce event — halt prevented the second
+    expect(produced).toHaveLength(1);
+    const ceilingEvents = await store.list({ type: 'ceiling-reached' });
+    expect(ceilingEvents).toHaveLength(1);
+  });
+
+  it('documented overshoot case: one-in-flight call may complete before halt', async () => {
+    // This test documents the accepted ADR-017 overshoot: a call already in flight
+    // when the ceiling trips completes (one-call overshoot). The serial test case:
+    // the produce call itself is the overshoot — it completes, ceiling fires after.
+    const store = new MemoryEventStore();
+    const brain = new ScriptedBrain()
+      .queueProduceWithUsage(textArtifact('overshoot output'), { promptTokens: 10, completionTokens: 5, costUsd: 20 });
+    const registry = buildRegistry([leafTypeDef({ judgeType: null })]);
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const goal = makeGoal({
+      budget: { attempts: 5, tokens: 100000, toolCalls: 50, wallClockMs: 60000 },
+      spendCeilingUsd: 15,
+    });
+    await engine.run(goal);
+
+    // The produce event fired (overshoot), then ceiling-reached fired after
+    const produced = await store.list({ type: 'produced' });
+    expect(produced).toHaveLength(1);
+    const ceilingEvents = await store.list({ type: 'ceiling-reached' });
+    expect(ceilingEvents).toHaveLength(1);
+    // Ceiling spent exceeds 15 (overshoot by the in-flight call's cost)
+    const ev = ceilingEvents[0] as Extract<FactoryEvent, { type: 'ceiling-reached' }>;
+    expect(ev.spentUsd).toBeGreaterThan(ev.ceilingUsd);
+  });
+});
+
+// ── F-35 Chunk 5: No-cost-reported conservative fallback ─────────────────
+
+import { WORST_CASE_PRICE_PER_TOKEN } from '../../src/engine/engine.js';
+
+describe('F-35 no-cost fallback — tokens-only conservative bound', () => {
+  it('tree still halts via conservative bound when endpoint reports tokens but not cost', async () => {
+    const store = new MemoryEventStore();
+    // Usage without costUsd — fallback computes spentUsd = tokens * WORST_CASE_PRICE_PER_TOKEN
+    // With 1_000_000 tokens and $0.000015/token = $15 exactly → trips the $15 ceiling
+    const brain = new ScriptedBrain()
+      .queueProduceWithUsage(textArtifact('output'), { promptTokens: 500000, completionTokens: 500000 });
+    const registry = buildRegistry([leafTypeDef({ judgeType: null })]);
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const goal = makeGoal({
+      budget: { attempts: 5, tokens: 2000000, toolCalls: 50, wallClockMs: 60000 },
+      spendCeilingUsd: 15,
+    });
+    const report = await engine.run(goal);
+
+    // Tree should halt even without cost reporting
+    expect(report.blockers.length).toBeGreaterThan(0);
+    const ceilingEvents = await store.list({ type: 'ceiling-reached' });
+    expect(ceilingEvents).toHaveLength(1);
+    const ev = ceilingEvents[0] as Extract<FactoryEvent, { type: 'ceiling-reached' }>;
+    // The conservative fallback was applied: spentUsd = 1_000_000 * 0.000015 = 15
+    expect(ev.spentUsd).toBeCloseTo(15);
+  });
+
+  it('WORST_CASE_PRICE_PER_TOKEN is the documented fallback constant', () => {
+    expect(WORST_CASE_PRICE_PER_TOKEN).toBe(0.000015);
+  });
+
+  it('tree does not halt if token-only spend stays below ceiling', async () => {
+    const store = new MemoryEventStore();
+    // 100 tokens * 0.000015 = $0.0015, well below $15
+    const brain = new ScriptedBrain()
+      .queueProduceWithUsage(textArtifact('output'), { promptTokens: 50, completionTokens: 50 });
+    const registry = buildRegistry([leafTypeDef({ judgeType: null })]);
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const goal = makeGoal({
+      budget: { attempts: 5, tokens: 100000, toolCalls: 50, wallClockMs: 60000 },
+      spendCeilingUsd: 15,
+    });
+    const report = await engine.run(goal);
+
+    expect(report.blockers).toHaveLength(0);
+    const ceilingEvents = await store.list({ type: 'ceiling-reached' });
+    expect(ceilingEvents).toHaveLength(0);
+  });
+});
