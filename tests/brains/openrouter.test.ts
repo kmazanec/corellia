@@ -70,17 +70,17 @@ describe('openRouterConfig', () => {
 
   it('uses default haiku model when override is absent', () => {
     const cfg = openRouterConfig({ OPENROUTER_API_KEY: 'k' });
-    expect(cfg.modelByTier['haiku']).toMatch(/anthropic\/claude-haiku/);
+    expect(cfg.modelByTier['haiku']).toBe('deepseek/deepseek-v4-flash');
   });
 
   it('uses default sonnet model when override is absent', () => {
     const cfg = openRouterConfig({ OPENROUTER_API_KEY: 'k' });
-    expect(cfg.modelByTier['sonnet']).toMatch(/anthropic\/claude-sonnet/);
+    expect(cfg.modelByTier['sonnet']).toBe('deepseek/deepseek-v4-pro');
   });
 
   it('uses default opus model when override is absent', () => {
     const cfg = openRouterConfig({ OPENROUTER_API_KEY: 'k' });
-    expect(cfg.modelByTier['opus']).toMatch(/anthropic\/claude-opus/);
+    expect(cfg.modelByTier['opus']).toBe('moonshotai/kimi-k2.6');
   });
 
   it('env override wins for haiku tier', () => {

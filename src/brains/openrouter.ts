@@ -20,15 +20,22 @@ import type { LlmBrainConfig } from './llm.js';
 
 /**
  * Default model IDs sourced from GET https://openrouter.ai/api/v1/models on
- * 2026-06-10. These are the routing aliases that always resolve to the latest
- * model in each Anthropic tier-family on OpenRouter.
+ * 2026-06-11, cross-checked against current agentic/coding rankings. The tier
+ * names (haiku/sonnet/opus) are the contract's historical labels for
+ * low/medium/high — the bindings are cost-optimized, cross-vendor picks:
+ * each ranks at or above the Anthropic model it replaces on current agentic
+ * boards at roughly an order of magnitude lower cost, and all three support
+ * tools + structured outputs. Override per tier via CORELLIA_MODEL_*.
  */
 const DEFAULT_MODELS = {
-  haiku: 'anthropic/claude-haiku-latest',
-  sonnet: 'anthropic/claude-sonnet-latest',
-  // Explicit Opus 4 version rather than an alias — most capable tier currently
-  // listed. Swap to anthropic/claude-opus-latest when it becomes available.
-  opus: 'anthropic/claude-opus-4-5',
+  // ~$0.10/$0.20 per M (was $1/$5) — 1M ctx; the V4 family is noted for
+  // tool-call reliability and well-formed JSON payloads.
+  haiku: 'deepseek/deepseek-v4-flash',
+  // ~$0.44/$0.87 per M (was $3/$15) — 1M ctx; frontier-class agentic/coding.
+  sonnet: 'deepseek/deepseek-v4-pro',
+  // ~$0.67/$3.39 per M (was $5/$25) — judge-grade quality, different vendor
+  // from the lower tiers for provider diversity.
+  opus: 'moonshotai/kimi-k2.6',
 } as const;
 
 /**

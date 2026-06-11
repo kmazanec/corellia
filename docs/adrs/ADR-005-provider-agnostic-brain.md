@@ -51,3 +51,23 @@ every major provider through OpenRouter today and any compatible endpoint
 - Memories are passed quoted-as-data in prompts (use/mention discipline);
   retries carry prior verdicts via `BrainContext` — both are interface
   obligations, not adapter conveniences.
+
+## Amendment — 2026-06-11: cost-optimized default tier bindings
+
+Live-run cost evidence (≈$21 across the iteration-04 mapping runs, dominated
+by prompt tokens on long tool transcripts) prompted a re-binding of the
+default tier models, researched against the live OpenRouter catalog and
+current agentic/coding rankings:
+
+| Tier label | Was | Now | $/M in/out |
+| --- | --- | --- | --- |
+| haiku (low) | anthropic/claude-haiku-4.5 ($1/$5) | deepseek/deepseek-v4-flash | $0.098/$0.197 |
+| sonnet (mid) | anthropic/claude-sonnet-4.6 ($3/$15) | deepseek/deepseek-v4-pro | $0.435/$0.87 |
+| opus (high) | anthropic/claude-opus-4.8 ($5/$25) | moonshotai/kimi-k2.6 | $0.67/$3.39 |
+
+Selection criteria: tools + structured-output support on OpenRouter, current
+agentic-board ranking at or above the replaced model, 200k+ context, and
+vendor diversity across tiers. The contract's `Tier` union keeps its
+historical labels (haiku/sonnet/opus = low/medium/high); only the bindings
+changed, and `CORELLIA_MODEL_*` env overrides are untouched. The decision is
+config, not architecture — revisit freely as the catalog moves.
