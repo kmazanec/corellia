@@ -1,6 +1,6 @@
 # Build plan — 05-taste
 
-**Status:** Awaiting approval · **Iteration goal:** After this iteration the
+**Status:** Approved · **Approved by:** Keith (conversation, 2026-06-11) · **Iteration goal:** After this iteration the
 library stands at all 19 types with real per-family skill bundles (the
 generic-prompt ceiling removed), artifact emission is provider-guaranteed
 JSON (explore-then-emit), the intent dial modulates judges (never
