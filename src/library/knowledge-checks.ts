@@ -11,8 +11,8 @@
  *   - The artifact is always `kind: 'text'`, its `text` field carrying the
  *     JSON of KnowledgeArtifact (for map-repo) or RegionFacts (for dive).
  *   - Checks that need filesystem access read through CheckContext.sandboxRoot.
- *   - The architecture check accepts an injected scan function so F-42's
- *     import-scanner module is not a hard dependency here; tests supply a
+ *   - The architecture check accepts an injected scan function so the
+ *     import-graph scanner module is not a hard dependency here; tests supply a
  *     synthetic scan.
  *   - Stack version parsing is a minimal own-implementation that reads only
  *     the `dependencies` / `devDependencies` / `peerDependencies` fields from
@@ -25,6 +25,7 @@ import type { DeterministicCheck, CheckContext } from '../contract/goal-type.js'
 import type { Goal } from '../contract/goal.js';
 import type { Artifact } from '../contract/report.js';
 import type { KnowledgeArtifact, RegionFacts } from '../contract/knowledge.js';
+import { runScriptCheck } from './checks.js';
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -99,8 +100,8 @@ function toRegionFacts(value: unknown): RegionFacts | null {
 /**
  * A structural edge scan result: an adjacency pair emitted by a scanner over
  * the import graph of a repo. The scan function is structurally typed so the
- * architecture check does not import F-42's scanner module; tests inject
- * synthetic scan results.
+ * architecture check does not import the import-graph scanner module; tests
+ * inject synthetic scan results.
  */
 export interface ScanEdge {
   /** The importing module (repo-relative path). */
@@ -113,6 +114,8 @@ export interface ScanEdge {
  * A function that scans the import graph of a repo at a given SHA and returns
  * its edges. Injected at check-factory time — not supplied via CheckContext —
  * so the check's capability is declared at registration, not at runtime.
+ * The import-graph scanner module is the canonical supplier; tests inject
+ * a synthetic stub.
  */
 export type ArchScanFn = (repoRoot: string, sha: string) => Promise<ScanEdge[]>;
 
@@ -147,8 +150,11 @@ export function architectureCheck(scanFn: ArchScanFn): DeterministicCheck {
         return { ok: false, detail: `Expected category "architecture"; got "${ka.category}".` };
       }
 
-      // 1. Pointer path existence check
+      // Resolve the single root used by both the existence check and the scan,
+      // so both halves validate against the same tree.
       const root = ctx?.sandboxRoot ?? ka.repoRoot;
+
+      // 1. Pointer path existence check
       const missing: string[] = [];
       for (const pointer of ka.pointers) {
         const full = join(root, pointer.path);
@@ -172,7 +178,7 @@ export function architectureCheck(scanFn: ArchScanFn): DeterministicCheck {
       if (ka.pointers.length > 0) {
         let edges: ScanEdge[];
         try {
-          edges = await scanFn(ka.repoRoot, ka.generatedAtSha);
+          edges = await scanFn(root, ka.generatedAtSha);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           return { ok: false, detail: `Architecture scan failed: ${msg}` };
@@ -244,13 +250,19 @@ function parsePackageVersions(text: string): Map<string, string> {
  * KnowledgeArtifact by comparing its claimed dependency versions against the
  * versions declared in the repo's `package.json` (and optionally its lockfile).
  *
- * A pointer whose `note` carries a `name@version` claim is checked against the
- * parsed manifest. Pointers without a version claim in their note are skipped
- * (they are structural pointers, not version claims).
+ * A pointer whose `note` carries a `version:<name>@<version>` token is checked
+ * against the parsed manifest. Pointers without this token in their note are
+ * skipped (they are structural pointers, not version claims).
  *
- * Version-claim format in `note`: the note must contain a substring matching
- * `<name>@<version>` where `<name>` is the pointer `path` basename (the last
- * segment, stripped of any path prefix).
+ * Version-claim format in `note`: the note must contain a token of the form
+ * `version:<name>@<version>`, mirroring the `script:<name>` convention used by
+ * testScaffoldCheck. Examples:
+ *   - `version:typescript@5.4.0`
+ *   - `version:@scope/pkg@1.2.3`
+ *
+ * Only tokens prefixed with `version:` are treated as version claims; bare
+ * `name@version` substrings are ignored. This prevents false positives from
+ * email addresses, URLs, or other `@`-containing text in notes.
  */
 export function stackCheck(): DeterministicCheck {
   return {
@@ -285,10 +297,12 @@ export function stackCheck(): DeterministicCheck {
         return { ok: true, detail: 'No package.json found; no version claims to validate.' };
       }
 
-      // Check every pointer whose note contains a `@version` claim.
-      // Expected format: note contains "<pkgname>@<version>" as a token.
+      // Check every pointer whose note contains a `version:<name>@<version>` token.
+      // The `version:` prefix is required; bare `name@version` substrings are ignored.
+      // Scoped packages are supported: `version:@scope/pkg@1.2.3`.
       const mismatches: string[] = [];
-      const versionClaimRe = /(\S+)@(\S+)/g;
+      // Matches `version:` followed by an optional `@scope/` prefix, then `pkg@version`.
+      const versionClaimRe = /version:(@?[^@\s]+(?:\/[^@\s]+)?)@(\S+)/g;
 
       for (const pointer of ka.pointers) {
         let match: RegExpExecArray | null;
@@ -433,23 +447,7 @@ export function testScaffoldCheck(): DeterministicCheck {
         }
       }
 
-      const result = await ctx.runScript(scriptName);
-      if (!result.ok) {
-        const reason = result.timedOut
-          ? 'timed out'
-          : result.exitStatus === null
-            ? 'error'
-            : `exit ${result.exitStatus}`;
-        return {
-          ok: false,
-          detail: `Test-scaffold script "${scriptName}" failed (${reason}): ${result.output}`,
-        };
-      }
-
-      return {
-        ok: true,
-        detail: `Test-scaffold script "${scriptName}" passed (exit 0).`,
-      };
+      return runScriptCheck(scriptName).run(_goal, artifact, ctx);
     },
   };
 }

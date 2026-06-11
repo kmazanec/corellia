@@ -344,7 +344,7 @@ describe('stackCheck', () => {
     const artifact = knowledgeArtifact({
       category: 'stack',
       repoRoot,
-      pointers: [{ path: 'package.json', note: 'typescript@5.4.0 is the declared version' }],
+      pointers: [{ path: 'package.json', note: 'version:typescript@5.4.0 is the declared version' }],
     });
     const ctx: CheckContext = { sandboxRoot: repoRoot };
     const r = await stackCheck().run(baseGoal, textArt(JSON.stringify(artifact)), ctx);
@@ -360,7 +360,7 @@ describe('stackCheck', () => {
     const artifact = knowledgeArtifact({
       category: 'stack',
       repoRoot,
-      pointers: [{ path: 'package.json', note: 'typescript@3.9.0 (stale claim)' }],
+      pointers: [{ path: 'package.json', note: 'version:typescript@3.9.0 (stale claim)' }],
     });
     const ctx: CheckContext = { sandboxRoot: repoRoot };
     const r = await stackCheck().run(baseGoal, textArt(JSON.stringify(artifact)), ctx);
@@ -378,7 +378,7 @@ describe('stackCheck', () => {
     const artifact = knowledgeArtifact({
       category: 'stack',
       repoRoot,
-      pointers: [{ path: 'package.json', note: 'unknown-package@1.0.0' }],
+      pointers: [{ path: 'package.json', note: 'version:unknown-package@1.0.0' }],
     });
     const ctx: CheckContext = { sandboxRoot: repoRoot };
     const r = await stackCheck().run(baseGoal, textArt(JSON.stringify(artifact)), ctx);
@@ -767,5 +767,127 @@ describe('deterministic gate — failing validation blocks output', () => {
     );
     expect(gateResult.ok).toBe(false);
     expect(gateResult.detail).toContain('gone.ts');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX 4: scoped-package version claim (version:@scope/pkg@x.y.z)
+// ---------------------------------------------------------------------------
+
+describe('stackCheck — scoped-package version claim', () => {
+  it('passes when a scoped package version claim matches the manifest', async () => {
+    const repoRoot = makeTmp();
+    writeFileSync(join(repoRoot, 'package.json'), JSON.stringify({
+      dependencies: { '@scope/pkg': '^2.3.0' },
+    }));
+
+    const artifact = knowledgeArtifact({
+      category: 'stack',
+      repoRoot,
+      pointers: [{ path: 'package.json', note: 'version:@scope/pkg@2.3.0 is the runtime dep' }],
+    });
+    const ctx: CheckContext = { sandboxRoot: repoRoot };
+    const r = await stackCheck().run(baseGoal, textArt(JSON.stringify(artifact)), ctx);
+    expect(r.ok).toBe(true);
+  });
+
+  it('fails when a scoped package version claim contradicts the manifest', async () => {
+    const repoRoot = makeTmp();
+    writeFileSync(join(repoRoot, 'package.json'), JSON.stringify({
+      dependencies: { '@scope/pkg': '^2.3.0' },
+    }));
+
+    const artifact = knowledgeArtifact({
+      category: 'stack',
+      repoRoot,
+      pointers: [{ path: 'package.json', note: 'version:@scope/pkg@1.0.0 (stale)' }],
+    });
+    const ctx: CheckContext = { sandboxRoot: repoRoot };
+    const r = await stackCheck().run(baseGoal, textArt(JSON.stringify(artifact)), ctx);
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('@scope/pkg');
+    expect(r.detail).toContain('mismatch');
+  });
+
+  it('bare name@version in note (no version: prefix) is ignored — no false positive', async () => {
+    const repoRoot = makeTmp();
+    writeFileSync(join(repoRoot, 'package.json'), JSON.stringify({
+      dependencies: { typescript: '^5.4.0' },
+    }));
+
+    // Old bare format without version: prefix should now be ignored
+    const artifact = knowledgeArtifact({
+      category: 'stack',
+      repoRoot,
+      pointers: [{ path: 'package.json', note: 'typescript@3.9.0 (old format, no prefix)' }],
+    });
+    const ctx: CheckContext = { sandboxRoot: repoRoot };
+    const r = await stackCheck().run(baseGoal, textArt(JSON.stringify(artifact)), ctx);
+    // Without the version: prefix the claim is not parsed — no contradiction detected
+    expect(r.ok).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX 2: architectureCheck — scan and existence halves use the same root
+// ---------------------------------------------------------------------------
+
+describe('architectureCheck — single resolved root for scan + existence', () => {
+  it('uses sandboxRoot for both existence and scan when sandboxRoot is set and artifact repoRoot is bogus', async () => {
+    const sandboxRoot = makeTmp();
+    mkdirSync(join(sandboxRoot, 'src'), { recursive: true });
+    writeFileSync(join(sandboxRoot, 'src', 'main.ts'), 'export {}');
+
+    // The artifact carries a bogus repoRoot that does not exist on disk.
+    // The sandboxRoot is set in ctx — both halves must use it.
+    let scannedRoot = '';
+    const captureScanFn: ArchScanFn = async (root) => {
+      scannedRoot = root;
+      return [{ from: 'src/main.ts', to: 'src/main.ts' }];
+    };
+
+    const artifact = knowledgeArtifact({
+      category: 'architecture',
+      repoRoot: '/bogus/nonexistent/path',
+      pointers: [{ path: 'src/main.ts', note: 'entry point' }],
+    });
+    const ctx: CheckContext = { sandboxRoot };
+    const r = await architectureCheck(captureScanFn).run(baseGoal, textArt(JSON.stringify(artifact)), ctx);
+
+    // Existence check must succeed (file is under sandboxRoot, not bogus repoRoot)
+    expect(r.ok).toBe(true);
+    // Scan function must have received sandboxRoot, not the bogus repoRoot
+    expect(scannedRoot).toBe(sandboxRoot);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// diveAnchorCheck — binary file anchor (best-effort, no crash)
+// ---------------------------------------------------------------------------
+
+describe('diveAnchorCheck — binary file anchor', () => {
+  it('handles a binary file anchor without crashing (best-effort utf8 line count)', async () => {
+    const repoRoot = makeTmp();
+    // Write a file with null bytes to simulate binary content
+    const binaryContent = Buffer.from([0x00, 0x01, 0x02, 0x0a, 0x03, 0x04, 0x0a]);
+    writeFileSync(join(repoRoot, 'image.bin'), binaryContent);
+
+    const rf = regionFacts({
+      repoRoot,
+      facts: [
+        {
+          claim: 'binary asset referenced',
+          // Line 1 exists (binary content has 2 newlines → at least 2 lines)
+          anchors: [{ path: 'image.bin', line: 1 }],
+          sha: 'abc',
+          confidence: 'low',
+        },
+      ],
+    });
+    const ctx: CheckContext = { sandboxRoot: repoRoot };
+    // Should not throw; result is determined by whether utf8 line-count >= anchor line
+    const r = await diveAnchorCheck().run(baseGoal, textArt(JSON.stringify(rf)), ctx);
+    // The file exists and has a valid utf8 interpretation with lines, so it should pass
+    expect(r.ok).toBe(true);
   });
 });
