@@ -91,7 +91,7 @@ interface ChatResponse {
  * When tokens are present but cost is absent, returns usage without costUsd
  * so the engine can apply the conservative token-only ceiling fallback.
  */
-export function readUsage(data: ChatResponse): Usage {
+export function readUsage(data: { usage?: ChatUsage }): Usage {
   const u = data.usage;
   if (!u) return ZERO_USAGE;
   const promptTokens = u.prompt_tokens ?? 0;
@@ -149,12 +149,6 @@ interface StepRequest {
   tools: WireToolParam[];
 }
 
-interface WireUsage {
-  prompt_tokens?: number;
-  completion_tokens?: number;
-  cost?: number;
-}
-
 interface StepChoiceMessage {
   role: string;
   content: string | null;
@@ -167,7 +161,7 @@ interface StepChoice {
 
 interface StepResponse {
   choices: StepChoice[];
-  usage?: WireUsage;
+  usage?: ChatUsage;
 }
 
 // ---------------------------------------------------------------------------
@@ -276,22 +270,6 @@ function buildStepRequest(
 // ---------------------------------------------------------------------------
 // Response translation: wire StepResponse -> StepOutput
 // ---------------------------------------------------------------------------
-
-/**
- * Read usage from the wire response; falls back to ZERO_USAGE when absent.
- */
-function readUsage(response: StepResponse): Usage {
-  if (!response.usage) return ZERO_USAGE;
-  const u = response.usage;
-  const usage: Usage = {
-    promptTokens: u.prompt_tokens ?? 0,
-    completionTokens: u.completion_tokens ?? 0,
-  };
-  if (typeof u.cost === 'number') {
-    usage.costUsd = u.cost;
-  }
-  return usage;
-}
 
 /**
  * Translate a wire step response into a StepOutput.
