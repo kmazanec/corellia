@@ -30,6 +30,7 @@ import type { EventStore, FactoryEvent } from '../contract/events.js';
 import type { Budget, Intent, MemoryPointer } from '../contract/goal.js';
 import type { Report } from '../contract/report.js';
 import type { DecisionBrief } from '../contract/decision.js';
+import { verifyEntryPoints, type DeclaredScripts } from '../library/script-runner.js';
 
 // ── Public input types ────────────────────────────────────────────────────────
 
@@ -48,6 +49,14 @@ export interface CommissionInput {
   budget: Budget;
   /** Judge-strictness dial; defaults to 'production'. */
   intent?: Intent;
+  /**
+   * Optional capability pre-check: when present, the listener verifies that
+   * every declared script entry point exists on disk before admitting the
+   * commission. Missing entries bounce at receive with zero subtree spend.
+   */
+  declaredScripts?: DeclaredScripts;
+  /** The repo root used for the declared-scripts capability check. */
+  repoRoot?: string;
 }
 
 // ── Internal state ────────────────────────────────────────────────────────────
@@ -145,11 +154,29 @@ export class Listener {
    * The front door. Mints a root Goal (type 'deliver-intent', parentId null)
    * and runs it through the engine, subject to scope-disjoint admission.
    *
+   * When `declaredScripts` and `repoRoot` are present on the input, a
+   * capability pre-check verifies that every declared entry point exists on
+   * disk. A missing entry bounces immediately with zero subtree spend.
+   *
    * Returns a promise that resolves when the tree completes (or parks — parked
    * intents resolve immediately with the blocked report so the caller knows the
    * human question, and the intent surfaces in status().parked).
    */
   commission(input: CommissionInput): Promise<Report> {
+    if (input.declaredScripts !== undefined && input.repoRoot !== undefined) {
+      const { declaredScripts, repoRoot } = input;
+      return verifyEntryPoints(repoRoot, declaredScripts).then((check) => {
+        if (!check.ok) {
+          return Promise.reject(new Error(check.reason));
+        }
+        if (!this.hasConflict(input.scope)) {
+          return this.runIntent(input, []);
+        }
+        return new Promise<Report>((resolve, reject) => {
+          this.waitQueue.push({ input, extraMemories: [], resolve, reject });
+        });
+      });
+    }
     if (!this.hasConflict(input.scope)) {
       return this.runIntent(input, []);
     }

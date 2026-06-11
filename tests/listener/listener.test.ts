@@ -11,7 +11,10 @@
  * records the park without any post-hoc event scanning.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { Listener } from '../../src/listener/listener.js';
 import { Engine } from '../../src/engine/engine.js';
 import type { EventStore, FactoryEvent } from '../../src/contract/events.js';
@@ -679,5 +682,106 @@ describe('real Engine + Listener: brief-seam park and resume', () => {
     // A 'resumed' event was written when answer() was called.
     const resumedEvents = await store.list({ type: 'resumed' });
     expect(resumedEvents).toHaveLength(1);
+  });
+});
+
+// ── 9. Capability check at receive: bounce for missing declared scripts ────
+
+let capTmpDirs: string[] = [];
+
+afterEach(() => {
+  for (const d of capTmpDirs) {
+    try { rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+  capTmpDirs = [];
+});
+
+function makeCapTmp(): string {
+  const d = mkdtempSync(join(tmpdir(), 'corellia-listener-'));
+  capTmpDirs.push(d);
+  return d;
+}
+
+describe('capability check at receive: declaredScripts + repoRoot', () => {
+  it('bounces at receive when a declared script is absent, with zero subtree-spend events', async () => {
+    const store = new MemStore();
+    let spawnedGoals = 0;
+
+    const engine = {
+      async run(goal: Goal): Promise<Report> {
+        spawnedGoals++;
+        await store.append({ type: 'goal-received', at: Date.now(), goalId: goal.id, goal });
+        const report = successReport(goal.id);
+        await store.append({ type: 'emitted', at: Date.now(), goalId: goal.id, report });
+        return report;
+      },
+    } as unknown as InstanceType<typeof import('../../src/engine/engine.js').Engine>;
+
+    const listener = new Listener({ engine, store });
+
+    const repoRoot = makeCapTmp();
+    // Declare a script that does NOT exist on disk.
+    const input = makeInput('cap-test', ['src/cap'], {
+      declaredScripts: { test: 'scripts/test.mjs' },
+      repoRoot,
+    });
+
+    await expect(listener.commission(input)).rejects.toThrow(/not found|missing/i);
+
+    // No child-spawned or deterministic-checked events should have been emitted.
+    const allEvents = await store.list();
+    const childSpawned = allEvents.filter((e) => e.type === 'child-spawned');
+    const detChecked = allEvents.filter((e) => e.type === 'deterministic-checked');
+    expect(childSpawned).toHaveLength(0);
+    expect(detChecked).toHaveLength(0);
+    // And the engine was never called.
+    expect(spawnedGoals).toBe(0);
+  });
+
+  it('proceeds normally when all declared scripts exist', async () => {
+    const store = new MemStore();
+
+    const engine = {
+      async run(goal: Goal): Promise<Report> {
+        await store.append({ type: 'goal-received', at: Date.now(), goalId: goal.id, goal });
+        const report = successReport(goal.id);
+        await store.append({ type: 'emitted', at: Date.now(), goalId: goal.id, report });
+        return report;
+      },
+    } as unknown as InstanceType<typeof import('../../src/engine/engine.js').Engine>;
+
+    const listener = new Listener({ engine, store });
+
+    const repoRoot = makeCapTmp();
+    // Create the declared script file on disk.
+    mkdirSync(join(repoRoot, 'scripts'), { recursive: true });
+    writeFileSync(join(repoRoot, 'scripts', 'test.mjs'), `process.exit(0);`, 'utf8');
+
+    const input = makeInput('cap-ok', ['src/ok'], {
+      declaredScripts: { test: 'scripts/test.mjs' },
+      repoRoot,
+    });
+
+    const report = await listener.commission(input);
+    expect(report.blockers).toHaveLength(0);
+  });
+
+  it('proceeds normally when no declaredScripts are provided (existing behavior)', async () => {
+    const store = new MemStore();
+
+    const engine = {
+      async run(goal: Goal): Promise<Report> {
+        await store.append({ type: 'goal-received', at: Date.now(), goalId: goal.id, goal });
+        const report = successReport(goal.id);
+        await store.append({ type: 'emitted', at: Date.now(), goalId: goal.id, report });
+        return report;
+      },
+    } as unknown as InstanceType<typeof import('../../src/engine/engine.js').Engine>;
+
+    const listener = new Listener({ engine, store });
+
+    const input = makeInput('no-cap', ['src/nocap']);
+    const report = await listener.commission(input);
+    expect(report.blockers).toHaveLength(0);
   });
 });
