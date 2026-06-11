@@ -1,6 +1,6 @@
 # Build plan — 04-eyes
 
-**Status:** Awaiting approval · **Iteration goal:** After this iteration,
+**Status:** Approved · **Approved by:** Keith (conversation, 2026-06-11) · **Foreign repo for the done-when:** `~/dev/gauntlet/cats` · **Iteration goal:** After this iteration,
 pointed at an existing repo the factory maps what it needs (JIT, as split
 dependencies), splits sensibly against fresh knowledge, and a leaf consults
 `impact()` through the broker before touching code — proven scripted on
