@@ -18,7 +18,7 @@
  */
 
 import type { Brain, BrainContext, StepOutput, StepTranscript } from '../contract/brain.js';
-import type { Goal, Metered } from '../contract/goal.js';
+import type { Goal, Metered, Usage } from '../contract/goal.js';
 import { ZERO_USAGE } from '../contract/goal.js';
 import type { Tier } from '../contract/goal.js';
 import type { MemoryPointer } from '../contract/goal.js';
@@ -67,8 +67,31 @@ interface ChatChoice {
   message: { role: string; content: string };
 }
 
+interface ChatUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  /** OpenRouter reports cost here when usage accounting is enabled. */
+  cost?: number;
+}
+
 interface ChatResponse {
   choices: ChatChoice[];
+  usage?: ChatUsage;
+}
+
+/**
+ * Extract provider-reported usage from a chat-completions response JSON.
+ * When the response carries no usage block, returns {@link ZERO_USAGE}.
+ * When tokens are present but cost is absent, returns usage without costUsd
+ * so the engine can apply the conservative token-only ceiling fallback.
+ */
+export function readUsage(data: ChatResponse): Usage {
+  const u = data.usage;
+  if (!u) return ZERO_USAGE;
+  const promptTokens = u.prompt_tokens ?? 0;
+  const completionTokens = u.completion_tokens ?? 0;
+  const base: Usage = { promptTokens, completionTokens };
+  return u.cost !== undefined ? { ...base, costUsd: u.cost } : base;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,7 +214,7 @@ export class LlmBrain implements Brain {
     model: string,
     messages: ChatMessage[],
     jsonMode: boolean,
-  ): Promise<string> {
+  ): Promise<{ content: string; usage: Usage }> {
     const fetchFn = this.config.fetchImpl ?? globalThis.fetch;
     const body: ChatRequest = {
       model,
@@ -213,34 +236,42 @@ export class LlmBrain implements Brain {
     }
     const data = (await response.json()) as ChatResponse;
     const content = data.choices[0]?.message?.content ?? '';
-    return content;
+    return { content, usage: readUsage(data) };
   }
 
   /**
    * Attempt a strict-JSON call; on parse failure, issue one re-ask with the
    * bad response echoed back. Throws if the second attempt also fails to parse.
+   * Returns the parsed value and the accumulated usage from all HTTP calls made.
    */
   private async callJson<T>(
     model: string,
     messages: ChatMessage[],
     parse: (raw: string) => T,
-  ): Promise<T> {
-    const raw = await this.callCompletions(model, messages, true);
+  ): Promise<{ value: T; usage: Usage }> {
+    const first = await this.callCompletions(model, messages, true);
     try {
-      return parse(raw);
+      return { value: parse(first.content), usage: first.usage };
     } catch (_firstErr) {
       // Re-ask: append the bad response and a correction request.
       const correctionMessages: ChatMessage[] = [
         ...messages,
-        { role: 'assistant', content: raw },
+        { role: 'assistant', content: first.content },
         {
           role: 'user',
           content:
             'Your previous response was not valid JSON. Please reply with ONLY valid JSON, no prose.',
         },
       ];
-      const raw2 = await this.callCompletions(model, correctionMessages, true);
-      return parse(raw2);
+      const second = await this.callCompletions(model, correctionMessages, true);
+      const usage: Usage = {
+        promptTokens: first.usage.promptTokens + second.usage.promptTokens,
+        completionTokens: first.usage.completionTokens + second.usage.completionTokens,
+        ...(first.usage.costUsd !== undefined || second.usage.costUsd !== undefined
+          ? { costUsd: (first.usage.costUsd ?? 0) + (second.usage.costUsd ?? 0) }
+          : {}),
+      };
+      return { value: parse(second.content), usage };
     }
   }
 
@@ -313,8 +344,8 @@ export class LlmBrain implements Brain {
           `Reply with ONLY the JSON object — no prose, no markdown fences.`,
       },
     ];
-    const value = await this.callJson(model, messages, parseDecision);
-    return { value, usage: ZERO_USAGE };
+    const result = await this.callJson(model, messages, parseDecision);
+    return { value: result.value, usage: result.usage };
   }
 
   async produce(goal: Goal, ctx: BrainContext): Promise<Metered<Artifact>> {
@@ -337,10 +368,10 @@ export class LlmBrain implements Brain {
           `Do not truncate or summarize file content — emit every line.`,
       },
     ];
-    const raw = await this.callCompletions(model, messages, false);
-    const files = parseFileBlocks(raw);
-    const value: Artifact = files.length > 0 ? { kind: 'files', files } : { kind: 'text', text: raw };
-    return { value, usage: ZERO_USAGE };
+    const result = await this.callCompletions(model, messages, false);
+    const files = parseFileBlocks(result.content);
+    const value: Artifact = files.length > 0 ? { kind: 'files', files } : { kind: 'text', text: result.content };
+    return { value, usage: result.usage };
   }
 
   async judge(
@@ -388,8 +419,8 @@ export class LlmBrain implements Brain {
           `Set pass=false and add a gating finding whenever the artifact fails the rubric.`,
       },
     ];
-    const value = await this.callJson(model, messages, parseVerdict);
-    return { value, usage: ZERO_USAGE };
+    const result = await this.callJson(model, messages, parseVerdict);
+    return { value: result.value, usage: result.usage };
   }
 
   async repair(
@@ -422,10 +453,10 @@ export class LlmBrain implements Brain {
           `Return ALL files in full — do not truncate, summarize, or omit unchanged files.`,
       },
     ];
-    const raw = await this.callCompletions(model, messages, false);
-    const files = parseFileBlocks(raw);
-    const value: Artifact = files.length > 0 ? { kind: 'files', files } : { kind: 'text', text: raw };
-    return { value, usage: ZERO_USAGE };
+    const result = await this.callCompletions(model, messages, false);
+    const files = parseFileBlocks(result.content);
+    const value: Artifact = files.length > 0 ? { kind: 'files', files } : { kind: 'text', text: result.content };
+    return { value, usage: result.usage };
   }
 
   async step(

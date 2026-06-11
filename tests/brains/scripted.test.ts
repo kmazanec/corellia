@@ -269,3 +269,70 @@ describe('ScriptedBrain.step', () => {
     await expect(brain.step(baseGoal, [], [], ctx)).rejects.toThrow('step');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Synthetic usage on ScriptedBrain (ADR-017)
+// ---------------------------------------------------------------------------
+
+import type { WithUsage } from '../../src/brains/scripted.js';
+
+describe('ScriptedBrain synthetic usage', () => {
+  it('decide returns zero usage when the entry is a plain value', async () => {
+    const brain = new ScriptedBrain({ decide: { 'Write the widget': [{ kind: 'satisfy' }] } });
+    const result = await brain.decide(baseGoal, ctx);
+    expect(result.usage.promptTokens).toBe(0);
+    expect(result.usage.completionTokens).toBe(0);
+  });
+
+  it('decide returns synthetic usage when wrapped with WithUsage', async () => {
+    const entry: WithUsage<Decision> = {
+      value: { kind: 'satisfy' },
+      usage: { promptTokens: 120, completionTokens: 40, costUsd: 0.005 },
+    };
+    const brain = new ScriptedBrain({ decide: { 'Write the widget': [entry] } });
+    const result = await brain.decide(baseGoal, ctx);
+    expect(result.value.kind).toBe('satisfy');
+    expect(result.usage.promptTokens).toBe(120);
+    expect(result.usage.completionTokens).toBe(40);
+    expect(result.usage.costUsd).toBeCloseTo(0.005);
+  });
+
+  it('produce returns synthetic usage from WithUsage wrapper', async () => {
+    const entry: WithUsage<Artifact> = {
+      value: fileArtifact,
+      usage: { promptTokens: 200, completionTokens: 80, costUsd: 0.01 },
+    };
+    const brain = new ScriptedBrain({ produce: { 'Write the widget': [entry] } });
+    const result = await brain.produce(baseGoal, ctx);
+    expect(result.usage.promptTokens).toBe(200);
+    expect(result.usage.completionTokens).toBe(80);
+  });
+
+  it('judge returns synthetic usage from WithUsage wrapper', async () => {
+    const entry: WithUsage<Verdict> = {
+      value: passVerdict,
+      usage: { promptTokens: 300, completionTokens: 60 },
+    };
+    const brain = new ScriptedBrain({ judge: { 'Write the widget': [entry] } });
+    const result = await brain.judge(baseGoal, fileArtifact, 'rubric', ctx);
+    expect(result.usage.promptTokens).toBe(300);
+    expect(result.usage.costUsd).toBeUndefined();
+  });
+
+  it('mixed plain and WithUsage entries in sequence', async () => {
+    const withUsageEntry: WithUsage<Decision> = {
+      value: { kind: 'satisfy' },
+      usage: { promptTokens: 50, completionTokens: 10 },
+    };
+    const brain = new ScriptedBrain({
+      decide: {
+        'Write the widget': [satisfyDecision, withUsageEntry],
+      },
+    });
+    const r1 = await brain.decide(baseGoal, ctx);
+    expect(r1.usage.promptTokens).toBe(0);
+    const r2 = await brain.decide(baseGoal, ctx);
+    expect(r2.usage.promptTokens).toBe(50);
+    expect(r2.usage.completionTokens).toBe(10);
+  });
+});

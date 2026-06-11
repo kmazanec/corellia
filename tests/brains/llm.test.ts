@@ -360,3 +360,93 @@ describe('LlmBrain.repair', () => {
     expect(userMsg).toContain('Add strict mode.');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Real usage parsing (ADR-017)
+// ---------------------------------------------------------------------------
+
+function chatResponseWithUsage(content: string, usage: { prompt_tokens: number; completion_tokens: number; cost?: number }) {
+  return { choices: [{ message: { role: 'assistant', content } }], usage };
+}
+
+describe('LlmBrain usage parsing', () => {
+  it('decide surfaces promptTokens and completionTokens from the response usage block', async () => {
+    const { fetch } = stubFetch(
+      chatResponseWithUsage(JSON.stringify({ kind: 'satisfy' }), { prompt_tokens: 100, completion_tokens: 50 }),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(result.usage.promptTokens).toBe(100);
+    expect(result.usage.completionTokens).toBe(50);
+  });
+
+  it('decide surfaces costUsd when the endpoint reports cost', async () => {
+    const { fetch } = stubFetch(
+      chatResponseWithUsage(JSON.stringify({ kind: 'satisfy' }), { prompt_tokens: 200, completion_tokens: 80, cost: 0.0042 }),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(result.usage.costUsd).toBeCloseTo(0.0042);
+  });
+
+  it('decide returns undefined costUsd when cost is absent from the usage block', async () => {
+    const { fetch } = stubFetch(
+      chatResponseWithUsage(JSON.stringify({ kind: 'satisfy' }), { prompt_tokens: 100, completion_tokens: 30 }),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(result.usage.costUsd).toBeUndefined();
+  });
+
+  it('decide returns zero usage when the response carries no usage block', async () => {
+    const { fetch } = stubFetch(chatResponse(JSON.stringify({ kind: 'satisfy' })));
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(result.usage.promptTokens).toBe(0);
+    expect(result.usage.completionTokens).toBe(0);
+    expect(result.usage.costUsd).toBeUndefined();
+  });
+
+  it('produce surfaces usage from the response', async () => {
+    const { fetch } = stubFetch(
+      chatResponseWithUsage('plain text answer', { prompt_tokens: 60, completion_tokens: 20, cost: 0.001 }),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.produce(baseGoal, ctxSonnet);
+    expect(result.usage.promptTokens).toBe(60);
+    expect(result.usage.completionTokens).toBe(20);
+    expect(result.usage.costUsd).toBeCloseTo(0.001);
+  });
+
+  it('judge surfaces usage from the response', async () => {
+    const { fetch } = stubFetch(
+      chatResponseWithUsage(JSON.stringify({ pass: true, findings: [] }), { prompt_tokens: 150, completion_tokens: 40, cost: 0.002 }),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.judge(baseGoal, { kind: 'text', text: 'x' }, 'rubric', ctxSonnet);
+    expect(result.usage.promptTokens).toBe(150);
+    expect(result.usage.completionTokens).toBe(40);
+  });
+
+  it('repair surfaces usage from the response', async () => {
+    const { fetch } = stubFetch(
+      chatResponseWithUsage('```src/x.ts\nfixed\n```', { prompt_tokens: 75, completion_tokens: 15 }),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.repair(baseGoal, { kind: 'text', text: 'old' }, ['fix it'], ctxSonnet);
+    expect(result.usage.promptTokens).toBe(75);
+    expect(result.usage.completionTokens).toBe(15);
+  });
+
+  it('decide accumulates usage from both calls on a re-ask retry', async () => {
+    const { fetch } = stubFetch(
+      chatResponseWithUsage('not json at all', { prompt_tokens: 50, completion_tokens: 10 }),
+      chatResponseWithUsage(JSON.stringify({ kind: 'satisfy' }), { prompt_tokens: 60, completion_tokens: 5, cost: 0.001 }),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(result.usage.promptTokens).toBe(110);
+    expect(result.usage.completionTokens).toBe(15);
+    expect(result.usage.costUsd).toBeCloseTo(0.001);
+  });
+});
