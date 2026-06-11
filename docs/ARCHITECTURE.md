@@ -74,6 +74,9 @@ human signoff (ADR-011). The factory is operated by one person at a terminal
 | [ADR-019](./adrs/ADR-019-knowledge-artifacts-event-projected.md) | Knowledge artifacts event-projected; SHA-anchored freshness | Accepted | no | yes |
 | [ADR-020](./adrs/ADR-020-hybrid-impact-graph.md) | impact() on a deterministic import scan; dives add semantics | Accepted | no | yes |
 | [ADR-021](./adrs/ADR-021-coverage-policy-table.md) | Split-gate coverage as a per-kind policy table | Accepted | no | no |
+| [ADR-022](./adrs/ADR-022-skill-bundles-markdown-families.md) | Skill bundles as markdown family files | Accepted | no | yes |
+| [ADR-023](./adrs/ADR-023-two-phase-structured-emission.md) | Explore-then-emit via structured outputs | Accepted | no | yes |
+| [ADR-024](./adrs/ADR-024-golden-capture-as-events.md) | Golden-set capture as an event projection | Accepted | no | yes |
 
 ## Non-goals
 

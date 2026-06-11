@@ -55,16 +55,20 @@ The reliability gap is named harness debt carried to iteration 5
 (structured-output emission). Evidence + the cross-iteration transcript bug
 it exposed: build notes.
 
-### Iteration 5 — Taste: the library at full strength
+### Iteration 5 — Taste: the library at full strength *(specified, awaiting plan approval)*
 
-8 → 19 types; per-type/family skill bundles as harness content (the current
-generic-prompt quality ceiling removed); the intent dial wired through
-judges; golden-set capture from live runs. **Gate-brief candidates:**
-skill-bundle format; golden-set schema.
+Decisions locked in ADR-022/023/024 (markdown family skill files;
+explore-then-emit structured emission; golden capture as events); full 19
+types with evolve thin; tier models re-bound to cost-optimized picks
+(ADR-005 amendment). Specs in [iterations/05-taste/](./iterations/05-taste/)
+(F-51..F-57).
 
-*Done when:* a commissioned intent flows research → PRD → architecture →
-implementation with type-appropriate harnesses, and judges cite their
-rubrics.
+*Done when:* the scripted convergence passes (a commissioned mini-intent
+flows write-prd → design-arch (scan + alternatives-considered) →
+freeze-contract → implement, with the intent dial proven and golden events
+accruing), and the live:eyes retest on the new tiers reports honestly
+against the iteration-04 baseline (target 5/5 artifacts at well under
+$1/run).
 
 ### Iteration 6 — The loop closes: self-hosting
 
