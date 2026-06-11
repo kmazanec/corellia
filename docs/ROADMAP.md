@@ -1,6 +1,6 @@
 # Roadmap — Corellia
 
-**Status:** agreed · **Updated:** 2026-06-10
+**Status:** agreed · **Updated:** 2026-06-11
 **Sources:** [PRD.md](./PRD.md) (WHAT/WHY + acceptance criteria) ·
 [ARCHITECTURE.md](./ARCHITECTURE.md) + [adrs/](./adrs/) (implementation
 decisions) · [DESIGN.md](../DESIGN.md) (locked domain architecture) ·
@@ -15,30 +15,28 @@ loop, subdivided budgets, the event log with memory as a projection, the
 flywheel, risk gates, the listener, a Postgres substrate, and a
 provider-agnostic live brain — 300+ tests and a real end-to-end run.
 
-Measured against the PRD's success bar (a self-hosted PR **and** a
-foreign-repo PR): **the factory thinks, but doesn't yet have hands or
-eyes.** Nothing executes a test or uses a tool; the factory knows nothing
-about codebases it didn't create.
+Iteration 3 added **hands**: tool-using leaves in sandboxed worktrees,
+executing checks, real usage accounting with a hard ceiling, and a live
+red→green convergence run at $0.07 (555 tests). Measured against the PRD's
+success bar: **the factory thinks and acts, but doesn't yet have eyes** —
+it knows nothing about codebases it didn't create.
 
 ## The iteration arc
 
-Each iteration is a shippable state; each unblocks the next. Iteration 3 is
-fully specified (specs in [iterations/03-hands/](./iterations/03-hands/));
-4–6 stay arc-level deliberately — their right decomposition depends on what
-the prior iteration teaches (the JIT rule applied to planning itself). Each
-gets its gate brief + specs when it's next.
+Each iteration is a shippable state; each unblocks the next. Iterations get
+their gate brief + specs just-in-time, when they're next (the JIT rule
+applied to planning itself).
 
-### Iteration 3 — Hands: agentic leaf execution *(specified, ready to plan)*
+### Iteration 3 — Hands: agentic leaf execution *(shipped — PR #3)*
 
 Leaves become real tool-using loops in sandboxed worktrees. Decisions
 locked in ADR-014–018.
 
-*Done when:* the convergence check in
-[06-live-step-adapter.md](./iterations/03-hands/06-live-step-adapter.md)
-passes — a live sonnet-class `implement` leaf builds a small module
-test-first in a tree worktree, its declared test script actually runs red
-then green, a scope-violating call is refused and visible, and the run
-report prints real token + dollar totals (AC-7/8/11/12 observed live).
+*Done:* the live convergence run passed first try — a sonnet-class leaf
+built a module test-first in a tree worktree, the declared test ran red then
+green, and the report printed real totals ($0.0658). Scope-violation
+refusals are pinned by the scripted convergence suite. Outcomes + debts in
+the build notes.
 
 ### Iteration 4 — Eyes: brownfield comprehension *(specified, awaiting plan approval)*
 
