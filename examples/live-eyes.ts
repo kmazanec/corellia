@@ -173,6 +173,7 @@ function mapGoal(category: KnowledgeCategory): Goal {
       repoRoot: targetRepo,
       category,
       description:
+        `PROTOCOL: every message you send must either contain tool calls or be the final raw JSON object — nothing else. Never narrate, never announce readiness, never reply in prose: if you have enough information, your next message IS the JSON itself. ` +
         `Map the "${category}" knowledge of the repo. Be economical: list_dir the root (and one level ` +
         `where needed), read AT MOST 4-6 representative files, then emit. You do not need to read ` +
         `everything — pointers, not bodies. Your final message must be the raw JSON object only: no ` +
@@ -204,6 +205,7 @@ function diveGoal(region: string): Goal {
       repoRoot: targetRepo,
       region,
       description:
+        `PROTOCOL: every message you send must either contain tool calls or be the final raw JSON object — nothing else. Never narrate, never announce readiness, never reply in prose: if you have enough information, your next message IS the JSON itself. ` +
         `Deep-dive the region "${region}". Be economical: list the region once, read AT MOST 5 files, then emit immediately; never repeat a tool call you already made; 4-8 strong facts beat ` +
         `an exhaustive sweep. Your final message must be the raw JSON object only — no code fences, no prose. ` +
         `Emit RegionFacts as JSON: { repoRoot, region: "${region}", ` +
