@@ -18,6 +18,13 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 import { Engine } from '../../src/engine/engine.js';
+import {
+  openSandboxAssembly,
+  assembleKnowledgeWiring,
+  rebindKnowledgeScan,
+} from '../../src/engine/assembly.js';
+import { starterTypes } from '../../src/library/starter-types.js';
+import type { KnowledgeArtifact } from '../../src/contract/knowledge.js';
 import { MemoryEventStore, NoopMemoryView, buildRegistry, makeGoal } from './stubs.js';
 import type { Brain, BrainContext, StepOutput, StepTranscript } from '../../src/contract/brain.js';
 import type { Goal, Metered } from '../../src/contract/goal.js';
@@ -341,5 +348,135 @@ describe('assembly — sandbox config present', () => {
     if (scriptRan[0]?.type === 'script-ran') {
       expect(scriptRan[0].exitStatus).toBe(0);
     }
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// KNOWLEDGE / EYES WIRING (AC-1)
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('assembly — knowledge wiring (AC-1)', () => {
+  it('registers the five retrieval tools in the broker only when knowledge wiring is on', async () => {
+    const repo = makeTempRepo();
+    const store = new MemoryEventStore();
+    const registry = buildRegistry([implType([])]);
+
+    const off = await openSandboxAssembly(
+      { repoRoot: repo, declaredScripts: {} },
+      'g-off',
+      registry,
+      store,
+    );
+    const offDefs = (off.broker as unknown as { defs(): { name: string }[] }).defs().map((d) => d.name);
+    expect(offDefs).not.toContain('find_symbol');
+    expect(offDefs).not.toContain('impact');
+
+    const on = await openSandboxAssembly(
+      { repoRoot: repo, declaredScripts: {}, knowledge: true },
+      'g-on',
+      registry,
+      store,
+    );
+    const onDefs = (on.broker as unknown as { defs(): { name: string }[] }).defs().map((d) => d.name);
+    for (const name of ['find_symbol', 'find_exemplar', 'conventions_for', 'stack_versions', 'impact']) {
+      expect(onDefs).toContain(name);
+    }
+  });
+
+  it('rebindKnowledgeScan replaces the no-op map-repo scanner with a real one', () => {
+    const before = starterTypes().find((t) => t.name === 'map-repo')!;
+    const beforeCheck = before.deterministic.find((c) => c.name === 'knowledge:map-repo')!;
+
+    const rebound = rebindKnowledgeScan(starterTypes()).find((t) => t.name === 'map-repo')!;
+    const afterCheck = rebound.deterministic.find((c) => c.name === 'knowledge:map-repo')!;
+
+    // Same check identity (name preserved) but a distinct instance — the no-op
+    // closure was swapped for the real scanImports-backed one.
+    expect(afterCheck.name).toBe('knowledge:map-repo');
+    expect(afterCheck).not.toBe(beforeCheck);
+    // Other types are untouched (referentially identical where unchanged).
+    expect(rebindKnowledgeScan(starterTypes()).find((t) => t.name === 'implement')!.name).toBe('implement');
+  });
+
+  it('assembleKnowledgeWiring builds query/headSha/validate/mint/persist over the real parts', async () => {
+    const repo = makeTempRepo();
+    const store = new MemoryEventStore();
+    const registry = buildRegistry(rebindKnowledgeScan(starterTypes()));
+    const wiring = assembleKnowledgeWiring({ repoRoot: repo, declaredScripts: {}, knowledge: true }, store, registry);
+
+    // headSha reads the fixture's real HEAD (40-hex git sha).
+    const head = await wiring.headSha(repo);
+    expect(head).toMatch(/^[0-9a-f]{7,40}$/);
+
+    // query over an empty log → no artifacts, headSha threaded through.
+    const empty = await wiring.query(repo);
+    expect(empty.artifacts).toHaveLength(0);
+    expect(empty.headSha).toBe(head);
+
+    // mintComprehension turns a category miss into a map-repo child (deps stripped).
+    const minted = wiring.mintComprehension!([
+      { category: 'architecture', reason: 'absent' },
+    ]);
+    expect(minted).toHaveLength(1);
+    expect(minted[0]?.type).toBe('map-repo');
+    expect(minted[0]?.dependsOn).toEqual([]);
+
+    // persist parses a learn leaf's artifact JSON and appends a knowledge-written event.
+    const ka: KnowledgeArtifact = {
+      repoRoot: repo,
+      category: 'conventions',
+      generatedAtSha: head,
+      confidence: 'medium',
+      status: 'provisional',
+      pointers: [],
+      summary: 'wiring test',
+    };
+    const learnGoal = makeGoal({ id: 'g-learn', type: 'map-repo' });
+    await wiring.persist!(learnGoal, { kind: 'text', text: JSON.stringify(ka) });
+    const written = await store.list({ type: 'knowledge-written' });
+    expect(written).toHaveLength(1);
+
+    // query now sees the written artifact for this repo.
+    const after = await wiring.query(repo);
+    expect(after.artifacts.map((a) => a.category)).toContain('conventions');
+  });
+
+  it('persist is a no-op for non-learn goals and malformed artifacts', async () => {
+    const repo = makeTempRepo();
+    const store = new MemoryEventStore();
+    const registry = buildRegistry(rebindKnowledgeScan(starterTypes()));
+    const wiring = assembleKnowledgeWiring({ repoRoot: repo, declaredScripts: {}, knowledge: true }, store, registry);
+
+    // make-kind goal → not persisted.
+    await wiring.persist!(makeGoal({ id: 'g-make', type: 'implement' }), { kind: 'text', text: '{}' });
+    // learn goal but unparseable text → not persisted.
+    await wiring.persist!(makeGoal({ id: 'g-bad', type: 'map-repo' }), { kind: 'text', text: 'not json' });
+
+    expect(await store.list({ type: 'knowledge-written' })).toHaveLength(0);
+    expect(await store.list({ type: 'knowledge-facts-written' })).toHaveLength(0);
+  });
+
+  it('knowledge wiring absent → byte-identical iteration-03 broker (no retrieval tools, no knowledge events)', async () => {
+    const repo = makeTempRepo();
+    const store = new MemoryEventStore();
+    const brain = planBrain([
+      { kind: 'artifact', artifact: { kind: 'files', files: [{ path: 'src/out.txt', content: 'x' }] }, usage: ZERO_USAGE },
+    ]);
+    const registry = buildRegistry([implType([])]);
+    // No knowledge in EngineOptions, knowledge:false (default) in sandbox.
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      sandbox: { repoRoot: repo, declaredScripts: {} },
+    });
+    const report = await engine.run(makeGoal({ id: 'root-no-k', type: 'implement', scope: ['src/'] }));
+    expect(report.blockers).toHaveLength(0);
+
+    const types = store.types();
+    expect(types).not.toContain('gate-checked');
+    expect(types).not.toContain('knowledge-written');
+    expect(types).not.toContain('knowledge-checked');
   });
 });

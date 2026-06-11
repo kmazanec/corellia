@@ -185,6 +185,19 @@ export interface EngineOptions {
      * and does NOT call the brain for them.
      */
     mintComprehension: (missing: MissingRequirement[]) => ChildPlan[];
+    /**
+     * Persist a learn-type leaf's artifact after it passes its deterministic
+     * gate, per F-44's emission convention: map-repo emits a KnowledgeArtifact
+     * as JSON in artifact.text, deep-dive-region emits a RegionFacts. The engine
+     * calls this exactly once, at each leaf-success emission site, AFTER the gate
+     * verdict passes — the assembly parses artifact.text and appends the
+     * knowledge-written / knowledge-facts-written event via F-41's helpers. A
+     * non-learn goal, a malformed artifact, or a missing hook is a no-op.
+     *
+     * Optional: tests that do not exercise persistence omit it. When absent, a
+     * passing learn leaf emits exactly as before (no knowledge event appended).
+     */
+    persist?: (goal: Goal, artifact: Artifact) => Promise<void>;
   };
 }
 
@@ -916,6 +929,23 @@ export class Engine {
     return { decision: fallbackResult.value, loserFindings, winnerUsage: fallbackResult.usage };
   }
 
+  /**
+   * Persist a passing leaf's artifact through the assembly-supplied knowledge
+   * hook (F-41 helpers over F-44's emission convention). Called at every
+   * leaf-success emission site in the attempt loop, AFTER the gate verdict has
+   * passed and BEFORE the 'emitted' event is appended, so a knowledge-written /
+   * knowledge-facts-written event lands ahead of the leaf's emission in the log.
+   *
+   * No-op when knowledge wiring or the persist hook is absent. The hook itself
+   * decides whether the goal is a learn type and whether artifact.text parses —
+   * the engine stays free of knowledge-shape knowledge (it lives in assembly).
+   */
+  private async persistLeafKnowledge(goal: Goal, artifact: Artifact): Promise<void> {
+    const persist = this.knowledge?.persist;
+    if (persist === undefined) return;
+    await persist(goal, artifact);
+  }
+
   // ── ATTEMPT LOOP (the control loop) ──────────────────────────────────────
   private async runAttemptLoop(
     goal: Goal,
@@ -1175,6 +1205,7 @@ export class Engine {
               return this.ceilingReport(goal, treeState);
             }
             if (recheck.passed) {
+              await this.persistLeafKnowledge(goal, resolution.artifact);
               const report = buildReport(goal, resolution.artifact);
               await this.store.append({
                 type: 'emitted',
@@ -1310,6 +1341,7 @@ export class Engine {
               return this.ceilingReport(goal, treeState);
             }
             if (recheck.passed) {
+              await this.persistLeafKnowledge(goal, resolution.artifact);
               const report = buildReport(goal, resolution.artifact);
               await this.store.append({
                 type: 'emitted',
@@ -1349,6 +1381,7 @@ export class Engine {
       }
 
       // Both gates passed (or no judge) — emit the report
+      await this.persistLeafKnowledge(goal, artifact);
       const report = buildReport(goal, artifact);
       await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
       return report;

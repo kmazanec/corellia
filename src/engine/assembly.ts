@@ -12,7 +12,7 @@
  */
 
 import type { EventStore } from '../contract/events.js';
-import type { Registry, CheckContext } from '../contract/goal-type.js';
+import type { Registry, CheckContext, GoalTypeDef, DeterministicCheck } from '../contract/goal-type.js';
 import type { Goal } from '../contract/goal.js';
 import type { ToolBroker, ToolImpl } from '../contract/tool.js';
 import type { ScriptResult } from '../contract/tool.js';
@@ -25,7 +25,30 @@ import {
   type ScriptRunner,
   type DeclaredScripts,
 } from '../library/script-runner.js';
+import { execFileSync } from 'node:child_process';
 import { openTreeWorktree, type TreeWorktree } from './worktree.js';
+import { retrievalTools, type RetrievalDeps } from '../library/retrieval.js';
+import { scanImports } from '../library/imports.js';
+import { projectKnowledge } from '../eventlog/projections.js';
+import {
+  architectureCheck,
+  stackCheck,
+  conventionsCheck,
+  testScaffoldCheck,
+  diveAnchorCheck,
+  mapRepoCheck,
+  type ArchScanFn,
+  type ScanEdge,
+} from '../library/knowledge-checks.js';
+import { writeKnowledge, writeRegionFacts } from '../library/knowledge.js';
+import {
+  coverageCheck,
+  type KnowledgeForCoverage,
+  type MissingRequirement,
+} from '../library/coverage.js';
+import type { ChildPlan } from '../contract/decision.js';
+import type { Artifact } from '../contract/report.js';
+import type { KnowledgeArtifact, KnowledgeCategory, RegionFacts } from '../contract/knowledge.js';
 
 /**
  * The optional sandbox/assembly configuration the engine accepts. When present
@@ -37,6 +60,17 @@ export interface SandboxConfig {
   repoRoot: string;
   /** The declared script entry points (name → repo-relative path) run_script may invoke. */
   declaredScripts: DeclaredScripts;
+  /**
+   * Optional knowledge/eyes wiring (F-46). When truthy, the assembly registers
+   * the five read-only retrieval ToolImpls (find_symbol / find_exemplar /
+   * conventions_for / stack_versions / impact) in the broker table, backed by
+   * the real import scanner and the store's knowledge projection. When absent or
+   * false, the broker carries only the iteration-03 tools — byte-identical
+   * behavior. The engine's coverage gate is wired separately via
+   * EngineOptions.knowledge (see {@link assembleKnowledgeWiring}); this flag only
+   * governs the retrieval tools the broker exposes.
+   */
+  knowledge?: boolean;
 }
 
 /**
@@ -152,11 +186,28 @@ export async function openSandboxAssembly(
   })();
 
   const fileTools = createFileTools(root);
+
+  // ── Retrieval tools (F-46) ───────────────────────────────────────────────
+  // When knowledge wiring is enabled, register the five read-only retrieval
+  // ToolImpls backed by the REAL import scanner (scanImports over the worktree
+  // root) and the store's knowledge projection (latest artifacts for the target
+  // repoRoot). Absent the flag, the broker carries only the iteration-03 tools.
+  const knowledgeTools: ToolImpl[] = config.knowledge
+    ? Object.values(retrievalTools(buildRetrievalDeps(root, config.repoRoot, store)))
+    : [];
+
   const broker = new Broker({
     root,
     registry,
     store,
-    tools: [fileTools.readFile, fileTools.writeFile, fileTools.listDir, fileTools.search, runScriptImpl],
+    tools: [
+      fileTools.readFile,
+      fileTools.writeFile,
+      fileTools.listDir,
+      fileTools.search,
+      runScriptImpl,
+      ...knowledgeTools,
+    ],
   });
 
   const checkContextFor = (goalId: string): CheckContext => {
@@ -168,4 +219,269 @@ export async function openSandboxAssembly(
   };
 
   return { broker, worktree, checkContextFor };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// KNOWLEDGE / EYES WIRING (F-46)
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * The real ArchScanFn the architecture check consumes — backed by the
+ * deterministic import scanner (F-42). The check passes (root, generatedAtSha);
+ * we scan `root` and project scanImports' edge list onto the {from,to} ScanEdge
+ * shape the check expects. The artifact's claimed SHA is advisory only here: the
+ * scanner reads the live worktree, which is the ground truth the check validates
+ * pointers against.
+ */
+export function realArchScan(root: string, _sha: string): Promise<ScanEdge[]> {
+  const graph = scanImports(root);
+  return Promise.resolve(graph.edges.map((e) => ({ from: e.from, to: e.to })));
+}
+
+/**
+ * Build the RetrievalDeps the five retrieval tools run over: the worktree root
+ * for symbol/exemplar/stack search and impact scanning, a scanImports-backed
+ * `scan` adapted to the retrieval graph shape, and a `knowledge` query that
+ * projects the store's events and returns the latest artifacts for the TARGET
+ * repoRoot (artifacts are keyed by the target repo, not the worktree path).
+ */
+function buildRetrievalDeps(
+  worktreeRoot: string,
+  targetRepoRoot: string,
+  store: EventStore,
+): RetrievalDeps {
+  return {
+    repoRoot: worktreeRoot,
+    scan: async (root: string) => {
+      const graph = scanImports(root);
+      // Adapt scanImports' edge-list to retrieval's adjacency-map ImportGraph.
+      const edges: Record<string, string[]> = {};
+      for (const e of graph.edges) {
+        (edges[e.from] ??= []).push(e.to);
+      }
+      return { edges, scannedAtSha: graph.scannedAtSha };
+    },
+    knowledge: async () => {
+      const view = projectKnowledge(await store.list());
+      const out: KnowledgeArtifact[] = [];
+      for (const [, entry] of view.artifacts) {
+        if (entry.artifact.repoRoot === targetRepoRoot) out.push(entry.artifact);
+      }
+      return out;
+    },
+  };
+}
+
+/**
+ * Project the store's event log into the KnowledgeForCoverage shape the engine's
+ * coverage gate consumes: the latest artifact per category for `repoRoot`, every
+ * region dive for that repo, and the supplied current HEAD `headSha`.
+ */
+function projectCoverageKnowledge(
+  events: import('../contract/events.js').FactoryEvent[],
+  repoRoot: string,
+  headSha: string,
+): KnowledgeForCoverage {
+  const view = projectKnowledge(events);
+  const artifacts = [];
+  for (const [, entry] of view.artifacts) {
+    if (entry.artifact.repoRoot === repoRoot) {
+      artifacts.push({
+        category: entry.artifact.category,
+        generatedAtSha: entry.artifact.generatedAtSha,
+        repoRoot: entry.artifact.repoRoot,
+      });
+    }
+  }
+  const regionFacts = [];
+  for (const [, facts] of view.diveFacts) {
+    if (facts.repoRoot === repoRoot) {
+      regionFacts.push({
+        repoRoot: facts.repoRoot,
+        region: facts.region,
+        generatedAtSha: facts.generatedAtSha,
+      });
+    }
+  }
+  return { artifacts, regionFacts, headSha };
+}
+
+/** Read the current HEAD SHA of a repo via an args-array execFile (no shell). */
+function gitHeadSha(repoRoot: string): string {
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repoRoot,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 5000,
+    })
+      .toString()
+      .trim();
+  } catch {
+    return 'no-sha';
+  }
+}
+
+/**
+ * The per-category self-validation map (F-44's checks). The architecture check
+ * is bound to the REAL scanImports-backed ArchScanFn — replacing the no-op
+ * scanner that starter-types registers (see {@link rebindKnowledgeScan}).
+ */
+function categoryCheck(category: KnowledgeCategory, scanFn: ArchScanFn): DeterministicCheck {
+  switch (category) {
+    case 'architecture':
+      return architectureCheck(scanFn);
+    case 'stack':
+      return stackCheck();
+    case 'conventions':
+      return conventionsCheck();
+    case 'test-scaffold':
+      return testScaffoldCheck();
+    default:
+      // Categories without shipped self-validation: the map-repo dispatcher
+      // passes them through. Mirror that here with a passing check.
+      return mapRepoCheck(scanFn);
+  }
+}
+
+/**
+ * Default comprehension minting: a single map-repo ChildPlan per missing
+ * category and a deep-dive-region ChildPlan per missing region, with sane
+ * read-only budgets/scopes and no inter-dependencies (the engine injects them as
+ * dependencies of the existing children and strips dependsOn itself). Exposed so
+ * the live script and convergence test share one minting policy.
+ */
+export function defaultMintComprehension(
+  repoRoot: string,
+  missing: MissingRequirement[],
+): ChildPlan[] {
+  const plans: ChildPlan[] = [];
+  let n = 0;
+  for (const m of missing) {
+    if (m.region !== undefined) {
+      plans.push({
+        localId: `dive-${m.category}-${n++}`,
+        type: 'deep-dive-region',
+        title: `Deep-dive region ${m.region}`,
+        spec: { repoRoot, region: m.region, reason: m.reason },
+        scope: [m.region],
+        budgetShare: 0.2,
+        dependsOn: [],
+      });
+    } else {
+      plans.push({
+        localId: `map-${m.category}-${n++}`,
+        type: 'map-repo',
+        title: `Map repo: ${m.category}`,
+        spec: { repoRoot, category: m.category, reason: m.reason },
+        scope: [],
+        budgetShare: 0.2,
+        dependsOn: [],
+      });
+    }
+  }
+  return plans;
+}
+
+/**
+ * Parse a learn-leaf artifact and persist it via F-41's write helpers. map-repo
+ * leaves emit a KnowledgeArtifact JSON in artifact.text → knowledge-written;
+ * deep-dive-region leaves emit a RegionFacts JSON → knowledge-facts-written.
+ *
+ * A non-learn goal type, a non-text artifact, malformed JSON, or a shape that
+ * matches neither known producer is a silent no-op: persistence never blocks an
+ * already-passing leaf (the deterministic gate already validated the shape).
+ */
+async function persistLearnArtifact(
+  store: EventStore,
+  registry: Registry,
+  goal: Goal,
+  artifact: Artifact,
+): Promise<void> {
+  if (!registry.has(goal.type)) return;
+  const def = registry.get(goal.type);
+  if (def.kind !== 'learn') return;
+  if (artifact.kind !== 'text' || !artifact.text) return;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(artifact.text);
+  } catch {
+    return;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return;
+  const obj = parsed as Record<string, unknown>;
+
+  // RegionFacts: has region + facts array.
+  if (typeof obj['region'] === 'string' && Array.isArray(obj['facts'])) {
+    await writeRegionFacts(store, goal.id, parsed as RegionFacts);
+    return;
+  }
+  // KnowledgeArtifact: has category + pointers array + summary.
+  if (typeof obj['category'] === 'string' && Array.isArray(obj['pointers'])) {
+    await writeKnowledge(store, goal.id, parsed as KnowledgeArtifact);
+    return;
+  }
+}
+
+/**
+ * The composed knowledge wiring the engine's coverage gate + checkpoint consume,
+ * built over the REAL parts: store-backed projection (filtered to repoRoot),
+ * git HEAD, per-category self-validation (architecture bound to the real
+ * scanImports ArchScanFn), default comprehension minting, and the F-41-backed
+ * persist hook. Pass the result as EngineOptions.knowledge.
+ *
+ * NOTE: the engine only fires the split checkpoint (verify-on-read before
+ * fan-out); the integrate checkpoint is honestly deferred (see EngineOptions).
+ */
+export function assembleKnowledgeWiring(
+  config: SandboxConfig,
+  store: EventStore,
+  registry: Registry,
+): NonNullable<import('./engine.js').EngineOptions['knowledge']> {
+  const scanFn: ArchScanFn = realArchScan;
+  return {
+    query: async (repoRoot: string): Promise<KnowledgeForCoverage> => {
+      const headSha = gitHeadSha(repoRoot);
+      return projectCoverageKnowledge(await store.list(), repoRoot, headSha);
+    },
+    headSha: async (repoRoot: string): Promise<string> => gitHeadSha(repoRoot),
+    validate: async (artifact: KnowledgeArtifact): Promise<boolean> => {
+      const check = categoryCheck(artifact.category, scanFn);
+      const ctx: CheckContext = { sandboxRoot: artifact.repoRoot };
+      const result = await check.run(
+        { id: 'validate', type: 'map-repo' } as unknown as Goal,
+        { kind: 'text', text: JSON.stringify(artifact) },
+        ctx,
+      );
+      return result.ok;
+    },
+    mintComprehension: (missing: MissingRequirement[]): ChildPlan[] =>
+      defaultMintComprehension(config.repoRoot, missing),
+    persist: (goal: Goal, artifact: Artifact): Promise<void> =>
+      persistLearnArtifact(store, registry, goal, artifact),
+  };
+}
+
+/**
+ * Replace the no-op architecture scanner that `starterTypes()` registers
+ * (map-repo's `mapRepoCheck(async () => [])`) with the REAL scanImports-backed
+ * ArchScanFn, returning a fresh GoalTypeDef list (the originals are untouched).
+ *
+ * Registry-rebind choice (review finding): rather than mutate the contract or
+ * the engine's gate, the assembly rebuilds the goal-type table so map-repo's
+ * deterministic gate validates artifact pointers against the live import graph.
+ * The composition root passes the rebound types to its registry.
+ */
+export function rebindKnowledgeScan(types: GoalTypeDef[]): GoalTypeDef[] {
+  return types.map((t) => {
+    if (t.name === 'map-repo') {
+      return {
+        ...t,
+        deterministic: t.deterministic.map((c) =>
+          c.name === 'knowledge:map-repo' ? mapRepoCheck(realArchScan) : c,
+        ),
+      };
+    }
+    return t;
+  });
 }
