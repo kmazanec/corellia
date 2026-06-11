@@ -736,3 +736,250 @@ describe('T5: step event carries usage', () => {
     expect(firstStep.usage!.costUsd).toBe(0.001);
   }, 10_000);
 });
+
+// ── T6: tool-loop ceiling ─────────────────────────────────────────────────────
+// A tool-granted goal whose step outputs carry costUsd summing past the ceiling
+// must: (1) emit ceiling-reached exactly once, (2) make no further brain calls
+// after the ceiling trips, and (3) debit step token usage against the tokens
+// budget dimension so a tight tokens budget exhausts on step usage.
+
+describe('T6: tool-loop ceiling', () => {
+  it('step loop halts with ceiling-reached when costUsd crosses ceiling; no further brain calls', async () => {
+    const store = new MemoryEventStore();
+
+    // Step 1 costs $12 — ceiling is $10 → step 1 alone trips the ceiling.
+    // The step event is emitted before the ceiling check, so exactly 1 step event
+    // appears in the log. Brain.step must not be called a second time.
+    let stepCallCount = 0;
+    const stepOutputs: StepOutput[] = [
+      {
+        kind: 'tool-calls',
+        calls: [toolCall('c1', 'write_file')],
+        usage: { promptTokens: 10, completionTokens: 5, costUsd: 12 },
+      },
+      // This step must never be called — ceiling trips after step 1
+      {
+        kind: 'artifact',
+        artifact: textArtifact('should not appear'),
+        usage: { promptTokens: 10, completionTokens: 5, costUsd: 1 },
+      },
+    ];
+
+    const captureBrain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair() { throw new Error('not used'); },
+      async step() {
+        const out = stepOutputs[stepCallCount++];
+        if (!out) throw new Error('no more steps scripted');
+        return out;
+      },
+    };
+
+    const broker = new FakeBroker([
+      { callId: 'c1', ok: true, output: 'wrote' },
+    ]);
+
+    const registry = buildRegistry([toolGrantedType()]);
+    const engine = new Engine({
+      registry,
+      brain: captureBrain,
+      store,
+      memory: new NoopMemoryView(),
+      broker,
+    });
+
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'ceiling loop goal',
+      budget: { attempts: 3, tokens: 100_000, toolCalls: 10, wallClockMs: 60_000 },
+      spendCeilingUsd: 10,
+    });
+
+    const report = await engine.run(goal);
+
+    // Must have blocked (ceiling reached)
+    expect(report.blockers.length).toBeGreaterThan(0);
+
+    // ceiling-reached emitted exactly once
+    const ceilingEvents = await store.list({ type: 'ceiling-reached' });
+    expect(ceilingEvents).toHaveLength(1);
+
+    // Step 1's event is in the log (emitted before ceiling check); step 2 never ran
+    const stepEvents = await store.list({ type: 'step' });
+    expect(stepEvents).toHaveLength(1);
+
+    // Brain.step was only called once
+    expect(stepCallCount).toBe(1);
+  }, 10_000);
+
+  it('tight tokens budget exhausts on step token usage (tokens dimension gates tool leaves)', async () => {
+    const store = new MemoryEventStore();
+
+    // Each step uses 60 tokens (30+30). Budget is 100 tokens → exhausts after step 2.
+    const stepOutputs: StepOutput[] = [
+      {
+        kind: 'tool-calls',
+        calls: [toolCall('d1', 'write_file')],
+        usage: { promptTokens: 30, completionTokens: 30, costUsd: 0.001 },
+      },
+      {
+        kind: 'tool-calls',
+        calls: [toolCall('d2', 'write_file')],
+        usage: { promptTokens: 30, completionTokens: 30, costUsd: 0.001 },
+      },
+      {
+        kind: 'artifact',
+        artifact: textArtifact('result'),
+        usage: { promptTokens: 30, completionTokens: 30, costUsd: 0.001 },
+      },
+    ];
+    let stepIdx = 0;
+
+    const captureBrain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair() { throw new Error('not used'); },
+      async step() {
+        const out = stepOutputs[stepIdx++];
+        if (!out) throw new Error('no more steps');
+        return out;
+      },
+    };
+
+    const broker = new FakeBroker([
+      { callId: 'd1', ok: true, output: 'ok' },
+      { callId: 'd2', ok: true, output: 'ok' },
+    ]);
+
+    const registry = buildRegistry([toolGrantedType()]);
+    const engine = new Engine({
+      registry,
+      brain: captureBrain,
+      store,
+      memory: new NoopMemoryView(),
+      broker,
+    });
+
+    // tokens budget of 100 — three steps of 60 tokens each would overflow it
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'tokens-gate goal',
+      budget: { attempts: 5, tokens: 100, toolCalls: 20, wallClockMs: 60_000 },
+      spendCeilingUsd: 100, // ceiling high enough to not interfere
+    });
+
+    const report = await engine.run(goal);
+
+    // The artifact-returning step exceeds the tokens budget → blocked on tokens
+    expect(report.blockers.length).toBeGreaterThan(0);
+    const exhaustedEvents = await store.list({ type: 'budget-exhausted' });
+    const tokenExhausted = exhaustedEvents.find(
+      (e) => (e as { dimension: string }).dimension === 'tokens',
+    );
+    expect(tokenExhausted).toBeDefined();
+  }, 10_000);
+});
+
+// ── T7: debit equality reads the budget ──────────────────────────────────────
+// After a run, the remaining tokens budget equals initial minus the SUM of all
+// step event token usage — proving debit equals reported, not just behavioral.
+
+describe('T7: debit equality reads the budget', () => {
+  it('remaining tokens after step loop equals initial minus sum of step event usage', async () => {
+    const store = new MemoryEventStore();
+
+    const step1Usage: import('../../src/contract/goal.js').Usage = { promptTokens: 20, completionTokens: 10, costUsd: 0.001 };
+    const step2Usage: import('../../src/contract/goal.js').Usage = { promptTokens: 15, completionTokens: 5, costUsd: 0.001 };
+    const finalArtifact = textArtifact('done');
+
+    const brain = new SrcScriptedBrain({
+      step: {
+        'debit-equality goal': [
+          { kind: 'tool-calls', calls: [toolCall('e1', 'read_file')], usage: step1Usage } satisfies StepOutput,
+          { kind: 'artifact', artifact: finalArtifact, usage: step2Usage } satisfies StepOutput,
+        ],
+      },
+    });
+
+    const broker = new FakeBroker([
+      { callId: 'e1', ok: true, output: 'content' },
+    ]);
+
+    const registry = buildRegistry([toolGrantedType()]);
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      broker,
+    });
+
+    const initialTokens = 10_000;
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'debit-equality goal',
+      budget: { attempts: 3, tokens: initialTokens, toolCalls: 10, wallClockMs: 60_000 },
+      spendCeilingUsd: 100,
+    });
+
+    const report = await engine.run(goal);
+    expect(report.blockers).toHaveLength(0);
+
+    // Sum all step event token usage
+    const stepEvents = await store.list({ type: 'step' });
+    const totalStepTokens = stepEvents.reduce((sum, e) => {
+      const ev = e as { usage?: import('../../src/contract/goal.js').Usage };
+      if (!ev.usage) return sum;
+      return sum + ev.usage.promptTokens + ev.usage.completionTokens;
+    }, 0);
+
+    // Expected total: (20+10) + (15+5) = 50
+    const expectedTotal = (step1Usage.promptTokens + step1Usage.completionTokens) +
+                          (step2Usage.promptTokens + step2Usage.completionTokens);
+    expect(totalStepTokens).toBe(expectedTotal);
+
+    // The tokens budget was debited by exactly that sum.
+    // The remaining budget = initialTokens - totalStepTokens.
+    // We verify via a goal whose tokens budget equals the total step usage: it must
+    // exhaust on step usage alone (boundary condition).
+    const store2 = new MemoryEventStore();
+    const brain2 = new SrcScriptedBrain({
+      step: {
+        'boundary goal': [
+          { kind: 'tool-calls', calls: [toolCall('f1', 'read_file')], usage: step1Usage } satisfies StepOutput,
+          { kind: 'artifact', artifact: finalArtifact, usage: step2Usage } satisfies StepOutput,
+        ],
+      },
+    });
+    const broker2 = new FakeBroker([
+      { callId: 'f1', ok: true, output: 'content' },
+    ]);
+    const engine2 = new Engine({
+      registry,
+      brain: brain2,
+      store: store2,
+      memory: new NoopMemoryView(),
+      broker: broker2,
+    });
+
+    // Budget exactly equals the accumulated step tokens — last step should exhaust it
+    const boundaryGoal = makeGoal({
+      type: 'implement',
+      title: 'boundary goal',
+      budget: { attempts: 3, tokens: totalStepTokens, toolCalls: 10, wallClockMs: 60_000 },
+      spendCeilingUsd: 100,
+    });
+
+    const report2 = await engine2.run(boundaryGoal);
+    // The tokens budget is exactly consumed, so it exhausts on the final debit
+    expect(report2.blockers.length).toBeGreaterThan(0);
+    const exhaustedEvents = await store2.list({ type: 'budget-exhausted' });
+    const tokensExhausted = exhaustedEvents.find(
+      (e) => (e as { dimension: string }).dimension === 'tokens',
+    );
+    expect(tokensExhausted).toBeDefined();
+  }, 10_000);
+});

@@ -20,6 +20,7 @@ import {
 } from './stubs.js';
 import type { ChildPlan } from '../../src/contract/decision.js';
 import type { MemoryPointer } from '../../src/contract/goal.js';
+import { ZERO_USAGE } from '../../src/contract/goal.js';
 
 // ── 1. Leaf satisfy that passes ───────────────────────────────────────────
 
@@ -1167,14 +1168,14 @@ describe('F-35 no-cost fallback — tokens-only conservative bound', () => {
   it('tree still halts via conservative bound when endpoint reports tokens but not cost', async () => {
     const store = new MemoryEventStore();
     // Usage without costUsd — fallback computes spentUsd = tokens * WORST_CASE_PRICE_PER_TOKEN
-    // With 1_000_000 tokens and $0.000015/token = $15 exactly → trips the $15 ceiling
+    // With 1_000_000 tokens and $0.000025/token = $25 exactly → trips the $25 ceiling
     const brain = new ScriptedBrain()
       .queueProduceWithUsage(textArtifact('output'), { promptTokens: 500000, completionTokens: 500000 });
     const registry = buildRegistry([leafTypeDef({ judgeType: null })]);
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
     const goal = makeGoal({
       budget: { attempts: 5, tokens: 2000000, toolCalls: 50, wallClockMs: 60000 },
-      spendCeilingUsd: 15,
+      spendCeilingUsd: 25,
     });
     const report = await engine.run(goal);
 
@@ -1183,17 +1184,17 @@ describe('F-35 no-cost fallback — tokens-only conservative bound', () => {
     const ceilingEvents = await store.list({ type: 'ceiling-reached' });
     expect(ceilingEvents).toHaveLength(1);
     const ev = ceilingEvents[0] as Extract<FactoryEvent, { type: 'ceiling-reached' }>;
-    // The conservative fallback was applied: spentUsd = 1_000_000 * 0.000015 = 15
-    expect(ev.spentUsd).toBeCloseTo(15);
+    // The conservative fallback was applied: spentUsd = 1_000_000 * 0.000025 = 25
+    expect(ev.spentUsd).toBeCloseTo(25);
   });
 
-  it('WORST_CASE_PRICE_PER_TOKEN is the documented fallback constant', () => {
-    expect(WORST_CASE_PRICE_PER_TOKEN).toBe(0.000015);
+  it('WORST_CASE_PRICE_PER_TOKEN is the documented fallback constant (opus-class output worst-case)', () => {
+    expect(WORST_CASE_PRICE_PER_TOKEN).toBe(0.000025);
   });
 
   it('tree does not halt if token-only spend stays below ceiling', async () => {
     const store = new MemoryEventStore();
-    // 100 tokens * 0.000015 = $0.0015, well below $15
+    // 100 tokens * 0.000025 = $0.0025, well below $15
     const brain = new ScriptedBrain()
       .queueProduceWithUsage(textArtifact('output'), { promptTokens: 50, completionTokens: 50 });
     const registry = buildRegistry([leafTypeDef({ judgeType: null })]);
@@ -1208,4 +1209,86 @@ describe('F-35 no-cost fallback — tokens-only conservative bound', () => {
     const ceilingEvents = await store.list({ type: 'ceiling-reached' });
     expect(ceilingEvents).toHaveLength(0);
   });
+});
+
+// ── F-36 Split/concurrent ceiling ─────────────────────────────────────────────
+// A splitter with 2+ independent children whose combined usage crosses the ceiling
+// must emit ceiling-reached exactly once (not once per child that sees it tripped).
+// Post-trip produce events are bounded by the concurrent-branch count (ADR-017
+// one-in-flight exception: at most one in-flight call per branch may complete).
+
+describe('F-36 split/concurrent ceiling — ceiling-reached fires once, post-trip bounded', () => {
+  it('two independent children crossing the ceiling emit ceiling-reached exactly once', async () => {
+    const store = new MemoryEventStore();
+
+    // Each child's produce costs $8 — two children = $16 combined, ceiling is $10.
+    // Child A produces and trips the ceiling. Child B may or may not complete (it's
+    // concurrent), but ceiling-reached must appear exactly once in the event log.
+    const childA: ChildPlan = {
+      localId: 'a',
+      type: 'leaf',
+      title: 'child A',
+      spec: {},
+      dependsOn: [],
+      scope: [],
+      budgetShare: 0.5,
+    };
+    const childB: ChildPlan = {
+      localId: 'b',
+      type: 'leaf',
+      title: 'child B',
+      spec: {},
+      dependsOn: [],
+      scope: [],
+      budgetShare: 0.5,
+    };
+
+    // Both children independently produce with $8 cost each.
+    // The brain: decide once (splitter), then produce for each child.
+    let produceCount = 0;
+    const captureBrain = {
+      async decide(_goal: import('../../src/contract/goal.js').Goal, _ctx: import('../../src/contract/brain.js').BrainContext) {
+        if (_goal.type === 'splitter') {
+          return { value: { kind: 'split' as const, children: [childA, childB] }, usage: ZERO_USAGE };
+        }
+        throw new Error(`unexpected decide for type ${_goal.type}`);
+      },
+      async produce(_goal: import('../../src/contract/goal.js').Goal) {
+        produceCount++;
+        return { value: textArtifact(`output-${_goal.id}`), usage: { promptTokens: 10, completionTokens: 5, costUsd: 8 } };
+      },
+      async judge() { throw new Error('judge: not used'); },
+      async repair() { throw new Error('repair: not used'); },
+      async step() { throw new Error('step: not used'); },
+    };
+
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'splitter' }),
+      leafTypeDef({ name: 'leaf', judgeType: null }),
+    ]);
+    const engine = new Engine({
+      registry,
+      brain: captureBrain,
+      store,
+      memory: new NoopMemoryView(),
+    });
+
+    const goal = makeGoal({
+      id: 'root',
+      type: 'splitter',
+      title: 'concurrent ceiling test',
+      budget: { attempts: 5, tokens: 100_000, toolCalls: 50, wallClockMs: 60_000 },
+      spendCeilingUsd: 10,
+    });
+
+    await engine.run(goal);
+
+    // ceiling-reached must be emitted exactly once per tree (not per child)
+    const ceilingEvents = await store.list({ type: 'ceiling-reached' });
+    expect(ceilingEvents).toHaveLength(1);
+
+    // Post-trip produce events bounded by concurrent-branch count (2).
+    // At most 2 produce calls may complete (one per in-flight branch).
+    expect(produceCount).toBeLessThanOrEqual(2);
+  }, 10_000);
 });

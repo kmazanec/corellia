@@ -45,21 +45,6 @@ export interface Script {
 /** Mutable state tracking how many times each key has been consumed. */
 type Counters = Map<string, number>;
 
-/** Unwrap a script entry that may be a plain value or a WithUsage wrapper. */
-function unwrap<T>(entry: T | WithUsage<T>): { value: T; usage: Usage } {
-  if (entry !== null && typeof entry === 'object' && 'value' in (entry as object) && 'usage' in (entry as object)) {
-    const w = entry as WithUsage<T>;
-    return { value: w.value, usage: w.usage ?? ZERO_USAGE };
-  }
-  if (entry !== null && typeof entry === 'object' && 'value' in (entry as object)) {
-    const w = entry as WithUsage<T>;
-    if ('value' in w) {
-      return { value: w.value, usage: w.usage ?? ZERO_USAGE };
-    }
-  }
-  return { value: entry as T, usage: ZERO_USAGE };
-}
-
 function isWithUsage<T>(entry: T | WithUsage<T>): entry is WithUsage<T> {
   return (
     entry !== null &&
