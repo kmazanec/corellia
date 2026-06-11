@@ -1499,6 +1499,92 @@ export class Engine {
       }
 
       if (stepOutput.kind === 'artifact') {
+        // ── TWO-PHASE EMIT (ADR-023) ──────────────────────────────────────────
+        // When the goal-type declares outputSchema, this artifact-kind output is
+        // the exploration-complete signal — not the final artifact yet. Append
+        // the emit instruction context message, make ONE more brain.step call
+        // with ctx.outputSchema set (budget-gated, debited, evented like any
+        // step), and use THAT call's artifact-kind text as the final artifact.
+        // If the emit call returns tool-calls, treat as a failed step into the
+        // existing control loop (return kind:'failed').
+        const typeDef = this.registry.get(goal.type);
+        if (typeDef.outputSchema !== undefined) {
+          // Exploration complete: append the emit instruction message.
+          transcript.push({
+            role: 'context',
+            content: 'Emit the final artifact now: respond with ONLY the JSON object matching the required schema.',
+          });
+
+          // Budget gate for the emit call.
+          if (remainingToolCalls <= 0) {
+            return { kind: 'exhausted', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
+          }
+
+          // Update the rolling budget context message.
+          const lastMsgBeforeEmit = transcript[transcript.length - 1];
+          // The emit instruction we just pushed is the last — add the rolling count after it.
+          transcript.push({ role: 'context', content: `${remainingToolCalls} tool calls remaining` });
+
+          // Make the emit call with outputSchema set.
+          const emitCtx: BrainContext = { ...ctx, outputSchema: typeDef.outputSchema };
+          let emitOutput: import('../contract/brain.js').StepOutput;
+          try {
+            emitOutput = await this.brain.step(goal, transcript, tools, emitCtx);
+          } catch (err) {
+            const error = err instanceof Error ? err.message : String(err);
+            return { kind: 'failed', error, budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
+          }
+
+          // Emit step event and debit usage for the emit call.
+          await this.store.append({
+            type: 'step',
+            at: t(),
+            goalId: goal.id,
+            index: stepIndex,
+            outputKind: emitOutput.kind,
+            usage: emitOutput.usage,
+          });
+          this.debitTreeState(treeState, emitOutput.usage);
+          totalTokensUsed += emitOutput.usage.promptTokens + emitOutput.usage.completionTokens;
+          stepIndex++;
+          // Ceiling check after emit call debit.
+          if (await this.checkCeiling(goal, treeState)) {
+            return { kind: 'ceiling', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
+          }
+
+          // Emit transport incidents if any.
+          if (emitOutput.incidents) {
+            for (const incident of emitOutput.incidents) {
+              await this.store.append({
+                type: incident.kind,
+                at: incident.at,
+                goalId: goal.id,
+                detail: incident.detail,
+              });
+            }
+          }
+
+          // If the emit call returned tool-calls instead of an artifact, treat
+          // as a failed step — fall into the existing control loop failure path.
+          if (emitOutput.kind !== 'artifact') {
+            return {
+              kind: 'failed',
+              error: 'emit call returned tool-calls instead of an artifact',
+              budget: { ...budget, toolCalls: remainingToolCalls },
+              transcript,
+            };
+          }
+
+          // Use the emit call's artifact as the final artifact.
+          return {
+            kind: 'artifact',
+            artifact: emitOutput.artifact,
+            budget: { ...budget, toolCalls: remainingToolCalls },
+            transcript,
+            tokensUsed: totalTokensUsed,
+          };
+        }
+
         return {
           kind: 'artifact',
           artifact: stepOutput.artifact,
