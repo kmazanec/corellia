@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { projectMemory, traceStats, renderTree, costSummary } from '../../src/eventlog/projections.js';
+import { projectMemory, traceStats, renderTree, costSummary, projectKnowledge } from '../../src/eventlog/projections.js';
 import type { FactoryEvent } from '../../src/contract/events.js';
 import type { MemoryPointer, Usage } from '../../src/contract/goal.js';
+import type { KnowledgeArtifact, RegionFacts, DiveFact } from '../../src/contract/knowledge.js';
 
 // ──────────────────────────────────────────────
 // Shared test helpers
@@ -557,5 +558,223 @@ describe('costSummary', () => {
     expect(result.byGoal['g1']?.costUsd).toBeCloseTo(0.004);
     expect(result.tree.costUsd).toBeCloseTo(0.004);
     expect(result.byGoal['g1']?.promptTokens).toBe(200);
+  });
+});
+
+// ──────────────────────────────────────────────
+// projectKnowledge
+// ──────────────────────────────────────────────
+
+/** Build a minimal KnowledgeArtifact for tests. */
+function makeArtifact(overrides: Partial<KnowledgeArtifact> = {}): KnowledgeArtifact {
+  return {
+    repoRoot: '/repo/alpha',
+    category: 'architecture',
+    generatedAtSha: 'abc123',
+    confidence: 'high',
+    status: 'provisional',
+    pointers: [],
+    summary: 'Overview of architecture',
+    ...overrides,
+  };
+}
+
+/** Build a minimal RegionFacts for tests. */
+function makeRegionFacts(overrides: Partial<RegionFacts> = {}): RegionFacts {
+  return {
+    repoRoot: '/repo/alpha',
+    region: 'src/core',
+    generatedAtSha: 'abc123',
+    facts: [],
+    ...overrides,
+  };
+}
+
+/** Wrap a KnowledgeArtifact as a knowledge-written FactoryEvent. */
+function knowledgeWritten(artifact: KnowledgeArtifact, goalId = 'g1'): FactoryEvent {
+  return { type: 'knowledge-written', at: Date.now(), goalId, artifact };
+}
+
+/** Wrap a RegionFacts as a knowledge-facts-written FactoryEvent. */
+function factsWritten(facts: RegionFacts, goalId = 'g1'): FactoryEvent {
+  return { type: 'knowledge-facts-written', at: Date.now(), goalId, facts };
+}
+
+describe('projectKnowledge', () => {
+  it('returns empty maps when no knowledge events are present', () => {
+    const view = projectKnowledge([baseGoal()]);
+    expect(view.artifacts.size).toBe(0);
+    expect(view.diveFacts.size).toBe(0);
+  });
+
+  it('records an artifact as fresh after a knowledge-written event', () => {
+    const artifact = makeArtifact();
+    const view = projectKnowledge([knowledgeWritten(artifact)]);
+    const key = `${artifact.repoRoot}::${artifact.category}`;
+    const entry = view.artifacts.get(key);
+    expect(entry).toBeDefined();
+    expect(entry?.artifact.category).toBe('architecture');
+    expect(entry?.freshness).toBe('fresh');
+  });
+
+  it('latest knowledge-written replaces earlier artifact for the same repo × category', () => {
+    const first = makeArtifact({ generatedAtSha: 'sha-first', summary: 'first' });
+    const second = makeArtifact({ generatedAtSha: 'sha-second', summary: 'second' });
+    const view = projectKnowledge([knowledgeWritten(first), knowledgeWritten(second)]);
+    const key = `${first.repoRoot}::${first.category}`;
+    expect(view.artifacts.get(key)?.artifact.generatedAtSha).toBe('sha-second');
+    expect(view.artifacts.size).toBe(1);
+  });
+
+  it('keeps artifacts for different categories under distinct keys', () => {
+    const arch = makeArtifact({ category: 'architecture' });
+    const stack = makeArtifact({ category: 'stack' });
+    const view = projectKnowledge([knowledgeWritten(arch), knowledgeWritten(stack)]);
+    expect(view.artifacts.size).toBe(2);
+  });
+
+  it('knowledge-checked with stale-validated updates freshness to stale-validated', () => {
+    const artifact = makeArtifact();
+    const events: FactoryEvent[] = [
+      knowledgeWritten(artifact),
+      {
+        type: 'knowledge-checked',
+        at: Date.now(),
+        goalId: 'g1',
+        repoRoot: artifact.repoRoot,
+        category: artifact.category,
+        sha: 'head-sha',
+        outcome: 'stale-validated',
+      },
+    ];
+    const view = projectKnowledge(events);
+    const key = `${artifact.repoRoot}::${artifact.category}`;
+    expect(view.artifacts.get(key)?.freshness).toBe('stale-validated');
+  });
+
+  it('knowledge-checked with invalid marks the artifact invalid', () => {
+    const artifact = makeArtifact();
+    const events: FactoryEvent[] = [
+      knowledgeWritten(artifact),
+      {
+        type: 'knowledge-checked',
+        at: Date.now(),
+        goalId: 'g1',
+        repoRoot: artifact.repoRoot,
+        category: artifact.category,
+        sha: 'head-sha',
+        outcome: 'invalid',
+      },
+    ];
+    const view = projectKnowledge(events);
+    const key = `${artifact.repoRoot}::${artifact.category}`;
+    expect(view.artifacts.get(key)?.freshness).toBe('invalid');
+  });
+
+  it('a subsequent knowledge-written after invalid restores freshness to fresh', () => {
+    const artifact = makeArtifact();
+    const refreshed = makeArtifact({ generatedAtSha: 'new-sha' });
+    const events: FactoryEvent[] = [
+      knowledgeWritten(artifact),
+      {
+        type: 'knowledge-checked',
+        at: Date.now(),
+        goalId: 'g1',
+        repoRoot: artifact.repoRoot,
+        category: artifact.category,
+        sha: 'head-sha',
+        outcome: 'invalid',
+      },
+      knowledgeWritten(refreshed),
+    ];
+    const view = projectKnowledge(events);
+    const key = `${artifact.repoRoot}::${artifact.category}`;
+    expect(view.artifacts.get(key)?.freshness).toBe('fresh');
+    expect(view.artifacts.get(key)?.artifact.generatedAtSha).toBe('new-sha');
+  });
+
+  it('knowledge-checked before any artifact for that key is a no-op', () => {
+    const events: FactoryEvent[] = [
+      {
+        type: 'knowledge-checked',
+        at: Date.now(),
+        goalId: 'g1',
+        repoRoot: '/repo/alpha',
+        category: 'architecture',
+        sha: 'some-sha',
+        outcome: 'invalid',
+      },
+    ];
+    const view = projectKnowledge(events);
+    expect(view.artifacts.size).toBe(0);
+  });
+
+  it('point-in-time replay reconstructs exactly by slicing the log', () => {
+    const artifact = makeArtifact();
+    const refreshed = makeArtifact({ generatedAtSha: 'new-sha' });
+    const invalidCheck: FactoryEvent = {
+      type: 'knowledge-checked',
+      at: Date.now(),
+      goalId: 'g1',
+      repoRoot: artifact.repoRoot,
+      category: artifact.category,
+      sha: 'head-sha',
+      outcome: 'invalid',
+    };
+    const allEvents: FactoryEvent[] = [
+      knowledgeWritten(artifact),
+      invalidCheck,
+      knowledgeWritten(refreshed),
+    ];
+    // At index 1 (just after initial write): fresh
+    const atWrite = projectKnowledge(allEvents.slice(0, 1));
+    const key = `${artifact.repoRoot}::${artifact.category}`;
+    expect(atWrite.artifacts.get(key)?.freshness).toBe('fresh');
+
+    // At index 2 (after the check): invalid
+    const atCheck = projectKnowledge(allEvents.slice(0, 2));
+    expect(atCheck.artifacts.get(key)?.freshness).toBe('invalid');
+
+    // At index 3 (after refresh): fresh again
+    const atRefresh = projectKnowledge(allEvents.slice(0, 3));
+    expect(atRefresh.artifacts.get(key)?.freshness).toBe('fresh');
+    expect(atRefresh.artifacts.get(key)?.artifact.generatedAtSha).toBe('new-sha');
+  });
+
+  it('dive facts round-trip with file:line anchors and SHA intact', () => {
+    const fact: DiveFact = {
+      claim: 'All requests pass through middleware',
+      anchors: [{ path: 'src/middleware.ts', line: 42 }],
+      sha: 'abc123',
+      confidence: 'high',
+    };
+    const regionFacts = makeRegionFacts({ facts: [fact] });
+    const view = projectKnowledge([factsWritten(regionFacts)]);
+    const key = `${regionFacts.repoRoot}::${regionFacts.region}`;
+    const stored = view.diveFacts.get(key);
+    expect(stored).toBeDefined();
+    expect(stored?.generatedAtSha).toBe('abc123');
+    expect(stored?.facts[0]?.claim).toBe('All requests pass through middleware');
+    expect(stored?.facts[0]?.anchors[0]?.path).toBe('src/middleware.ts');
+    expect(stored?.facts[0]?.anchors[0]?.line).toBe(42);
+    expect(stored?.facts[0]?.sha).toBe('abc123');
+  });
+
+  it('latest knowledge-facts-written replaces earlier facts for the same repo × region', () => {
+    const first = makeRegionFacts({ generatedAtSha: 'sha-v1' });
+    const second = makeRegionFacts({ generatedAtSha: 'sha-v2' });
+    const view = projectKnowledge([factsWritten(first), factsWritten(second)]);
+    const key = `${first.repoRoot}::${first.region}`;
+    expect(view.diveFacts.get(key)?.generatedAtSha).toBe('sha-v2');
+    expect(view.diveFacts.size).toBe(1);
+  });
+
+  it('artifacts for different repos are kept independently', () => {
+    const alpha = makeArtifact({ repoRoot: '/repo/alpha' });
+    const beta = makeArtifact({ repoRoot: '/repo/beta' });
+    const view = projectKnowledge([knowledgeWritten(alpha), knowledgeWritten(beta)]);
+    expect(view.artifacts.size).toBe(2);
+    expect(view.artifacts.get('/repo/alpha::architecture')?.artifact.repoRoot).toBe('/repo/alpha');
+    expect(view.artifacts.get('/repo/beta::architecture')?.artifact.repoRoot).toBe('/repo/beta');
   });
 });

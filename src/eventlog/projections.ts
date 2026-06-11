@@ -7,6 +7,7 @@
 import type { FactoryEvent } from '../contract/events.js';
 import type { MemoryPointer, Usage } from '../contract/goal.js';
 import type { MemoryView } from '../contract/memory.js';
+import type { KnowledgeArtifact, KnowledgeCategory, RegionFacts } from '../contract/knowledge.js';
 
 // ──────────────────────────────────────────────
 // projectMemory
@@ -310,6 +311,112 @@ export function costSummary(events: FactoryEvent[]): CostSummary {
   }
 
   return { byGoal, tree };
+}
+
+// ──────────────────────────────────────────────
+// projectKnowledge
+// ──────────────────────────────────────────────
+
+/** Freshness state layered on top of an artifact by knowledge-checked events. */
+export type ArtifactFreshness = 'fresh' | 'stale-validated' | 'invalid';
+
+/** The projection's view of one artifact: the artifact itself plus its current freshness. */
+export interface ArtifactEntry {
+  artifact: KnowledgeArtifact;
+  freshness: ArtifactFreshness;
+}
+
+/** The full knowledge state projected from the event log. */
+export interface KnowledgeView {
+  /**
+   * Latest artifact per repo × category key (`${repoRoot}::${category}`).
+   * A subsequent knowledge-written for the same key replaces the previous one
+   * and resets freshness to 'fresh'.
+   */
+  artifacts: Map<string, ArtifactEntry>;
+  /**
+   * Latest dive facts per repo × region key (`${repoRoot}::${region}`).
+   * A subsequent knowledge-facts-written for the same key replaces the previous one.
+   */
+  diveFacts: Map<string, RegionFacts>;
+}
+
+/**
+ * Fold knowledge-written, knowledge-facts-written, and knowledge-checked events
+ * into a KnowledgeView.
+ *
+ * Latest-wins per key: a new knowledge-written for the same repo × category
+ * replaces the previous artifact and resets freshness to 'fresh'. A
+ * knowledge-checked event updates the freshness of the artifact at that key
+ * without replacing the artifact. A knowledge-facts-written replaces the
+ * previous RegionFacts for the same repo × region.
+ *
+ * All other event members are visited but do not contribute. Exhaustive switch
+ * ensures the union is covered as new members are added.
+ */
+export function projectKnowledge(events: FactoryEvent[]): KnowledgeView {
+  const artifacts = new Map<string, ArtifactEntry>();
+  const diveFacts = new Map<string, RegionFacts>();
+
+  for (const e of events) {
+    switch (e.type) {
+      case 'knowledge-written': {
+        const key = `${e.artifact.repoRoot}::${e.artifact.category}`;
+        artifacts.set(key, { artifact: { ...e.artifact }, freshness: 'fresh' });
+        break;
+      }
+
+      case 'knowledge-facts-written': {
+        const key = `${e.facts.repoRoot}::${e.facts.region}`;
+        diveFacts.set(key, { ...e.facts, facts: e.facts.facts.map((f) => ({ ...f, anchors: f.anchors.map((a) => ({ ...a })) })) });
+        break;
+      }
+
+      case 'knowledge-checked': {
+        const key = `${e.repoRoot}::${e.category}`;
+        const entry = artifacts.get(key);
+        if (entry) {
+          artifacts.set(key, { ...entry, freshness: e.outcome });
+        }
+        // If there is no artifact yet for this key, the check is a no-op: there
+        // is nothing to update freshness on.
+        break;
+      }
+
+      case 'goal-received':
+      case 'gate-checked':
+      case 'decided':
+      case 'child-spawned':
+      case 'deterministic-checked':
+      case 'judge-verdict':
+      case 'repair-applied':
+      case 'tier-escalated':
+      case 'blocked':
+      case 'memory-written':
+      case 'memory-reinforced':
+      case 'emitted':
+      case 'budget-exhausted':
+      case 'risk-classified':
+      case 'gate-decision':
+      case 'parked':
+      case 'resumed':
+      case 'pattern-consulted':
+      case 'pattern-recorded':
+      case 'tool-call':
+      case 'step':
+      case 'script-ran':
+      case 'worktree-created':
+      case 'worktree-collected':
+      case 'worktree-preserved':
+      case 'produced':
+      case 'ceiling-reached':
+      case 'transport-retry':
+      case 'malformation-reprompt':
+        break;
+    }
+  }
+
+  return { artifacts, diveFacts };
 }
 
 // ──────────────────────────────────────────────
