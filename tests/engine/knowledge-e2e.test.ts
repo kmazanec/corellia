@@ -576,13 +576,13 @@ describe('knowledge schemas structural pin (ADR-023)', () => {
   });
 
   it('a valid KnowledgeArtifact passes structural check against the schema', () => {
-    const ka: KnowledgeArtifact = {
+    const ka = {
       repoRoot: '/repo',
       category: 'architecture',
       generatedAtSha: 'abc123',
       confidence: 'medium',
       status: 'provisional',
-      pointers: [{ path: 'src/index.ts', note: 'entry point' }],
+      pointers: [{ path: 'src/index.ts', line: null, note: 'entry point' }],
       summary: 'Architecture summary',
     };
     const errors = structuralCheck(KNOWLEDGE_ARTIFACT_SCHEMA, ka);

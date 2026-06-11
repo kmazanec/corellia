@@ -24,6 +24,10 @@ import type { Artifact } from '../../src/contract/report.js';
 import type { CheckContext } from '../../src/contract/goal-type.js';
 import type { KnowledgeArtifact, RegionFacts } from '../../src/contract/knowledge.js';
 import type { ScriptResult } from '../../src/contract/tool.js';
+import {
+  KNOWLEDGE_ARTIFACT_SCHEMA,
+  REGION_FACTS_SCHEMA,
+} from '../../src/library/knowledge-schemas.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -921,6 +925,114 @@ describe('diveAnchorCheck — binary file anchor', () => {
     // Should not throw; result is determined by whether utf8 line-count >= anchor line
     const r = await diveAnchorCheck().run(baseGoal, textArt(JSON.stringify(rf)), ctx);
     // The file exists and has a valid utf8 interpretation with lines, so it should pass
+    expect(r.ok).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Strict-mode schema structural validator
+// ---------------------------------------------------------------------------
+
+/**
+ * Walk a JSON-Schema object tree and assert that every `object` node satisfies
+ * the OpenAI strict-mode invariant: required ⊇ keys(properties).
+ * Returns the list of violation paths found.
+ */
+function findStrictViolations(
+  schema: unknown,
+  path = '#',
+): string[] {
+  if (typeof schema !== 'object' || schema === null) return [];
+  const s = schema as Record<string, unknown>;
+  const violations: string[] = [];
+
+  if (s['type'] === 'object' && typeof s['properties'] === 'object' && s['properties'] !== null) {
+    const propKeys = Object.keys(s['properties'] as object);
+    const required = Array.isArray(s['required']) ? (s['required'] as string[]) : [];
+    const missing = propKeys.filter((k) => !required.includes(k));
+    if (missing.length > 0) {
+      violations.push(
+        `${path}: properties [${missing.join(', ')}] are not in required[] — strict mode demands required ⊇ keys(properties)`,
+      );
+    }
+  }
+
+  for (const [key, child] of Object.entries(s)) {
+    if (key === 'properties' && typeof child === 'object' && child !== null) {
+      for (const [propName, propSchema] of Object.entries(child as object)) {
+        violations.push(...findStrictViolations(propSchema, `${path}.properties.${propName}`));
+      }
+    } else if (key === 'items') {
+      violations.push(...findStrictViolations(child, `${path}.items`));
+    }
+  }
+
+  return violations;
+}
+
+describe('strict-mode schema compliance (required ⊇ keys(properties))', () => {
+  it('KNOWLEDGE_ARTIFACT_SCHEMA satisfies strict-mode: every object node has required ⊇ properties', () => {
+    const violations = findStrictViolations(KNOWLEDGE_ARTIFACT_SCHEMA);
+    expect(violations).toEqual([]);
+  });
+
+  it('REGION_FACTS_SCHEMA satisfies strict-mode: every object node has required ⊇ properties', () => {
+    const violations = findStrictViolations(REGION_FACTS_SCHEMA);
+    expect(violations).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pointer null-line tolerance: null line → omitted in checks
+// ---------------------------------------------------------------------------
+
+describe('knowledge artifact pointer with null line is tolerated by checks', () => {
+  it('stackCheck passes when a pointer carries line: null (strict-schema null maps to absent)', async () => {
+    const repoRoot = makeTmp();
+    writeFileSync(join(repoRoot, 'package.json'), JSON.stringify({ dependencies: {} }));
+
+    const artifact = knowledgeArtifact({
+      category: 'stack',
+      repoRoot,
+      pointers: [
+        // Simulate what the strict-mode schema emits: line is null (absent case)
+        { path: 'package.json', line: null as unknown as number, note: 'deps manifest' },
+      ],
+    });
+    const r = await stackCheck().run(baseGoal, textArt(JSON.stringify(artifact)), { sandboxRoot: repoRoot });
+    expect(r.ok).toBe(true);
+  });
+
+  it('stackCheck passes when a pointer carries an explicit integer line', async () => {
+    const repoRoot = makeTmp();
+    writeFileSync(join(repoRoot, 'package.json'), JSON.stringify({ dependencies: {} }));
+
+    const artifact = knowledgeArtifact({
+      category: 'stack',
+      repoRoot,
+      pointers: [
+        { path: 'package.json', line: 1, note: 'deps manifest' },
+      ],
+    });
+    const r = await stackCheck().run(baseGoal, textArt(JSON.stringify(artifact)), { sandboxRoot: repoRoot });
+    expect(r.ok).toBe(true);
+  });
+
+  it('toKnowledgeArtifact narrowing converts null line to absent (pointer has no line property)', async () => {
+    const repoRoot = makeTmp();
+    writeFileSync(join(repoRoot, 'pkg.json'), '{}');
+
+    const raw = {
+      repoRoot,
+      category: 'conventions' as const,
+      generatedAtSha: 'sha1',
+      confidence: 'high' as const,
+      status: 'provisional' as const,
+      pointers: [{ path: 'pkg.json', line: null, note: 'an exemplar' }],
+      summary: 'test',
+    };
+    const art = textArt(JSON.stringify(raw));
+    const r = await conventionsCheck().run(baseGoal, art, { sandboxRoot: repoRoot });
     expect(r.ok).toBe(true);
   });
 });

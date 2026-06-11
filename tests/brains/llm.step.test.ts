@@ -913,6 +913,51 @@ describe('step response_format: json_schema when ctx.outputSchema present', () =
   });
 });
 
+describe('step malformation re-prompt preserves response_format when ctx.outputSchema is set', () => {
+  it('re-prompt request body carries response_format.json_schema when ctx.outputSchema was set on the initial call', async () => {
+    const malformedBody = {
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'c1',
+                type: 'function',
+                function: { name: 'read_file', arguments: 'NOT VALID JSON {{{' },
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const schema: Record<string, unknown> = {
+      type: 'object',
+      properties: { result: { type: 'string' } },
+      required: ['result'],
+      additionalProperties: false,
+    };
+
+    const { fetch, calls } = stubFetch(
+      { status: 200, body: malformedBody },
+      { status: 200, body: contentResponse('{"result":"recovered"}') },
+    );
+    const brain = new LlmBrain({ baseUrl: BASE, apiKey: KEY, modelByTier, fetchImpl: fetch });
+    const ctxWithSchema: BrainContext = { tier: 'sonnet', memories: [], outputSchema: schema };
+
+    await brain.step(baseGoal, [{ role: 'context', content: 'sys' }], tools, ctxWithSchema);
+
+    expect(calls).toHaveLength(2);
+    const repromptBody = JSON.parse(calls[1]!.options.body as string);
+    expect(repromptBody.response_format).toBeDefined();
+    expect(repromptBody.response_format.type).toBe('json_schema');
+    expect(repromptBody.response_format.json_schema.strict).toBe(true);
+    expect(repromptBody.response_format.json_schema.schema).toEqual(schema);
+  });
+});
+
 describe('step network-rejection retry leg succeeds after two rejections (T3)', () => {
   it('succeeds when fetchImpl rejects twice then resolves, records 2 transport-retry incidents and invokes sleepFn twice', async () => {
     const delays: number[] = [];

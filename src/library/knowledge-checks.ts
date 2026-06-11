@@ -82,6 +82,8 @@ function parseArtifactJson(artifact: Artifact | null): { ok: true; value: unknow
 /**
  * Narrow an unknown value to KnowledgeArtifact by checking the required
  * structural fields. Returns null when the shape does not match.
+ * Sanitizes pointer `line: null` → omitted (undefined) so strict-mode schemas
+ * that emit null for the absent-line case are handled correctly at runtime.
  */
 function toKnowledgeArtifact(value: unknown): KnowledgeArtifact | null {
   if (typeof value !== 'object' || value === null) return null;
@@ -97,7 +99,17 @@ function toKnowledgeArtifact(value: unknown): KnowledgeArtifact | null {
   ) {
     return null;
   }
-  return value as KnowledgeArtifact;
+  const sanitized = {
+    ...v,
+    pointers: (v['pointers'] as Array<Record<string, unknown>>).map((p) => {
+      if (p['line'] === null) {
+        const { line: _dropped, ...rest } = p;
+        return rest;
+      }
+      return p;
+    }),
+  };
+  return sanitized as unknown as KnowledgeArtifact;
 }
 
 /**

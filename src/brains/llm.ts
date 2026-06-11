@@ -799,7 +799,7 @@ export class LlmBrain implements Brain {
         },
       ];
 
-      const repromptBody = buildStepRequest(correctedTranscript, tools, model);
+      const repromptBody = buildStepRequest(correctedTranscript, tools, model, ctx.outputSchema);
       const repromptResponse = await fetchFn(`${this.config.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {

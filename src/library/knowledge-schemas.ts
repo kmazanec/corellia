@@ -51,10 +51,10 @@ export const KNOWLEDGE_ARTIFACT_SCHEMA: Record<string, unknown> = {
         type: 'object',
         properties: {
           path: { type: 'string' },
-          line: { type: 'integer' },
+          line: { type: ['integer', 'null'] },
           note: { type: 'string' },
         },
-        required: ['path', 'note'],
+        required: ['path', 'line', 'note'],
         additionalProperties: false,
       },
     },
