@@ -258,7 +258,7 @@ describe('convergence — scripted full-stack composed path', () => {
 // against a real git fixture repo with a `test` script (mirroring the convergence
 // pattern above).
 
-describe('FIX 7 — script-ran attribution: SPLIT tree attributes run to CHILD leaf', () => {
+describe('script-ran attribution: SPLIT tree attributes run to CHILD leaf', () => {
   it('script-ran event goalId equals child leaf id, not root id', async () => {
     const repo = makeFixtureRepo();
     const store = new MemoryEventStore();

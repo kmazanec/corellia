@@ -482,7 +482,7 @@ describe('failed-loop attempt escalates carrying transcript tail', () => {
 
 // ── T1: transcript tail reaches next attempt ────────────────────────────────────
 
-describe('T1: transcript tail reaches next attempt', () => {
+describe('transcript tail reaches next attempt', () => {
   it('priorAttempt seen by brain on next attempt contains step-loop transcript evidence', async () => {
     const store = new MemoryEventStore();
 
@@ -571,7 +571,7 @@ describe('T1: transcript tail reaches next attempt', () => {
 
 // ── T3: toolCalls budget 1, step returning 2 calls → exactly 1 brokered ──────────
 
-describe('T3: per-call budget gate', () => {
+describe('per-call budget gate', () => {
   it('budget=1, step returns 2 calls: exactly 1 brokered, exhaustion surfaced, no hang', async () => {
     const store = new MemoryEventStore();
 
@@ -626,7 +626,7 @@ describe('T3: per-call budget gate', () => {
 
 // ── T4: toolCalls budget 0 at loop entry → immediate exhaustion ────────────────
 
-describe('T4: zero toolCalls budget at loop entry', () => {
+describe('zero toolCalls budget at loop entry', () => {
   it('budget toolCalls=0: exhaustion before any brain.step call', async () => {
     const store = new MemoryEventStore();
 
@@ -674,7 +674,7 @@ describe('T4: zero toolCalls budget at loop entry', () => {
 
 // ── T5: step event carries usage when StepOutput had usage ──────────────────────
 
-describe('T5: step event carries usage', () => {
+describe('step event carries usage', () => {
   it('step event includes the usage field reported by the StepOutput', async () => {
     const store = new MemoryEventStore();
 
@@ -743,7 +743,7 @@ describe('T5: step event carries usage', () => {
 // after the ceiling trips, and (3) debit step token usage against the tokens
 // budget dimension so a tight tokens budget exhausts on step usage.
 
-describe('T6: tool-loop ceiling', () => {
+describe('tool-loop ceiling', () => {
   it('step loop halts with ceiling-reached when costUsd crosses ceiling; no further brain calls', async () => {
     const store = new MemoryEventStore();
 
@@ -888,7 +888,7 @@ describe('T6: tool-loop ceiling', () => {
 // the REAL ToolDef parameter schemas — in particular, run_script must have a
 // 'script' property in its parameters, not the empty synthesized fallback.
 
-describe('T-SCHEMA: real tool schemas reach the brain via assembly broker', () => {
+describe('real tool schemas reach the brain via assembly broker', () => {
   it('brain.step receives run_script parameters.properties.script when assembly broker is active', async () => {
     const store = new MemoryEventStore();
 
@@ -976,7 +976,7 @@ describe('T-SCHEMA: real tool schemas reach the brain via assembly broker', () =
 // After a run, the remaining tokens budget equals initial minus the SUM of all
 // step event token usage — proving debit equals reported, not just behavioral.
 
-describe('T7: debit equality reads the budget', () => {
+describe('debit equality reads the budget', () => {
   it('remaining tokens after step loop equals initial minus sum of step event usage', async () => {
     const store = new MemoryEventStore();
 

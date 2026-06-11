@@ -117,7 +117,7 @@ const tools: ToolDef[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Chunk 1: Request shaping
+// Request shaping
 // ---------------------------------------------------------------------------
 
 describe('step request shaping', () => {
@@ -244,7 +244,7 @@ describe('step request shaping', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Chunk 1b: Prefix stability (AC-6)
+// Prefix stability (AC-6)
 // ---------------------------------------------------------------------------
 
 describe('step prefix stability', () => {
@@ -297,7 +297,7 @@ describe('step prefix stability', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Chunk 2: Response translation fidelity
+// Response translation fidelity
 // ---------------------------------------------------------------------------
 
 describe('step translation', () => {
@@ -387,7 +387,7 @@ describe('step translation', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Chunk 3: Transport retries
+// Transport retries
 // ---------------------------------------------------------------------------
 
 describe('step transport retries', () => {
@@ -472,7 +472,7 @@ describe('step transport retries', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Chunk 3b: Retries exhausted
+// Retries exhausted
 // ---------------------------------------------------------------------------
 
 describe('step transport retries exhausted', () => {
@@ -505,7 +505,7 @@ describe('step transport retries exhausted', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Chunk 4: Malformation re-prompt
+// Malformation re-prompt
 // ---------------------------------------------------------------------------
 
 describe('step malformation', () => {
@@ -663,7 +663,7 @@ describe('step malformation', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Chunk 5: Terminal errors
+// Terminal errors
 // ---------------------------------------------------------------------------
 
 describe('step terminal errors', () => {
@@ -721,7 +721,7 @@ describe('step terminal errors', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Chunk 6: Pinned edge-case behaviors (T1, T2a, T2b, T3)
+// Pinned edge-case behaviors (T1, T2a, T2b, T3)
 // ---------------------------------------------------------------------------
 
 describe('step re-prompt transport error is one-shot (T1)', () => {

@@ -991,7 +991,7 @@ describe('cyclic dependency detection', () => {
 import type { FactoryEvent } from '../../src/contract/events.js';
 import type { Usage } from '../../src/contract/goal.js';
 
-describe('F-35 usage accounting — events carry usage and debit equals reported tokens', () => {
+describe('usage accounting — events carry usage and debit equals reported tokens', () => {
   it('produced event carries the reported usage from the produce call', async () => {
     const store = new MemoryEventStore();
     const brain = new ScriptedBrain()
@@ -1072,9 +1072,9 @@ describe('F-35 usage accounting — events carry usage and debit equals reported
   });
 });
 
-// ── F-35 Chunks 4+5: Ceiling halt and no-cost fallback ────────────────────
+// ── Chunks 4+5: Ceiling halt and no-cost fallback ────────────────────
 
-describe('F-35 spend ceiling — tree halts when measured cost reaches ceiling', () => {
+describe('spend ceiling — tree halts when measured cost reaches ceiling', () => {
   it('tree halts when cumulative costUsd reaches the ceiling', async () => {
     const store = new MemoryEventStore();
     const brain = new ScriptedBrain()
@@ -1160,11 +1160,11 @@ describe('F-35 spend ceiling — tree halts when measured cost reaches ceiling',
   });
 });
 
-// ── F-35 Chunk 5: No-cost-reported conservative fallback ─────────────────
+// ── Chunk 5: No-cost-reported conservative fallback ─────────────────
 
 import { WORST_CASE_PRICE_PER_TOKEN } from '../../src/engine/engine.js';
 
-describe('F-35 no-cost fallback — tokens-only conservative bound', () => {
+describe('no-cost fallback — tokens-only conservative bound', () => {
   it('tree still halts via conservative bound when endpoint reports tokens but not cost', async () => {
     const store = new MemoryEventStore();
     // Usage without costUsd — fallback computes spentUsd = tokens * WORST_CASE_PRICE_PER_TOKEN
@@ -1211,13 +1211,13 @@ describe('F-35 no-cost fallback — tokens-only conservative bound', () => {
   });
 });
 
-// ── F-36 Split/concurrent ceiling ─────────────────────────────────────────────
+// ── Split/concurrent ceiling ─────────────────────────────────────────────
 // A splitter with 2+ independent children whose combined usage crosses the ceiling
 // must emit ceiling-reached exactly once (not once per child that sees it tripped).
 // Post-trip produce events are bounded by the concurrent-branch count (ADR-017
 // one-in-flight exception: at most one in-flight call per branch may complete).
 
-describe('F-36 split/concurrent ceiling — ceiling-reached fires once, post-trip bounded', () => {
+describe('split/concurrent ceiling — ceiling-reached fires once, post-trip bounded', () => {
   it('two independent children crossing the ceiling emit ceiling-reached exactly once', async () => {
     const store = new MemoryEventStore();
 

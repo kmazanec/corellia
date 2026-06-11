@@ -320,7 +320,7 @@ export class Engine {
     // ── RECEIVE ────────────────────────────────────────────────────────────
     await this.store.append({ type: 'goal-received', at: t(), goalId: goal.id, goal });
 
-    // FIX 3: early ceiling gate — if the tree is already over ceiling (prior
+    // early ceiling gate — if the tree is already over ceiling (prior
     // siblings consumed it), halt before making any brain call. Guard: only emit
     // 'ceiling-reached' once per tree; if it was already emitted by a sibling
     // the treeState is already over ceiling and this child returns the same report
@@ -745,7 +745,7 @@ export class Engine {
       const decideResult = await this.brain.decide(goal, lensCtx);
       const candidate = decideResult.value;
       this.debitTreeState(treeState, decideResult.usage);
-      // FIX 2: ceiling check after each terraced-scan decide debit.
+      // ceiling check after each terraced-scan decide debit.
       if (await this.checkCeiling(goal, treeState)) {
         return { ceiling: true };
       }
@@ -764,7 +764,7 @@ export class Engine {
       const judgeResult = await this.brain.judge(goal, splitArtifact, rubric, judgeCtx);
       const verdict = judgeResult.value;
       this.debitTreeState(treeState, judgeResult.usage);
-      // FIX 2: ceiling check after each terraced-scan judge debit.
+      // ceiling check after each terraced-scan judge debit.
       if (await this.checkCeiling(goal, treeState)) {
         return { ceiling: true };
       }
@@ -824,7 +824,7 @@ export class Engine {
     };
     const fallbackResult = await this.brain.decide(goal, fallbackCtx);
     this.debitTreeState(treeState, fallbackResult.usage);
-    // FIX 2: ceiling check after terraced-scan fallback debit.
+    // ceiling check after terraced-scan fallback debit.
     if (await this.checkCeiling(goal, treeState)) {
       return { ceiling: true };
     }
@@ -885,7 +885,7 @@ export class Engine {
       // classic produce path.
       let artifact: Artifact;
       let stepLoopTranscriptTail: StepTranscript | undefined;
-      // FIX 1: when the step loop produces an artifact, carry a compact
+      // when the step loop produces an artifact, carry a compact
       // serialization of the transcript tail so that any subsequent failure
       // (deterministic or judge) can thread it into the next attempt's
       // BrainContext.priorAttempt. Stored as a non-gating advisory finding so
@@ -896,7 +896,7 @@ export class Engine {
         const loopResult = await this.runStepLoop(goal, typeDef.grants, budget, ctx, priorAttempt, treeState);
 
         if (loopResult.kind === 'ceiling') {
-          // FIX 1a: step loop tripped the ceiling — surface ceiling-reached once
+          // step loop tripped the ceiling — surface ceiling-reached once
           // and return immediately (no further brain calls).
           return this.ceilingReport(goal, treeState);
         } else if (loopResult.kind === 'artifact') {
@@ -920,7 +920,7 @@ export class Engine {
               gating: false,
             };
           }
-          // FIX 1b: debit accumulated step token usage against the tokens budget
+          // debit accumulated step token usage against the tokens budget
           // dimension, exactly as the classic produce branch does. This gates tool
           // leaves on the tokens dimension so a tight tokens budget exhausts them.
           const stepTokens = loopResult.tokensUsed;
@@ -1115,7 +1115,7 @@ export class Engine {
             tierIndex = tierLadder.indexOf(tier);
             budget = resolution.budget;
             // Thread the transcript tail finding into the verdict so the next
-            // attempt's BrainContext carries step-loop evidence (FIX 1).
+            // attempt's BrainContext carries step-loop evidence.
             priorAttempt = {
               artifact,
               verdict: stepLoopTailFinding !== null
@@ -1249,7 +1249,7 @@ export class Engine {
             tierIndex = tierLadder.indexOf(tier);
             budget = resolution.budget;
             // Thread the transcript tail finding into the verdict so the next
-            // attempt's BrainContext carries step-loop evidence (FIX 1).
+            // attempt's BrainContext carries step-loop evidence.
             priorAttempt = {
               artifact,
               verdict: stepLoopTailFinding !== null
@@ -1296,7 +1296,7 @@ export class Engine {
     const transcript: StepTranscript = [];
     let remainingToolCalls = budget.toolCalls;
     let stepIndex = 0;
-    // Accumulate total token usage across all steps for tokens-budget debit (FIX 1b).
+    // Accumulate total token usage across all steps for tokens-budget debit.
     let totalTokensUsed = 0;
 
     // Inject initial context message for the brain
@@ -1338,10 +1338,10 @@ export class Engine {
         usage: stepOutput.usage,
       });
       this.debitTreeState(treeState, stepOutput.usage);
-      // FIX 1b: accumulate step token usage for tokens-budget debit.
+      // accumulate step token usage for tokens-budget debit.
       totalTokensUsed += stepOutput.usage.promptTokens + stepOutput.usage.completionTokens;
       stepIndex++;
-      // FIX 1a: ceiling check after each step debit — surface ceiling-reached
+      // ceiling check after each step debit — surface ceiling-reached
       // exactly once and short-circuit the loop.
       if (await this.checkCeiling(goal, treeState)) {
         return { kind: 'ceiling', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
@@ -1370,7 +1370,7 @@ export class Engine {
       }
 
       // Tool-calls path: append assistant turn to transcript, then route each call.
-      // FIX 2: check remaining BEFORE dispatching each call so that a step that
+      // check remaining BEFORE dispatching each call so that a step that
       // returns multiple calls cannot drive the counter negative when only one
       // slot remains. When the counter hits 0 with calls left, stop routing and
       // surface exhaustion exactly like the pre-step gate above.
@@ -1485,7 +1485,7 @@ export class Engine {
         tier,
         usage: judgeResult.usage,
       });
-      // FIX 2: ceiling check after recheckAfterRepair judge debit.
+      // ceiling check after recheckAfterRepair judge debit.
       if (await this.checkCeiling(goal, treeState)) {
         return { passed: false, budget, verdict: null, tier, ceiling: true };
       }
@@ -1590,7 +1590,7 @@ export class Engine {
         prescriptions,
         usage: repairResult.usage,
       });
-      // FIX 2: ceiling check after handleFailure repair debit.
+      // ceiling check after handleFailure repair debit.
       if (await this.checkCeiling(goal, treeState)) {
         const ceilingRpt = await this.ceilingReport(goal, treeState);
         return { kind: 'blocked', report: ceilingRpt };
