@@ -1,10 +1,61 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, rmSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { InMemoryEventStore } from '../../src/eventlog/memory-store.js';
 import { JsonlEventStore } from '../../src/eventlog/jsonl-store.js';
 import type { FactoryEvent } from '../../src/contract/events.js';
+import type { KnowledgeArtifact, RegionFacts, DiveFact } from '../../src/contract/knowledge.js';
+
+// ── Knowledge event fixtures ──────────────────
+
+const diveFact: DiveFact = {
+  claim: 'All requests route through middleware',
+  anchors: [{ path: 'src/middleware.ts', line: 42 }],
+  sha: 'deadbeef',
+  confidence: 'high',
+};
+
+const knowledgeArtifact: KnowledgeArtifact = {
+  repoRoot: '/repo/cats',
+  category: 'architecture',
+  generatedAtSha: 'deadbeef',
+  confidence: 'high',
+  status: 'provisional',
+  pointers: [{ path: 'src/index.ts', line: 1, note: 'Entry point' }],
+  summary: 'Monolith with a single entry point.',
+};
+
+const regionFacts: RegionFacts = {
+  repoRoot: '/repo/cats',
+  region: 'src/core',
+  generatedAtSha: 'deadbeef',
+  facts: [diveFact],
+};
+
+const knowledgeWritten: FactoryEvent = {
+  type: 'knowledge-written',
+  at: 7000,
+  goalId: 'g1',
+  artifact: knowledgeArtifact,
+};
+
+const knowledgeFactsWritten: FactoryEvent = {
+  type: 'knowledge-facts-written',
+  at: 7100,
+  goalId: 'g1',
+  facts: regionFacts,
+};
+
+const knowledgeChecked: FactoryEvent = {
+  type: 'knowledge-checked',
+  at: 7200,
+  goalId: 'g1',
+  repoRoot: '/repo/cats',
+  category: 'architecture',
+  sha: 'cafecafe',
+  outcome: 'stale-validated',
+};
 
 // script-ran fixture
 const scriptRan: FactoryEvent = {
@@ -148,6 +199,57 @@ describe('InMemoryEventStore', () => {
     expect(ev.durationMs).toBe(123);
     expect(ev.outputRef).toBe('g1:test:9000');
   });
+
+  it('round-trips a knowledge-written event with artifact fields intact', async () => {
+    const store = new InMemoryEventStore();
+    await store.append(knowledgeWritten);
+
+    const all = await store.list({ type: 'knowledge-written' });
+    expect(all).toHaveLength(1);
+
+    const ev = all[0] as Extract<FactoryEvent, { type: 'knowledge-written' }>;
+    expect(ev.artifact.repoRoot).toBe('/repo/cats');
+    expect(ev.artifact.category).toBe('architecture');
+    expect(ev.artifact.generatedAtSha).toBe('deadbeef');
+    expect(ev.artifact.confidence).toBe('high');
+    expect(ev.artifact.status).toBe('provisional');
+    expect(ev.artifact.pointers).toHaveLength(1);
+    expect(ev.artifact.pointers[0]?.path).toBe('src/index.ts');
+    expect(ev.artifact.pointers[0]?.line).toBe(1);
+    expect(ev.artifact.summary).toBe('Monolith with a single entry point.');
+  });
+
+  it('round-trips a knowledge-facts-written event with anchors and SHA intact', async () => {
+    const store = new InMemoryEventStore();
+    await store.append(knowledgeFactsWritten);
+
+    const all = await store.list({ type: 'knowledge-facts-written' });
+    expect(all).toHaveLength(1);
+
+    const ev = all[0] as Extract<FactoryEvent, { type: 'knowledge-facts-written' }>;
+    expect(ev.facts.repoRoot).toBe('/repo/cats');
+    expect(ev.facts.region).toBe('src/core');
+    expect(ev.facts.generatedAtSha).toBe('deadbeef');
+    expect(ev.facts.facts).toHaveLength(1);
+    expect(ev.facts.facts[0]?.claim).toBe('All requests route through middleware');
+    expect(ev.facts.facts[0]?.anchors[0]?.path).toBe('src/middleware.ts');
+    expect(ev.facts.facts[0]?.anchors[0]?.line).toBe(42);
+    expect(ev.facts.facts[0]?.sha).toBe('deadbeef');
+  });
+
+  it('round-trips a knowledge-checked event with all outcome fields intact', async () => {
+    const store = new InMemoryEventStore();
+    await store.append(knowledgeChecked);
+
+    const all = await store.list({ type: 'knowledge-checked' });
+    expect(all).toHaveLength(1);
+
+    const ev = all[0] as Extract<FactoryEvent, { type: 'knowledge-checked' }>;
+    expect(ev.repoRoot).toBe('/repo/cats');
+    expect(ev.category).toBe('architecture');
+    expect(ev.sha).toBe('cafecafe');
+    expect(ev.outcome).toBe('stale-validated');
+  });
 });
 
 // ──────────────────────────────────────────────
@@ -239,5 +341,105 @@ describe('JsonlEventStore', () => {
     expect(ev.exitStatus).toBe(0);
     expect(ev.durationMs).toBe(123);
     expect(ev.outputRef).toBe('g1:test:9000');
+  });
+
+  it('round-trips knowledge-written through JSONL with artifact fields intact', async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'corellia-test-'));
+    const store = new JsonlEventStore(join(tmpDir, 'events.jsonl'));
+    await store.append(knowledgeWritten);
+
+    const all = await store.list({ type: 'knowledge-written' });
+    expect(all).toHaveLength(1);
+
+    const ev = all[0] as Extract<FactoryEvent, { type: 'knowledge-written' }>;
+    expect(ev.artifact.repoRoot).toBe('/repo/cats');
+    expect(ev.artifact.category).toBe('architecture');
+    expect(ev.artifact.generatedAtSha).toBe('deadbeef');
+    expect(ev.artifact.pointers[0]?.path).toBe('src/index.ts');
+    expect(ev.artifact.pointers[0]?.line).toBe(1);
+    expect(ev.artifact.summary).toBe('Monolith with a single entry point.');
+  });
+
+  it('round-trips knowledge-facts-written through JSONL with anchors and SHA intact', async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'corellia-test-'));
+    const store = new JsonlEventStore(join(tmpDir, 'events.jsonl'));
+    await store.append(knowledgeFactsWritten);
+
+    const all = await store.list({ type: 'knowledge-facts-written' });
+    expect(all).toHaveLength(1);
+
+    const ev = all[0] as Extract<FactoryEvent, { type: 'knowledge-facts-written' }>;
+    expect(ev.facts.region).toBe('src/core');
+    expect(ev.facts.generatedAtSha).toBe('deadbeef');
+    expect(ev.facts.facts[0]?.anchors[0]?.path).toBe('src/middleware.ts');
+    expect(ev.facts.facts[0]?.anchors[0]?.line).toBe(42);
+    expect(ev.facts.facts[0]?.sha).toBe('deadbeef');
+  });
+
+  it('round-trips knowledge-checked through JSONL with outcome intact', async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'corellia-test-'));
+    const store = new JsonlEventStore(join(tmpDir, 'events.jsonl'));
+    await store.append(knowledgeChecked);
+
+    const all = await store.list({ type: 'knowledge-checked' });
+    expect(all).toHaveLength(1);
+
+    const ev = all[0] as Extract<FactoryEvent, { type: 'knowledge-checked' }>;
+    expect(ev.repoRoot).toBe('/repo/cats');
+    expect(ev.category).toBe('architecture');
+    expect(ev.sha).toBe('cafecafe');
+    expect(ev.outcome).toBe('stale-validated');
+  });
+});
+
+// ──────────────────────────────────────────────
+// PgEventStore (skipped without DATABASE_URL)
+// ──────────────────────────────────────────────
+
+describe.skipIf(!process.env['DATABASE_URL'])('PgEventStore — knowledge events', () => {
+  let PgEventStore: typeof import('../../src/substrate/pg-event-store.js').PgEventStore;
+  let store: InstanceType<typeof PgEventStore>;
+
+  beforeAll(async () => {
+    const mod = await import('../../src/substrate/pg-event-store.js');
+    PgEventStore = mod.PgEventStore;
+    store = new PgEventStore(process.env['DATABASE_URL']!);
+    await store.ensureSchema();
+    // Clean out any leftover rows from a prior run so assertions stay exact.
+    // @ts-expect-error — accessing private pool for test isolation
+    await store['#pool'].query(`DELETE FROM corellia_events WHERE goal_id = 'g1'`);
+  });
+
+  afterAll(async () => {
+    await store.close();
+  });
+
+  it('round-trips knowledge-written through pg with artifact fields intact', async () => {
+    await store.append(knowledgeWritten);
+
+    const all = await store.list({ type: 'knowledge-written', goalId: 'g1' });
+    const ev = all.at(-1) as Extract<FactoryEvent, { type: 'knowledge-written' }>;
+    expect(ev.artifact.repoRoot).toBe('/repo/cats');
+    expect(ev.artifact.category).toBe('architecture');
+    expect(ev.artifact.generatedAtSha).toBe('deadbeef');
+    expect(ev.artifact.pointers[0]?.path).toBe('src/index.ts');
+  });
+
+  it('round-trips knowledge-facts-written through pg with anchors intact', async () => {
+    await store.append(knowledgeFactsWritten);
+
+    const all = await store.list({ type: 'knowledge-facts-written', goalId: 'g1' });
+    const ev = all.at(-1) as Extract<FactoryEvent, { type: 'knowledge-facts-written' }>;
+    expect(ev.facts.region).toBe('src/core');
+    expect(ev.facts.facts[0]?.anchors[0]?.line).toBe(42);
+  });
+
+  it('round-trips knowledge-checked through pg with outcome intact', async () => {
+    await store.append(knowledgeChecked);
+
+    const all = await store.list({ type: 'knowledge-checked', goalId: 'g1' });
+    const ev = all.at(-1) as Extract<FactoryEvent, { type: 'knowledge-checked' }>;
+    expect(ev.outcome).toBe('stale-validated');
+    expect(ev.sha).toBe('cafecafe');
   });
 });
