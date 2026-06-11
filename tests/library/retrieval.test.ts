@@ -171,6 +171,45 @@ describe('find_symbol', () => {
     const paths = result.data.map((r) => r.path);
     expect(paths.some((p) => p.includes('node_modules'))).toBe(false);
   });
+
+  it('caps results at 50 and appends the capped notice when matches exceed 50', async () => {
+    // Create 60 files each containing one definition of `overloadedFn`.
+    await mkdir(join(repoRoot, 'src'), { recursive: true });
+    for (let i = 0; i < 60; i++) {
+      await writeFile(
+        join(repoRoot, 'src', `file${String(i).padStart(3, '0')}.ts`),
+        `export function overloadedFn() { return ${i}; }\n`,
+      );
+    }
+
+    const result = await findSymbol('overloadedFn', makeDeps());
+    expect(result.data).toHaveLength(50);
+    expect(result.text).toContain('(results capped at 50)');
+  });
+
+  it('finds export default function declaration', async () => {
+    await mkdir(join(repoRoot, 'src'), { recursive: true });
+    await writeFile(
+      join(repoRoot, 'src', 'handler.ts'),
+      'export default function handleRequest(req: Request) { return req; }\n',
+    );
+
+    const result = await findSymbol('handleRequest', makeDeps());
+    expect(result.data.length).toBeGreaterThan(0);
+    expect(result.text).toContain('src/handler.ts:1:');
+  });
+
+  it('finds arrow-const definition', async () => {
+    await mkdir(join(repoRoot, 'src'), { recursive: true });
+    await writeFile(
+      join(repoRoot, 'src', 'utils.ts'),
+      'export const formatDate = (d: Date): string => d.toISOString();\n',
+    );
+
+    const result = await findSymbol('formatDate', makeDeps());
+    expect(result.data.length).toBeGreaterThan(0);
+    expect(result.text).toContain('src/utils.ts:1:');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -238,6 +277,17 @@ describe('find_exemplar', () => {
     const result = await findExemplar('', deps);
     expect(result.text).toContain('non-empty');
     expect(result.data).toHaveLength(0);
+  });
+
+  it('does not throw on invalid regex — falls back to escaped-literal search', async () => {
+    await mkdir(join(repoRoot, 'src'), { recursive: true });
+    await writeFile(join(repoRoot, 'src', 'example.ts'), 'export const x = 1;\n');
+    const deps = makeDeps({ knowledge: () => [] });
+    // '[unclosed' is an invalid regex; the function must not throw and must return a result.
+    await expect(findExemplar('[unclosed', deps)).resolves.toBeDefined();
+    const result = await findExemplar('[unclosed', deps);
+    expect(typeof result.text).toBe('string');
+    expect(result.data).toBeDefined();
   });
 });
 

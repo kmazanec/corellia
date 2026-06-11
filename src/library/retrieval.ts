@@ -18,7 +18,7 @@
  */
 
 import { readFile, stat } from 'node:fs/promises';
-import { join, normalize, relative } from 'node:path';
+import { join, posix, relative } from 'node:path';
 import type { KnowledgeArtifact } from '../contract/knowledge.js';
 import type { Goal } from '../contract/goal.js';
 
@@ -549,14 +549,14 @@ export async function impact(files: string[], deps: RetrievalDeps): Promise<Impa
   }
 
   // BFS/DFS reverse reachability from the changed files.
-  const inputSet = new Set(files.map((f) => normalize(f)));
+  const inputSet = new Set(files.map((f) => posix.normalize(f)));
   const visited = new Set<string>(inputSet);
   const queue = [...inputSet];
 
   while (queue.length > 0) {
     const current = queue.shift()!;
     for (const importer of reverseEdges[current] ?? []) {
-      const norm = normalize(importer);
+      const norm = posix.normalize(importer);
       if (!visited.has(norm)) {
         visited.add(norm);
         queue.push(norm);
