@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { projectMemory, traceStats, renderTree, costSummary, projectKnowledge } from '../../src/eventlog/projections.js';
+import { writeKnowledge, writeRegionFacts, recordKnowledgeCheck } from '../../src/library/knowledge.js';
+import { InMemoryEventStore } from '../../src/eventlog/memory-store.js';
 import type { FactoryEvent } from '../../src/contract/events.js';
 import type { MemoryPointer, Usage } from '../../src/contract/goal.js';
 import type { KnowledgeArtifact, RegionFacts, DiveFact } from '../../src/contract/knowledge.js';
@@ -776,5 +778,94 @@ describe('projectKnowledge', () => {
     expect(view.artifacts.size).toBe(2);
     expect(view.artifacts.get('/repo/alpha::architecture')?.artifact.repoRoot).toBe('/repo/alpha');
     expect(view.artifacts.get('/repo/beta::architecture')?.artifact.repoRoot).toBe('/repo/beta');
+  });
+});
+
+// ──────────────────────────────────────────────
+// write helpers
+// ──────────────────────────────────────────────
+
+describe('writeKnowledge', () => {
+  it('appends a knowledge-written event that the projection sees as fresh', async () => {
+    const store = new InMemoryEventStore();
+    const artifact = makeArtifact();
+    await writeKnowledge(store, 'g1', artifact);
+
+    const events = await store.list();
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('knowledge-written');
+
+    const view = projectKnowledge(events);
+    const key = `${artifact.repoRoot}::${artifact.category}`;
+    expect(view.artifacts.get(key)?.freshness).toBe('fresh');
+    expect(view.artifacts.get(key)?.artifact.generatedAtSha).toBe(artifact.generatedAtSha);
+  });
+
+  it('uses the supplied goalId on the appended event', async () => {
+    const store = new InMemoryEventStore();
+    await writeKnowledge(store, 'goal-xyz', makeArtifact());
+
+    const events = await store.list();
+    expect(events[0]?.goalId).toBe('goal-xyz');
+  });
+});
+
+describe('writeRegionFacts', () => {
+  it('appends a knowledge-facts-written event with anchors intact', async () => {
+    const store = new InMemoryEventStore();
+    const facts = makeRegionFacts({
+      facts: [{ claim: 'No global state', anchors: [{ path: 'src/state.ts', line: 10 }], sha: 'abc', confidence: 'medium' }],
+    });
+    await writeRegionFacts(store, 'g1', facts);
+
+    const events = await store.list();
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('knowledge-facts-written');
+
+    const view = projectKnowledge(events);
+    const key = `${facts.repoRoot}::${facts.region}`;
+    const stored = view.diveFacts.get(key);
+    expect(stored?.facts[0]?.claim).toBe('No global state');
+    expect(stored?.facts[0]?.anchors[0]?.line).toBe(10);
+  });
+});
+
+describe('recordKnowledgeCheck', () => {
+  it('appends a knowledge-checked event that updates artifact freshness', async () => {
+    const store = new InMemoryEventStore();
+    const artifact = makeArtifact();
+    await writeKnowledge(store, 'g1', artifact);
+    await recordKnowledgeCheck(store, 'g1', {
+      repoRoot: artifact.repoRoot,
+      category: artifact.category,
+      sha: 'new-head',
+      outcome: 'invalid',
+    });
+
+    const events = await store.list();
+    expect(events).toHaveLength(2);
+    expect(events[1]?.type).toBe('knowledge-checked');
+
+    const view = projectKnowledge(events);
+    const key = `${artifact.repoRoot}::${artifact.category}`;
+    expect(view.artifacts.get(key)?.freshness).toBe('invalid');
+  });
+
+  it('all three outcomes are accepted by the store without type errors', async () => {
+    const store = new InMemoryEventStore();
+    const artifact = makeArtifact();
+    await writeKnowledge(store, 'g1', artifact);
+
+    for (const outcome of ['fresh', 'stale-validated', 'invalid'] as const) {
+      await recordKnowledgeCheck(store, 'g1', {
+        repoRoot: artifact.repoRoot,
+        category: artifact.category,
+        sha: 'sha',
+        outcome,
+      });
+    }
+
+    const events = await store.list({ type: 'knowledge-checked' });
+    expect(events).toHaveLength(3);
   });
 });
