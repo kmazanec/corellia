@@ -1,0 +1,364 @@
+/**
+ * Tests for the four core file-system ToolImpl objects: read_file, write_file,
+ * list_dir, and search — all bound to a sandbox root created per-test in
+ * os.tmpdir(). Covers sandbox safety (traversal, absolute paths), scope
+ * enforcement (write_file), and correct results for in-scope operations.
+ */
+
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises';
+import { join, sep } from 'node:path';
+import { tmpdir } from 'node:os';
+import { createFileTools } from '../../src/engine/tools.js';
+import type { Goal } from '../../src/contract/goal.js';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeGoal(overrides: Partial<Goal> = {}): Goal {
+  return {
+    id: 'g1',
+    type: 'implement',
+    parentId: null,
+    title: 'test goal',
+    spec: {},
+    intent: 'production',
+    scope: ['src/'],
+    budget: { attempts: 3, tokens: 1000, toolCalls: 10, wallClockMs: 60000 },
+    memories: [],
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+let sandboxRoot: string;
+
+beforeEach(async () => {
+  sandboxRoot = await mkdtemp(join(tmpdir(), 'corellia-tools-test-'));
+  // Seed a directory structure.
+  await mkdir(join(sandboxRoot, 'src'), { recursive: true });
+  await mkdir(join(sandboxRoot, 'tests'), { recursive: true });
+  await writeFile(join(sandboxRoot, 'src', 'index.ts'), 'export const answer = 42;\n');
+  await writeFile(join(sandboxRoot, 'src', 'util.ts'), 'export function add(a: number, b: number) { return a + b; }\n');
+  await writeFile(join(sandboxRoot, 'tests', 'index.test.ts'), 'import { answer } from "../src/index.js";\n');
+});
+
+afterEach(async () => {
+  await rm(sandboxRoot, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// read_file
+// ---------------------------------------------------------------------------
+
+describe('read_file', () => {
+  it('returns the content of an in-sandbox file', async () => {
+    const { readFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    const result = await readFile.execute(goal, { path: 'src/index.ts' });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain('answer = 42');
+  });
+
+  it('returns ok:false for a missing file', async () => {
+    const { readFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    const result = await readFile.execute(goal, { path: 'src/missing.ts' });
+    expect(result.ok).toBe(false);
+  });
+
+  it('refuses an absolute path', async () => {
+    const { readFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    const result = await readFile.execute(goal, { path: '/etc/passwd' });
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('outside the sandbox root');
+  });
+
+  it('refuses a ../ traversal that escapes the root', async () => {
+    const { readFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    const result = await readFile.execute(goal, { path: '../../../etc/passwd' });
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('outside the sandbox root');
+  });
+
+  it('refuses a path that normalizes to escaping the root', async () => {
+    const { readFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    const result = await readFile.execute(goal, { path: 'src/../../etc/passwd' });
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('outside the sandbox root');
+  });
+
+  it('refuses an empty path', async () => {
+    const { readFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    const result = await readFile.execute(goal, { path: '' });
+    expect(result.ok).toBe(false);
+  });
+
+  it('refuses a non-string path', async () => {
+    const { readFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    const result = await readFile.execute(goal, { path: 42 });
+    expect(result.ok).toBe(false);
+  });
+
+  it('reads a deeply nested file', async () => {
+    const { readFile } = createFileTools(sandboxRoot);
+    await mkdir(join(sandboxRoot, 'src', 'deep', 'nested'), { recursive: true });
+    await writeFile(join(sandboxRoot, 'src', 'deep', 'nested', 'file.ts'), 'hello');
+    const goal = makeGoal();
+    const result = await readFile.execute(goal, { path: 'src/deep/nested/file.ts' });
+    expect(result.ok).toBe(true);
+    expect(result.output).toBe('hello');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// list_dir
+// ---------------------------------------------------------------------------
+
+describe('list_dir', () => {
+  it('returns entries for an in-sandbox directory', async () => {
+    const { listDir } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    const result = await listDir.execute(goal, { path: 'src' });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain('index.ts');
+    expect(result.output).toContain('util.ts');
+  });
+
+  it('marks directories with a trailing slash', async () => {
+    const { listDir } = createFileTools(sandboxRoot);
+    await mkdir(join(sandboxRoot, 'src', 'subdir'), { recursive: true });
+    const goal = makeGoal();
+    const result = await listDir.execute(goal, { path: 'src' });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain('subdir/');
+  });
+
+  it('lists the root sandbox itself with path "."', async () => {
+    const { listDir } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    const result = await listDir.execute(goal, { path: '.' });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain('src/');
+    expect(result.output).toContain('tests/');
+  });
+
+  it('refuses an absolute path', async () => {
+    const { listDir } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    const result = await listDir.execute(goal, { path: '/tmp' });
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('outside the sandbox root');
+  });
+
+  it('refuses a ../ traversal', async () => {
+    const { listDir } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    const result = await listDir.execute(goal, { path: '../' });
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('outside the sandbox root');
+  });
+
+  it('returns ok:false for a missing directory', async () => {
+    const { listDir } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    const result = await listDir.execute(goal, { path: 'nonexistent' });
+    expect(result.ok).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// write_file
+// ---------------------------------------------------------------------------
+
+describe('write_file', () => {
+  it('writes an in-scope file', async () => {
+    const { writeFile, readFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal({ scope: ['src/'] });
+    const writeResult = await writeFile.execute(goal, { path: 'src/new.ts', content: 'export {}' });
+    expect(writeResult.ok).toBe(true);
+    // Verify the file was actually written.
+    const readResult = await readFile.execute(goal, { path: 'src/new.ts' });
+    expect(readResult.ok).toBe(true);
+    expect(readResult.output).toBe('export {}');
+  });
+
+  it('refuses a path outside the goal scope', async () => {
+    const { writeFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal({ scope: ['src/'] });
+    const result = await writeFile.execute(goal, { path: 'tests/bad.ts', content: 'oops' });
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("outside the goal's declared scope");
+    // Verify no file was created.
+    const { readFile } = createFileTools(sandboxRoot);
+    const check = await readFile.execute(goal, { path: 'tests/bad.ts' });
+    expect(check.ok).toBe(false);
+  });
+
+  it('refuses an absolute path', async () => {
+    const { writeFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal({ scope: ['src/'] });
+    const result = await writeFile.execute(goal, { path: '/etc/evil', content: 'evil' });
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('outside the sandbox root');
+  });
+
+  it('refuses ../ traversal', async () => {
+    const { writeFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal({ scope: ['src/'] });
+    const result = await writeFile.execute(goal, { path: '../escaped.ts', content: 'evil' });
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('outside the sandbox root');
+  });
+
+  it('refuses a path that normalizes to escaping root', async () => {
+    const { writeFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal({ scope: ['src/'] });
+    const result = await writeFile.execute(goal, { path: 'src/../../escape.ts', content: 'evil' });
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('outside the sandbox root');
+  });
+
+  it('allows write when scope is empty (no scope restriction)', async () => {
+    const { writeFile, readFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal({ scope: [] });
+    const result = await writeFile.execute(goal, { path: 'src/any.ts', content: 'hello' });
+    expect(result.ok).toBe(true);
+    const check = await readFile.execute(goal, { path: 'src/any.ts' });
+    expect(check.ok).toBe(true);
+  });
+
+  it('creates parent directories if needed', async () => {
+    const { writeFile, readFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal({ scope: ['src/'] });
+    const result = await writeFile.execute(goal, { path: 'src/new/dir/file.ts', content: 'deep' });
+    expect(result.ok).toBe(true);
+    const check = await readFile.execute(goal, { path: 'src/new/dir/file.ts' });
+    expect(check.ok).toBe(true);
+    expect(check.output).toBe('deep');
+  });
+
+  // Parametrized scope-normalization cases mirroring filesWithinScope suite.
+  const scopeTable: Array<{ label: string; path: string; scope: string[]; expectOk: boolean }> = [
+    { label: 'in scope: exact prefix match', path: 'src/index.ts', scope: ['src/'], expectOk: true },
+    { label: 'in scope: nested path under prefix', path: 'src/deep/file.ts', scope: ['src/'], expectOk: true },
+    { label: 'out of scope: different top-level dir', path: 'lib/file.ts', scope: ['src/'], expectOk: false },
+    { label: 'out of scope: looks like prefix but not a directory boundary', path: 'srcX/file.ts', scope: ['src/'], expectOk: false },
+    { label: 'in scope: multiple scope entries, matches second', path: 'tests/foo.ts', scope: ['src/', 'tests/'], expectOk: true },
+    { label: 'out of scope: none of the scopes match', path: 'vendor/x.ts', scope: ['src/', 'tests/'], expectOk: false },
+  ];
+
+  for (const { label, path, scope, expectOk } of scopeTable) {
+    it(`scope normalization — ${label}`, async () => {
+      const { writeFile } = createFileTools(sandboxRoot);
+      const goal = makeGoal({ scope });
+      // Ensure directory exists for the write attempt.
+      const { dirname } = await import('node:path');
+      const { mkdir: mkdirFn } = await import('node:fs/promises');
+      await mkdirFn(join(sandboxRoot, dirname(path)), { recursive: true });
+      const result = await writeFile.execute(goal, { path, content: 'test' });
+      expect(result.ok).toBe(expectOk);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// search
+// ---------------------------------------------------------------------------
+
+describe('search', () => {
+  it('returns path:line-prefixed matches', async () => {
+    const { search } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    const result = await search.execute(goal, { pattern: 'answer' });
+    expect(result.ok).toBe(true);
+    // Should match src/index.ts line 1
+    expect(result.output).toMatch(/src.index\.ts:1:/);
+    expect(result.output).toContain('answer');
+  });
+
+  it('returns empty output for no matches', async () => {
+    const { search } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    const result = await search.execute(goal, { pattern: 'zzz_no_match_zzz' });
+    expect(result.ok).toBe(true);
+    expect(result.output).toBe('');
+  });
+
+  it('searches only within the specified sub-path', async () => {
+    const { search } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    // 'import' appears in tests/ but not in src/index.ts
+    const result = await search.execute(goal, { pattern: 'import', path: 'src' });
+    expect(result.ok).toBe(true);
+    // src/index.ts has no import; src/util.ts has no import either
+    expect(result.output).not.toContain('index.test.ts');
+  });
+
+  it('finds matches in multiple files', async () => {
+    const { search } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    // 'export' appears in both src/index.ts and src/util.ts
+    const result = await search.execute(goal, { pattern: 'export' });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain('src' + sep + 'index.ts');
+    expect(result.output).toContain('src' + sep + 'util.ts');
+  });
+
+  it('refuses an absolute search path', async () => {
+    const { search } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    const result = await search.execute(goal, { pattern: 'export', path: '/etc' });
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('outside the sandbox root');
+  });
+
+  it('refuses a ../ traversal in path', async () => {
+    const { search } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    const result = await search.execute(goal, { pattern: 'export', path: '../' });
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('outside the sandbox root');
+  });
+
+  it('returns ok:true with empty output for a non-existent search path', async () => {
+    const { search } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    const result = await search.execute(goal, { pattern: 'export', path: 'nonexistent' });
+    expect(result.ok).toBe(true);
+    expect(result.output).toBe('');
+  });
+
+  it('handles a regex pattern', async () => {
+    const { search } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    const result = await search.execute(goal, { pattern: 'answer\\s*=\\s*\\d+' });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain('answer');
+  });
+
+  it('never throws on binary-like or unreadable content', async () => {
+    const { search } = createFileTools(sandboxRoot);
+    // Write a file with null bytes (binary-like).
+    await writeFile(join(sandboxRoot, 'src', 'binary.bin'), Buffer.from([0x00, 0x01, 0x02]));
+    const goal = makeGoal();
+    // Should not throw; just skips or returns empty for that file.
+    await expect(search.execute(goal, { pattern: 'anything' })).resolves.toBeDefined();
+  });
+
+  it('returns ok:false for an empty pattern', async () => {
+    const { search } = createFileTools(sandboxRoot);
+    const goal = makeGoal();
+    const result = await search.execute(goal, { pattern: '' });
+    expect(result.ok).toBe(false);
+  });
+});
