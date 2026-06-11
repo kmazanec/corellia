@@ -7,9 +7,8 @@
  * and return results; grant and scope enforcement happen above them.
  */
 
-import { normalize, isAbsolute, join, relative } from 'node:path';
-import { readFile, readdir, stat } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { normalize, isAbsolute, join, relative, dirname } from 'node:path';
+import { readFile, readdir, stat, writeFile as fsWriteFile, mkdir } from 'node:fs/promises';
 import type { Goal } from '../contract/goal.js';
 import type { ToolImpl } from '../contract/tool.js';
 
@@ -21,8 +20,13 @@ import type { ToolImpl } from '../contract/tool.js';
  * Resolve a caller-supplied relative path against the sandbox root. Returns
  * null if the path is absolute, starts with `..` after normalization, or would
  * escape the root — any of which represents an unsafe traversal.
+ *
+ * Containment is lexical (normalize + relative-path prefix check). Symlink
+ * escape is accepted under ADR-016's operator-trusts-own-repos model: in v1 the
+ * operator controls the sandbox root and its contents, so realpath hardening
+ * would add complexity for no security gain at this trust boundary. (ADR-016)
  */
-function resolveSandboxPath(root: string, rawPath: string): string | null {
+export function resolveSandboxPath(root: string, rawPath: string): string | null {
   if (isAbsolute(rawPath)) return null;
   const normalized = normalize(rawPath);
   if (normalized.startsWith('..')) return null;
@@ -38,7 +42,7 @@ function resolveSandboxPath(root: string, rawPath: string): string | null {
  * declared scope prefixes, using the same normalize + boundary-suffix match
  * as the `filesWithinScope` deterministic check.
  */
-function isInScope(rawPath: string, scope: string[]): boolean {
+export function isInScope(rawPath: string, scope: string[]): boolean {
   if (scope.length === 0) return true; // No scope declared: allow all.
   const normalized = normalize(rawPath);
   return scope.some((prefix) => {
@@ -47,35 +51,6 @@ function isInScope(rawPath: string, scope: string[]): boolean {
     return normalized === ns || normalized.startsWith(boundary);
   });
 }
-
-// ---------------------------------------------------------------------------
-// read_file
-// ---------------------------------------------------------------------------
-
-export const readFileTool: ToolImpl = {
-  def: {
-    name: 'read_file',
-    description: 'Read the contents of a file inside the sandbox root. The path must be relative and must not escape the root.',
-    parameters: {
-      type: 'object',
-      properties: {
-        path: { type: 'string', description: 'Relative path to the file, e.g. src/index.ts' },
-      },
-      required: ['path'],
-    },
-  },
-
-  async execute(_goal: Goal, args: Record<string, unknown>): Promise<{ ok: boolean; output: string }> {
-    const rawPath = args['path'];
-    if (typeof rawPath !== 'string' || rawPath.length === 0) {
-      return { ok: false, output: 'read_file: path argument must be a non-empty string' };
-    }
-    // Sandbox root is injected via the closure created in createFileTools.
-    // This top-level export is the factory; the actual impl closes over root.
-    // (This signature is only used by the factory below; it is not exported directly for use without a root.)
-    return { ok: false, output: 'read_file: internal error — use createFileTools(root) to get a bound impl' };
-  },
-};
 
 // ---------------------------------------------------------------------------
 // Tool factories bound to a sandbox root
@@ -167,9 +142,7 @@ export function createFileTools(root: string): {
       }
 
       try {
-        const { writeFile: fsWriteFile, mkdir } = await import('node:fs/promises');
         // Ensure parent directory exists.
-        const { dirname } = await import('node:path');
         await mkdir(dirname(full), { recursive: true });
         await fsWriteFile(full, content, 'utf-8');
         return { ok: true, output: `wrote ${rawPath}` };
@@ -317,10 +290,3 @@ export function createFileTools(root: string): {
   };
 }
 
-/**
- * Whether the path exists in the filesystem (used by tests only — not exported
- * for production use since the broker always validates against the root).
- */
-export function pathExists(p: string): boolean {
-  return existsSync(p);
-}

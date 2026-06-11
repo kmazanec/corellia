@@ -13,6 +13,7 @@ import type { ToolCall, ToolImpl, ToolResult } from '../contract/tool.js';
 import { GRANT_TOOL_MAP } from '../contract/tool.js';
 import type { EventStore } from '../contract/events.js';
 import type { Registry } from '../contract/goal-type.js';
+import { resolveSandboxPath, isInScope } from './tools.js';
 
 /**
  * Options for constructing a Broker. The dispatch table is injectable so
@@ -75,13 +76,27 @@ export class Broker {
       return this.#refuse(goal, call, `not granted: ${needed}`);
     }
 
-    // 3. Look up the implementation.
+    // 3. For write_file: check sandbox containment and goal scope before
+    //    touching the event log. An out-of-scope write is logged as 'refused'
+    //    with a reason — not as 'ran' — so the audit trail is honest.
+    if (call.name === 'write_file') {
+      const rawPath = typeof call.args['path'] === 'string' ? call.args['path'] : '';
+      const full = rawPath ? resolveSandboxPath(this.#root, rawPath) : null;
+      if (full === null) {
+        return this.#refuse(goal, call, `write_file: path "${rawPath}" is outside the sandbox root`);
+      }
+      if (!isInScope(rawPath, goal.scope)) {
+        return this.#refuse(goal, call, `write_file: path "${rawPath}" is outside the goal's declared scope`);
+      }
+    }
+
+    // 4. Look up the implementation.
     const impl = this.#tools.get(call.name);
     if (impl === undefined) {
       return this.#refuse(goal, call, `tool "${call.name}" is not registered in this broker`);
     }
 
-    // 4. Append a 'ran' event and dispatch.
+    // 5. Append a 'ran' event and dispatch.
     await this.#store.append({
       type: 'tool-call',
       at: Date.now(),

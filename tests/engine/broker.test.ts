@@ -202,6 +202,26 @@ describe('grant refusal', () => {
     expect(result.ok).toBe(false);
     expect(result.callId).toBe(call.id);
   });
+
+  it('refuses write_file for "characterize" type (has fs.write_test_dirs, lacks fs.write)', async () => {
+    // 'characterize' deliberately holds only 'fs.write_test_dirs', not 'fs.write'.
+    // write_file requires 'fs.write' (GRANT_TOOL_MAP). This pins the v1 deferral:
+    // fs.write_test_dirs is a scoped grant recognized by the type library but not
+    // yet wired into GRANT_TOOL_MAP — so characterize goals cannot write files
+    // through the broker until that wiring is added.
+    const goal = makeGoal({ type: 'characterize', scope: ['tests/'] });
+    const call = makeCall({ name: 'write_file', args: { path: 'tests/foo.test.ts', content: 'x' } });
+    const result = await broker.execute(goal, call);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('fs.write');
+    // Must be logged as refused with a reason naming the missing grant.
+    const events = await store.list({ goalId: goal.id, type: 'tool-call' });
+    expect(events).toHaveLength(1);
+    if (events[0]?.type === 'tool-call') {
+      expect(events[0].outcome).toBe('refused');
+      expect(events[0].reason).toContain('fs.write');
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -218,16 +238,31 @@ describe('scope refusal (write_file)', () => {
     expect(result.output).toContain('scope');
   });
 
-  it('appends a "ran" event even when the tool itself returns ok:false', async () => {
-    // The broker records 'ran' for granted calls; the tool's own refusal is in output.
+  it('appends a "refused" event with a reason when the broker catches an out-of-scope write', async () => {
+    // The broker now performs the scope check before dispatching — outcome is 'refused', not 'ran'.
     const goal = makeGoal({ type: 'implement', scope: ['src/'] });
     const call = makeCall({ name: 'write_file', args: { path: 'tests/bad.ts', content: 'x' } });
     await broker.execute(goal, call);
     const events = await store.list({ goalId: goal.id, type: 'tool-call' });
     expect(events).toHaveLength(1);
-    // The broker dispatched to the impl (which refused scope internally) — outcome is 'ran'.
     if (events[0]?.type === 'tool-call') {
-      expect(events[0].outcome).toBe('ran');
+      expect(events[0].outcome).toBe('refused');
+      expect(events[0].reason).toContain('scope');
+    }
+  });
+
+  it('refuses write to a path that looks like prefix but violates directory boundary (srcX/file vs src/)', async () => {
+    // scope ['src/'] must refuse 'srcX/file' — the boundary check prevents prefix-only matches.
+    const goal = makeGoal({ type: 'implement', scope: ['src/'] });
+    const call = makeCall({ name: 'write_file', args: { path: 'srcX/file.ts', content: 'x' } });
+    const result = await broker.execute(goal, call);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('scope');
+    // Must be logged as refused, not ran.
+    const events = await store.list({ goalId: goal.id, type: 'tool-call' });
+    expect(events).toHaveLength(1);
+    if (events[0]?.type === 'tool-call') {
+      expect(events[0].outcome).toBe('refused');
     }
   });
 
