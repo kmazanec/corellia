@@ -1114,3 +1114,323 @@ describe('debit equality reads the budget', () => {
     expect(tokensExhausted).toBeDefined();
   }, 10_000);
 });
+
+// ── Two-phase structured emission (ADR-023) ────────────────────────────────────
+// Types with outputSchema: exploration-complete artifact triggers one extra emit
+// call. Types without outputSchema: byte-identical behavior.
+
+const SAMPLE_OUTPUT_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: { result: { type: 'string' } },
+  required: ['result'],
+};
+
+function outputSchemaType() {
+  return leafTypeDef({
+    name: 'implement',
+    grants: ['fs.read', 'fs.write'],
+    outputSchema: SAMPLE_OUTPUT_SCHEMA,
+  });
+}
+
+describe('two-phase emit: type with outputSchema', () => {
+  it('exactly one extra step call made after exploration-complete; emit ctx carries the schema', async () => {
+    const store = new MemoryEventStore();
+    const explorationArtifact = textArtifact('exploration done');
+    const finalJsonArtifact = textArtifact('{"result":"done"}');
+
+    const capturedCtxSchemas: (Record<string, unknown> | undefined)[] = [];
+    let stepCallCount = 0;
+
+    const stepsArr: StepOutput[] = [
+      { kind: 'tool-calls', calls: [toolCall('c1', 'read_file')], usage: ZERO_USAGE },
+      { kind: 'artifact', artifact: explorationArtifact, usage: ZERO_USAGE },
+      { kind: 'artifact', artifact: finalJsonArtifact, usage: ZERO_USAGE },
+    ];
+
+    const captureBrain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair() { throw new Error('not used'); },
+      async step(_goal, _transcript, _tools, ctx) {
+        capturedCtxSchemas.push(ctx.outputSchema);
+        const out = stepsArr[stepCallCount++];
+        if (!out) throw new Error('no more steps scripted');
+        return out;
+      },
+    };
+
+    const broker = new FakeBroker([{ callId: 'c1', ok: true, output: 'content' }]);
+    const registry = buildRegistry([outputSchemaType()]);
+    const engine = new Engine({
+      registry,
+      brain: captureBrain,
+      store,
+      memory: new NoopMemoryView(),
+      broker,
+    });
+
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'two-phase goal',
+      budget: { attempts: 3, tokens: 10_000, toolCalls: 10, wallClockMs: 60_000 },
+    });
+
+    const report = await engine.run(goal);
+
+    expect(report.blockers).toHaveLength(0);
+    expect(report.artifact).toEqual(finalJsonArtifact);
+
+    expect(stepCallCount).toBe(3);
+
+    expect(capturedCtxSchemas[0]).toBeUndefined();
+    expect(capturedCtxSchemas[1]).toBeUndefined();
+    expect(capturedCtxSchemas[2]).toEqual(SAMPLE_OUTPUT_SCHEMA);
+
+    const stepEvents = await store.list({ type: 'step' });
+    expect(stepEvents).toHaveLength(3);
+  }, 10_000);
+
+  it('emit call usage and step event appear in the log', async () => {
+    const store = new MemoryEventStore();
+    const explorationArtifact = textArtifact('exploring');
+    const emitArtifact = textArtifact('{"result":"emitted"}');
+    const emitUsage = { promptTokens: 42, completionTokens: 17, costUsd: 0.001 };
+
+    const stepsArr: StepOutput[] = [
+      { kind: 'artifact', artifact: explorationArtifact, usage: ZERO_USAGE },
+      { kind: 'artifact', artifact: emitArtifact, usage: emitUsage },
+    ];
+    let idx = 0;
+
+    const brain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair() { throw new Error('not used'); },
+      async step() {
+        const out = stepsArr[idx++];
+        if (!out) throw new Error('no more steps');
+        return out;
+      },
+    };
+
+    const registry = buildRegistry([outputSchemaType()]);
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      broker: new FakeBroker([]),
+    });
+
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'emit-usage goal',
+      budget: { attempts: 3, tokens: 10_000, toolCalls: 10, wallClockMs: 60_000 },
+    });
+
+    const report = await engine.run(goal);
+    expect(report.blockers).toHaveLength(0);
+    expect(report.artifact).toEqual(emitArtifact);
+
+    const stepEvents = await store.list({ type: 'step' });
+    expect(stepEvents).toHaveLength(2);
+
+    const emitStepEvent = stepEvents[1] as { usage?: import('../../src/contract/goal.js').Usage };
+    expect(emitStepEvent.usage?.promptTokens).toBe(42);
+    expect(emitStepEvent.usage?.completionTokens).toBe(17);
+    expect(emitStepEvent.usage?.costUsd).toBe(0.001);
+  }, 10_000);
+
+  it('emit call context tail carries the emit-now instruction message', async () => {
+    const store = new MemoryEventStore();
+    const explorationArtifact = textArtifact('exploring');
+    const emitArtifact = textArtifact('{}');
+
+    const capturedTranscripts: import('../../src/contract/brain.js').StepTranscript[] = [];
+    let idx = 0;
+    const stepsArr: StepOutput[] = [
+      { kind: 'artifact', artifact: explorationArtifact, usage: ZERO_USAGE },
+      { kind: 'artifact', artifact: emitArtifact, usage: ZERO_USAGE },
+    ];
+
+    const brain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair() { throw new Error('not used'); },
+      async step(_goal, transcript) {
+        capturedTranscripts.push([...transcript]);
+        const out = stepsArr[idx++];
+        if (!out) throw new Error('no more steps');
+        return out;
+      },
+    };
+
+    const registry = buildRegistry([outputSchemaType()]);
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      broker: new FakeBroker([]),
+    });
+
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'emit-instruction goal',
+      budget: { attempts: 3, tokens: 10_000, toolCalls: 10, wallClockMs: 60_000 },
+    });
+
+    await engine.run(goal);
+
+    const emitTranscript = capturedTranscripts[1];
+    expect(emitTranscript).toBeDefined();
+    const emitInstruction = emitTranscript!.find(
+      (m) => m.role === 'context' && 'content' in m && (m.content as string).includes('Emit the final artifact now'),
+    );
+    expect(emitInstruction).toBeDefined();
+  }, 10_000);
+
+  it('budget exhaustion before emit call surfaces as exhausted path', async () => {
+    const store = new MemoryEventStore();
+    const explorationArtifact = textArtifact('exploring');
+
+    let idx = 0;
+    // Step 1: return a tool-call (which routes and consumes 1 toolCall slot).
+    // Step 2: return the exploration-complete artifact. At this point remainingToolCalls=0.
+    // Step 3 (emit): must NOT be called — the budget gate fires first.
+    const stepsArr: StepOutput[] = [
+      { kind: 'tool-calls', calls: [toolCall('c1', 'read_file')], usage: ZERO_USAGE },
+      { kind: 'artifact', artifact: explorationArtifact, usage: ZERO_USAGE },
+    ];
+
+    const brain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair() { throw new Error('not used'); },
+      async step() {
+        const out = stepsArr[idx++];
+        if (!out) throw new Error('should not call step for emit when budget=0');
+        return out;
+      },
+    };
+
+    const registry = buildRegistry([outputSchemaType()]);
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      broker: new FakeBroker([{ callId: 'c1', ok: true, output: 'content' }]),
+    });
+
+    // toolCalls: 1 means only 1 routing slot. After routing c1 from step 1,
+    // remainingToolCalls drops to 0. When the exploration artifact fires (step 2),
+    // the emit gate finds 0 remaining and returns exhausted.
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'exhaustion-before-emit goal',
+      budget: {
+        attempts: 3,
+        tokens: 10_000,
+        toolCalls: 1,
+        wallClockMs: 60_000,
+      },
+    });
+
+    const report = await engine.run(goal);
+    expect(report.blockers.length).toBeGreaterThan(0);
+
+    const exhaustedEvents = await store.list({ type: 'budget-exhausted' });
+    expect(exhaustedEvents.length).toBeGreaterThan(0);
+    const tcExhausted = exhaustedEvents.find(
+      (e) => (e as { dimension: string }).dimension === 'toolCalls',
+    );
+    expect(tcExhausted).toBeDefined();
+  }, 10_000);
+
+  it('emit call returning tool-calls treated as failed step (falls into control loop)', async () => {
+    const store = new MemoryEventStore();
+    const explorationArtifact = textArtifact('exploring');
+
+    let idx = 0;
+    const stepsArr: StepOutput[] = [
+      { kind: 'artifact', artifact: explorationArtifact, usage: ZERO_USAGE },
+      { kind: 'tool-calls', calls: [toolCall('bad1', 'read_file')], usage: ZERO_USAGE },
+    ];
+
+    const brain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair() { throw new Error('not used'); },
+      async step() {
+        const out = stepsArr[idx++];
+        if (!out) throw new Error('no more steps');
+        return out;
+      },
+    };
+
+    const registry = buildRegistry([outputSchemaType()]);
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      broker: new FakeBroker([]),
+    });
+
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'emit-tool-calls goal',
+      budget: { attempts: 1, tokens: 10_000, toolCalls: 10, wallClockMs: 60_000 },
+    });
+
+    const report = await engine.run(goal);
+    expect(report.blockers.length).toBeGreaterThan(0);
+  }, 10_000);
+});
+
+describe('two-phase emit: type without outputSchema regression', () => {
+  it('first artifact-kind step ends the loop immediately (no extra step call)', async () => {
+    const store = new MemoryEventStore();
+    const finalArtifact = textArtifact('immediate artifact');
+
+    let stepCallCount = 0;
+    const brain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair() { throw new Error('not used'); },
+      async step() {
+        stepCallCount++;
+        if (stepCallCount > 1) throw new Error('step called more than once — regression');
+        return { kind: 'artifact', artifact: finalArtifact, usage: ZERO_USAGE };
+      },
+    };
+
+    const registry = buildRegistry([toolGrantedType()]);
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      broker: new FakeBroker([]),
+    });
+
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'no-schema regression',
+      budget: { attempts: 3, tokens: 10_000, toolCalls: 10, wallClockMs: 60_000 },
+    });
+
+    const report = await engine.run(goal);
+    expect(report.blockers).toHaveLength(0);
+    expect(report.artifact).toEqual(finalArtifact);
+    expect(stepCallCount).toBe(1);
+  }, 10_000);
+});

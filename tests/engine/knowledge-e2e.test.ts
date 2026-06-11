@@ -11,6 +11,8 @@
  *      inline write helper matching frozen signature.
  *      (Integration with full assembly machinery happens at assembly;
  *      this test uses a local inline helper to prove the event contract.)
+ *   4. map-repo and deep-dive-region declare outputSchema and the schemas
+ *      validate their own contract fixtures structurally (ADR-023 pin).
  *
  * No network. No real import scanner (synthetic scan fns). Tmp-dir fixture
  * repos with real files for the path-existence checks.
@@ -34,6 +36,8 @@ import { artifactPresent } from '../../src/library/checks.js';
 import type { KnowledgeArtifact, RegionFacts } from '../../src/contract/knowledge.js';
 import type { FactoryEvent, EventStore } from '../../src/contract/events.js';
 import type { Artifact } from '../../src/contract/report.js';
+import { KNOWLEDGE_ARTIFACT_SCHEMA, REGION_FACTS_SCHEMA } from '../../src/library/knowledge-schemas.js';
+import { starterTypes } from '../../src/library/starter-types.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -468,5 +472,181 @@ describe('deep-dive-region leaf — invalid anchors (deterministic gate blocks)'
 
     const judgeEvents = await store.list({ type: 'judge-verdict' });
     expect(judgeEvents).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Schema structural validation (ADR-023 pin)
+// Tiny structural checker: validates that a JSON object satisfies the required
+// fields and enum values declared by a JSON-Schema — no library dependency.
+// ---------------------------------------------------------------------------
+
+type JsonSchemaObject = {
+  type?: string;
+  properties?: Record<string, JsonSchemaObject>;
+  required?: string[];
+  enum?: unknown[];
+  items?: JsonSchemaObject;
+  additionalProperties?: boolean | JsonSchemaObject;
+};
+
+function structuralCheck(
+  schema: Record<string, unknown>,
+  value: unknown,
+  path = '$',
+): string[] {
+  const s = schema as JsonSchemaObject;
+  const errors: string[] = [];
+
+  if (s.type === 'object') {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      errors.push(`${path}: expected object`);
+      return errors;
+    }
+    const obj = value as Record<string, unknown>;
+    for (const req of s.required ?? []) {
+      if (!(req in obj)) {
+        errors.push(`${path}: missing required field "${req}"`);
+      }
+    }
+    if (s.properties) {
+      for (const [key, propSchema] of Object.entries(s.properties)) {
+        if (key in obj) {
+          errors.push(...structuralCheck(propSchema as Record<string, unknown>, obj[key], `${path}.${key}`));
+        }
+      }
+    }
+  } else if (s.type === 'array') {
+    if (!Array.isArray(value)) {
+      errors.push(`${path}: expected array`);
+      return errors;
+    }
+    if (s.items) {
+      for (let i = 0; i < value.length; i++) {
+        errors.push(...structuralCheck(s.items as Record<string, unknown>, value[i], `${path}[${i}]`));
+      }
+    }
+  } else if (s.type === 'string') {
+    if (typeof value !== 'string') {
+      errors.push(`${path}: expected string`);
+    } else if (s.enum && !s.enum.includes(value)) {
+      errors.push(`${path}: "${value}" not in enum ${JSON.stringify(s.enum)}`);
+    }
+  } else if (s.type === 'integer') {
+    if (typeof value !== 'number' || !Number.isInteger(value)) {
+      errors.push(`${path}: expected integer`);
+    }
+  }
+
+  return errors;
+}
+
+describe('knowledge schemas structural pin (ADR-023)', () => {
+  it('KNOWLEDGE_ARTIFACT_SCHEMA has required fields matching KnowledgeArtifact', () => {
+    const schema = KNOWLEDGE_ARTIFACT_SCHEMA as JsonSchemaObject;
+    expect(schema.type).toBe('object');
+    expect(schema.required).toContain('repoRoot');
+    expect(schema.required).toContain('category');
+    expect(schema.required).toContain('generatedAtSha');
+    expect(schema.required).toContain('confidence');
+    expect(schema.required).toContain('status');
+    expect(schema.required).toContain('pointers');
+    expect(schema.required).toContain('summary');
+  });
+
+  it('KNOWLEDGE_ARTIFACT_SCHEMA category enum matches KnowledgeCategory', () => {
+    const schema = KNOWLEDGE_ARTIFACT_SCHEMA as JsonSchemaObject;
+    const categoryEnum = schema.properties?.['category']?.enum;
+    expect(categoryEnum).toBeDefined();
+    expect(categoryEnum).toContain('architecture');
+    expect(categoryEnum).toContain('stack');
+    expect(categoryEnum).toContain('conventions');
+    expect(categoryEnum).toContain('test-scaffold');
+  });
+
+  it('KNOWLEDGE_ARTIFACT_SCHEMA confidence and status enums are correct', () => {
+    const schema = KNOWLEDGE_ARTIFACT_SCHEMA as JsonSchemaObject;
+    const confidenceEnum = schema.properties?.['confidence']?.enum;
+    const statusEnum = schema.properties?.['status']?.enum;
+    expect(confidenceEnum).toContain('low');
+    expect(confidenceEnum).toContain('medium');
+    expect(confidenceEnum).toContain('high');
+    expect(statusEnum).toContain('provisional');
+    expect(statusEnum).toContain('trusted');
+  });
+
+  it('a valid KnowledgeArtifact passes structural check against the schema', () => {
+    const ka: KnowledgeArtifact = {
+      repoRoot: '/repo',
+      category: 'architecture',
+      generatedAtSha: 'abc123',
+      confidence: 'medium',
+      status: 'provisional',
+      pointers: [{ path: 'src/index.ts', note: 'entry point' }],
+      summary: 'Architecture summary',
+    };
+    const errors = structuralCheck(KNOWLEDGE_ARTIFACT_SCHEMA, ka);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('a KnowledgeArtifact missing required fields fails structural check', () => {
+    const bad = {
+      repoRoot: '/repo',
+      category: 'architecture',
+    };
+    const errors = structuralCheck(KNOWLEDGE_ARTIFACT_SCHEMA, bad);
+    expect(errors.length).toBeGreaterThan(0);
+    const titles = errors.join(' ');
+    expect(titles).toMatch(/generatedAtSha|confidence|status|pointers|summary/);
+  });
+
+  it('REGION_FACTS_SCHEMA has required fields matching RegionFacts', () => {
+    const schema = REGION_FACTS_SCHEMA as JsonSchemaObject;
+    expect(schema.type).toBe('object');
+    expect(schema.required).toContain('repoRoot');
+    expect(schema.required).toContain('region');
+    expect(schema.required).toContain('generatedAtSha');
+    expect(schema.required).toContain('facts');
+  });
+
+  it('a valid RegionFacts passes structural check against REGION_FACTS_SCHEMA', () => {
+    const rf: RegionFacts = {
+      repoRoot: '/repo',
+      region: 'src/auth',
+      generatedAtSha: 'deadbeef',
+      facts: [
+        {
+          claim: 'auth exports middleware',
+          anchors: [{ path: 'src/auth.ts', line: 3 }],
+          sha: 'deadbeef',
+          confidence: 'high',
+        },
+      ],
+    };
+    const errors = structuralCheck(REGION_FACTS_SCHEMA, rf);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('a RegionFacts missing facts field fails structural check', () => {
+    const bad = { repoRoot: '/repo', region: 'src', generatedAtSha: 'abc' };
+    const errors = structuralCheck(REGION_FACTS_SCHEMA, bad);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.join(' ')).toContain('facts');
+  });
+
+  it('map-repo starter type declares outputSchema pointing to KNOWLEDGE_ARTIFACT_SCHEMA', () => {
+    const types = starterTypes();
+    const mapRepo = types.find((t) => t.name === 'map-repo');
+    expect(mapRepo).toBeDefined();
+    expect(mapRepo!.outputSchema).toBeDefined();
+    expect(mapRepo!.outputSchema).toBe(KNOWLEDGE_ARTIFACT_SCHEMA);
+  });
+
+  it('deep-dive-region starter type declares outputSchema pointing to REGION_FACTS_SCHEMA', () => {
+    const types = starterTypes();
+    const diveType = types.find((t) => t.name === 'deep-dive-region');
+    expect(diveType).toBeDefined();
+    expect(diveType!.outputSchema).toBeDefined();
+    expect(diveType!.outputSchema).toBe(REGION_FACTS_SCHEMA);
   });
 });

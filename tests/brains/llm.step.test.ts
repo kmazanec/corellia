@@ -867,6 +867,52 @@ describe('step response with both content and tool_calls drops prose (T2b)', () 
   });
 });
 
+// ---------------------------------------------------------------------------
+// response_format: json_schema (ADR-023)
+// ---------------------------------------------------------------------------
+
+describe('step response_format: json_schema when ctx.outputSchema present', () => {
+  it('request includes response_format.json_schema when ctx.outputSchema is set', async () => {
+    const { fetch, calls } = stubFetch({ status: 200, body: contentResponse('{"result":"done"}') });
+    const brain = new LlmBrain({ baseUrl: BASE, apiKey: KEY, modelByTier, fetchImpl: fetch });
+    const schema: Record<string, unknown> = {
+      type: 'object',
+      properties: { result: { type: 'string' } },
+      required: ['result'],
+    };
+    const ctxWithSchema: BrainContext = { tier: 'sonnet', memories: [], outputSchema: schema };
+    await brain.step(baseGoal, [{ role: 'context', content: 'sys' }], tools, ctxWithSchema);
+
+    const body = JSON.parse(calls[0]!.options.body as string);
+    expect(body.response_format).toBeDefined();
+    expect(body.response_format.type).toBe('json_schema');
+    expect(body.response_format.json_schema.name).toBe('artifact');
+    expect(body.response_format.json_schema.strict).toBe(true);
+    expect(body.response_format.json_schema.schema).toEqual(schema);
+  });
+
+  it('tools array is still present in request when ctx.outputSchema is set', async () => {
+    const { fetch, calls } = stubFetch({ status: 200, body: contentResponse('{}') });
+    const brain = new LlmBrain({ baseUrl: BASE, apiKey: KEY, modelByTier, fetchImpl: fetch });
+    const schema: Record<string, unknown> = { type: 'object', properties: {}, required: [] };
+    const ctxWithSchema: BrainContext = { tier: 'sonnet', memories: [], outputSchema: schema };
+    await brain.step(baseGoal, [{ role: 'context', content: 'sys' }], tools, ctxWithSchema);
+
+    const body = JSON.parse(calls[0]!.options.body as string);
+    expect(body.tools).toBeDefined();
+    expect(body.tools).toHaveLength(2);
+  });
+
+  it('request omits response_format when ctx.outputSchema is absent', async () => {
+    const { fetch, calls } = stubFetch({ status: 200, body: contentResponse('plain result') });
+    const brain = new LlmBrain({ baseUrl: BASE, apiKey: KEY, modelByTier, fetchImpl: fetch });
+    await brain.step(baseGoal, [{ role: 'context', content: 'sys' }], tools, ctx);
+
+    const body = JSON.parse(calls[0]!.options.body as string);
+    expect(body.response_format).toBeUndefined();
+  });
+});
+
 describe('step network-rejection retry leg succeeds after two rejections (T3)', () => {
   it('succeeds when fetchImpl rejects twice then resolves, records 2 transport-retry incidents and invokes sleepFn twice', async () => {
     const delays: number[] = [];
