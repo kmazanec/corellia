@@ -1,0 +1,309 @@
+/**
+ * Tree worktree lifecycle: open, diff-vs-scope, collect/preserve, and teardown.
+ *
+ * Each tree gets one git worktree on a fresh branch under the target repo's
+ * .claude/worktrees/<tree-id>/ (gitignored). The broker binds to that root;
+ * on collection the branch's commits are retained and the worktree is removed.
+ * On failure/block, the worktree is preserved for inspection and the
+ * preservation recorded as an event. (ADR-016)
+ */
+
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
+import { join, normalize, isAbsolute } from 'node:path';
+import type { EventStore } from '../contract/events.js';
+import { isInScope } from './tools.js';
+
+// ---------------------------------------------------------------------------
+// Sanitize a goal id to a branch/directory-safe string.
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive a filesystem- and git-ref-safe tree id from a root goal id.
+ * Replaces path separators (/) and whitespace with '-'; strips characters
+ * that are not safe in branch names.
+ */
+export function sanitizeTreeId(goalId: string): string {
+  return goalId
+    .replace(/[\s/\\]+/g, '-')
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .replace(/^[-_]+|[-_]+$/g, '') // trim leading/trailing separators
+    .substring(0, 80); // cap length for filesystem safety
+}
+
+// ---------------------------------------------------------------------------
+// Worktree descriptor
+// ---------------------------------------------------------------------------
+
+export interface TreeWorktree {
+  /** The sanitized tree id (used for branch name and directory). */
+  treeId: string;
+  /** The branch created for this worktree. */
+  branch: string;
+  /** The absolute path of the worktree directory. */
+  root: string;
+  /** The repo root against which this worktree was created. */
+  repoRoot: string;
+  /** The goal id of the tree-root goal (for event emission). */
+  goalId: string;
+}
+
+// ---------------------------------------------------------------------------
+// Ensure .claude/worktrees is gitignored via .git/info/exclude.
+// Never touches a tracked .gitignore.
+// ---------------------------------------------------------------------------
+
+const WORKTREES_PATTERN = '.claude/worktrees/';
+
+function ensureGitignored(repoRoot: string): void {
+  // Find the real .git directory (handles worktree .git files too).
+  const gitFile = join(repoRoot, '.git');
+  let gitDir: string;
+
+  if (existsSync(gitFile)) {
+    const st = statSync(gitFile);
+    if (st.isFile()) {
+      // It's a worktree .git file — read the gitdir reference.
+      const content = readFileSync(gitFile, 'utf-8').trim();
+      if (content.startsWith('gitdir:')) {
+        // worktreeGitDir is something like /path/to/repo/.git/worktrees/name
+        // The main .git is two levels up.
+        const worktreeGitDir = content.slice('gitdir:'.length).trim();
+        gitDir = join(worktreeGitDir, '..', '..');
+      } else {
+        gitDir = gitFile;
+      }
+    } else {
+      // It's a real .git directory (normal repo).
+      gitDir = gitFile;
+    }
+  } else {
+    gitDir = gitFile; // Will fail if absent, but that's expected.
+  }
+
+  const infoDir = join(gitDir, 'info');
+  const excludeFile = join(infoDir, 'exclude');
+
+  // Ensure info/ exists.
+  if (!existsSync(infoDir)) {
+    mkdirSync(infoDir, { recursive: true });
+  }
+
+  // Read existing content (may not exist).
+  let existing = '';
+  if (existsSync(excludeFile)) {
+    existing = readFileSync(excludeFile, 'utf-8');
+  }
+
+  // Check if the pattern is already present (any form: with or without trailing slash).
+  const alreadyPresent =
+    existing.split('\n').some((line) => {
+      const t = line.trim();
+      return t === WORKTREES_PATTERN || t === WORKTREES_PATTERN.replace(/\/$/, '');
+    });
+
+  if (!alreadyPresent) {
+    const suffix = existing.length > 0 && !existing.endsWith('\n') ? '\n' : '';
+    writeFileSync(excludeFile, existing + suffix + WORKTREES_PATTERN + '\n', 'utf-8');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Chunk 1: openTreeWorktree
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a git worktree on a fresh branch under <repoRoot>/.claude/worktrees/<treeId>/,
+ * ensure .claude/worktrees is gitignored via .git/info/exclude (never touches a
+ * tracked .gitignore), and append a worktree-created event.
+ *
+ * Returns { treeId, branch, root } where root is the absolute worktree path a
+ * future broker will bind to as its sandbox root.
+ */
+export async function openTreeWorktree(
+  repoRoot: string,
+  rootGoalId: string,
+  store: EventStore,
+): Promise<{ treeId: string; branch: string; root: string }> {
+  const treeId = sanitizeTreeId(rootGoalId);
+  const branch = `tree/${treeId}`;
+  const root = join(repoRoot, '.claude', 'worktrees', treeId);
+
+  // Ensure .claude/worktrees is gitignored before creating the directory.
+  ensureGitignored(repoRoot);
+
+  // Create the worktree on a new branch.
+  // execFileSync with args-array (no shell string).
+  execFileSync('git', ['-C', repoRoot, 'worktree', 'add', '-b', branch, root], {
+    stdio: 'pipe',
+  });
+
+  await store.append({
+    type: 'worktree-created',
+    at: Date.now(),
+    goalId: rootGoalId,
+    treeId,
+    branch,
+    path: root,
+  });
+
+  return { treeId, branch, root };
+}
+
+// ---------------------------------------------------------------------------
+// Chunk 2: diffWithinScope
+// ---------------------------------------------------------------------------
+
+/**
+ * Run the actual git diff in the worktree (staged + unstaged + untracked) and
+ * check every changed path against the declared scope using the same
+ * normalize + boundary-suffix predicate as isInScope in tools.ts.
+ *
+ * Returns { ok: true } when all changed paths are within scope, or
+ * { ok: false, scopeInsufficiency } naming the offending paths.
+ */
+export function diffWithinScope(
+  worktreeRoot: string,
+  scope: string[],
+): { ok: boolean; scopeInsufficiency?: string } {
+  // Collect changed paths: staged+unstaged via diff, untracked via ls-files.
+  const diffOutput = execFileSync(
+    'git',
+    ['-C', worktreeRoot, 'diff', '--name-only', 'HEAD'],
+    { stdio: 'pipe', encoding: 'utf-8' },
+  ).trim();
+
+  // Also get staged changes (index vs HEAD).
+  const stagedOutput = execFileSync(
+    'git',
+    ['-C', worktreeRoot, 'diff', '--name-only', '--cached', 'HEAD'],
+    { stdio: 'pipe', encoding: 'utf-8' },
+  ).trim();
+
+  // Untracked files.
+  const untrackedOutput = execFileSync(
+    'git',
+    ['-C', worktreeRoot, 'ls-files', '--others', '--exclude-standard'],
+    { stdio: 'pipe', encoding: 'utf-8' },
+  ).trim();
+
+  // Collect all changed paths (de-duplicate).
+  const all = new Set<string>();
+  for (const line of [...diffOutput.split('\n'), ...stagedOutput.split('\n'), ...untrackedOutput.split('\n')]) {
+    const p = line.trim();
+    if (p.length > 0) all.add(p);
+  }
+
+  if (all.size === 0) {
+    return { ok: true };
+  }
+
+  // If scope is empty, allow everything (consistent with isInScope behavior).
+  if (scope.length === 0) {
+    return { ok: true };
+  }
+
+  const offending: string[] = [];
+  for (const p of all) {
+    // Reject absolute paths and traversals outright.
+    if (isAbsolute(p) || normalize(p).startsWith('..')) {
+      offending.push(p);
+      continue;
+    }
+    if (!isInScope(p, scope)) {
+      offending.push(p);
+    }
+  }
+
+  if (offending.length === 0) {
+    return { ok: true };
+  }
+
+  return {
+    ok: false,
+    scopeInsufficiency: `File(s) outside declared scope: ${offending.join(', ')}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Chunk 4: collectTree / preserveTree
+// ---------------------------------------------------------------------------
+
+/**
+ * For a completed (successful) tree: stage all changes, commit them onto the
+ * branch, remove the worktree, and append a worktree-collected event.
+ *
+ * Uses synchronous execFileSync for metadata-mutating git ops so concurrent
+ * trees serialize on the shared .git.
+ */
+export async function collectTree(
+  worktree: TreeWorktree,
+  store: EventStore,
+): Promise<{ commits: string[] }> {
+  const { root, repoRoot, branch, treeId, goalId } = worktree;
+
+  // Stage all changes in the worktree.
+  execFileSync('git', ['-C', root, 'add', '--all'], { stdio: 'pipe' });
+
+  // Check if there's anything to commit.
+  const statusOutput = execFileSync(
+    'git',
+    ['-C', root, 'status', '--porcelain'],
+    { stdio: 'pipe', encoding: 'utf-8' },
+  ).trim();
+
+  const commits: string[] = [];
+
+  if (statusOutput.length > 0) {
+    // Commit the staged changes.
+    execFileSync(
+      'git',
+      ['-C', root, 'commit', '-m', `feat(tree): collect worktree ${treeId}`],
+      { stdio: 'pipe' },
+    );
+
+    // Get the commit SHA.
+    const sha = execFileSync(
+      'git',
+      ['-C', root, 'rev-parse', 'HEAD'],
+      { stdio: 'pipe', encoding: 'utf-8' },
+    ).trim();
+    commits.push(sha);
+  }
+
+  // Remove the worktree.
+  execFileSync('git', ['-C', repoRoot, 'worktree', 'remove', root], { stdio: 'pipe' });
+
+  await store.append({
+    type: 'worktree-collected',
+    at: Date.now(),
+    goalId,
+    treeId,
+    branch,
+    commits,
+  });
+
+  return { commits };
+}
+
+/**
+ * For a failed or blocked tree: leave the worktree in place, append a
+ * worktree-preserved event with the stated reason.
+ */
+export async function preserveTree(
+  worktree: TreeWorktree,
+  store: EventStore,
+  reason: string,
+): Promise<void> {
+  const { root, branch, treeId, goalId } = worktree;
+
+  await store.append({
+    type: 'worktree-preserved',
+    at: Date.now(),
+    goalId,
+    treeId,
+    branch,
+    path: root,
+    reason,
+  });
+}

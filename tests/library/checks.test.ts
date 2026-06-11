@@ -10,6 +10,7 @@ import {
   processClean,
   runScriptCheck,
 } from '../../src/library/checks.js';
+import { isInScope } from '../../src/engine/tools.js';
 import type { Goal } from '../../src/contract/goal.js';
 import type { Artifact } from '../../src/contract/report.js';
 import type { CheckContext } from '../../src/contract/goal-type.js';
@@ -339,5 +340,62 @@ describe('runScriptCheck', () => {
     const r = await artifactPresent.run(baseGoal, null, makeGreenCtx());
     expect(r.ok).toBe(false);
     expect(r.detail).toContain('No artifact');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isWithinScope shared predicate (reused from tools.ts in diffWithinScope)
+//
+// These tests verify that the isInScope helper used by diffWithinScope matches
+// the boundary logic embedded in filesWithinScope — one definition of scope
+// containment in the repo.
+// ---------------------------------------------------------------------------
+
+describe('isWithinScope shared predicate', () => {
+  it('returns true for a file directly inside a scope prefix directory', () => {
+    expect(isInScope('src/index.ts', ['src/'])).toBe(true);
+  });
+
+  it('returns true for a file in a nested subdirectory of a scope prefix', () => {
+    expect(isInScope('src/engine/tools.ts', ['src/'])).toBe(true);
+  });
+
+  it('returns false for a file outside all scope prefixes', () => {
+    expect(isInScope('lib/util.ts', ['src/', 'tests/'])).toBe(false);
+  });
+
+  it('returns true when scope is empty (no scope declared: allow all)', () => {
+    expect(isInScope('anything/path.ts', [])).toBe(true);
+  });
+
+  it('matches a file that is exactly the scope prefix (no trailing slash)', () => {
+    expect(isInScope('src', ['src'])).toBe(true);
+  });
+
+  it('does not match a file that starts with the prefix string but is not inside it', () => {
+    // 'src-other/foo.ts' starts with 'src' but is NOT inside the 'src/' boundary.
+    expect(isInScope('src-other/foo.ts', ['src/'])).toBe(false);
+  });
+
+  it('matches behavior with filesWithinScope: in-scope path passes', async () => {
+    const goal = { ...baseGoal, scope: ['src/'] };
+    const r = await filesWithinScope.run(
+      goal,
+      { kind: 'files', files: [{ path: 'src/a.ts', content: '' }] },
+    );
+    // Both must agree: isInScope passes, filesWithinScope passes.
+    expect(isInScope('src/a.ts', ['src/'])).toBe(true);
+    expect(r.ok).toBe(true);
+  });
+
+  it('matches behavior with filesWithinScope: out-of-scope path fails', async () => {
+    const goal = { ...baseGoal, scope: ['src/'] };
+    const r = await filesWithinScope.run(
+      goal,
+      { kind: 'files', files: [{ path: 'lib/x.ts', content: '' }] },
+    );
+    // Both must agree: isInScope fails, filesWithinScope fails.
+    expect(isInScope('lib/x.ts', ['src/'])).toBe(false);
+    expect(r.ok).toBe(false);
   });
 });
