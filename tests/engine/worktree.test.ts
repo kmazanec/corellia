@@ -462,20 +462,110 @@ describe('concurrent trees', () => {
 // ---------------------------------------------------------------------------
 
 describe('sanitizeTreeId', () => {
-  it('replaces slashes with dashes', () => {
-    expect(sanitizeTreeId('parent/child')).toBe('parent-child');
+  it('replaces slashes with dashes and appends 8-hex hash', () => {
+    // 'parent/child' → stem 'parent-child' + '-' + sha1('parent/child').slice(0,8)
+    expect(sanitizeTreeId('parent/child')).toMatch(/^parent-child-[0-9a-f]{8}$/);
+    expect(sanitizeTreeId('parent/child')).toBe('parent-child-f8682dbc');
   });
 
-  it('replaces spaces with dashes', () => {
-    expect(sanitizeTreeId('hello world')).toBe('hello-world');
+  it('replaces spaces with dashes and appends 8-hex hash', () => {
+    expect(sanitizeTreeId('hello world')).toMatch(/^hello-world-[0-9a-f]{8}$/);
+    expect(sanitizeTreeId('hello world')).toBe('hello-world-2aae6c35');
   });
 
-  it('produces a non-empty string for a plain id', () => {
-    expect(sanitizeTreeId('simple-id')).toBe('simple-id');
+  it('produces a non-empty string for a plain id with hash suffix', () => {
+    expect(sanitizeTreeId('simple-id')).toMatch(/^simple-id-[0-9a-f]{8}$/);
+    expect(sanitizeTreeId('simple-id')).toBe('simple-id-8cf4cd6e');
   });
 
   it('is filesystem-safe (no special chars)', () => {
     const result = sanitizeTreeId('a:b?c*d');
     expect(result).toMatch(/^[a-zA-Z0-9._-]+$/);
+  });
+
+  it('two goal ids that sanitize to the same stem produce DISTINCT tree ids', () => {
+    // 'a/b' and 'a-b' both sanitize to stem 'a-b', but their hashes differ.
+    const id1 = sanitizeTreeId('a/b');
+    const id2 = sanitizeTreeId('a-b');
+    expect(id1).not.toBe(id2);
+    // Both must still be filesystem-safe.
+    expect(id1).toMatch(/^[a-zA-Z0-9._-]+$/);
+    expect(id2).toMatch(/^[a-zA-Z0-9._-]+$/);
+  });
+
+  it('collision test: a/b and a-b open distinct branches and dirs successfully', async () => {
+    const repo = makeTempRepo();
+    const store = new InMemoryEventStore();
+
+    const wt1 = await openTreeWorktree(repo, 'a/b', store);
+    const wt2 = await openTreeWorktree(repo, 'a-b', store);
+
+    expect(wt1.branch).not.toBe(wt2.branch);
+    expect(wt1.root).not.toBe(wt2.root);
+    expect(existsSync(wt1.root)).toBe(true);
+    expect(existsSync(wt2.root)).toBe(true);
+
+    // Cleanup.
+    const w1 = { treeId: wt1.treeId, branch: wt1.branch, root: wt1.root, repoRoot: repo, goalId: 'a/b' };
+    const w2 = { treeId: wt2.treeId, branch: wt2.branch, root: wt2.root, repoRoot: repo, goalId: 'a-b' };
+    await collectTree(w1, store);
+    await collectTree(w2, store);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// New named-gap tests
+// ---------------------------------------------------------------------------
+
+describe('exclude idempotency', () => {
+  it('opening a second tree in the same repo adds .claude/worktrees/ exactly once', async () => {
+    const repo = makeTempRepo();
+    const store = new InMemoryEventStore();
+
+    // Open two trees sequentially in the same repo.
+    const wt1 = await openTreeWorktree(repo, 'idem-goal-1', store);
+    const wt2 = await openTreeWorktree(repo, 'idem-goal-2', store);
+
+    const exclude = readExclude(repo);
+    // Count occurrences of the exact pattern.
+    const occurrences = exclude.split('\n').filter((line) => line.trim() === '.claude/worktrees/').length;
+    expect(occurrences).toBe(1);
+
+    // Cleanup.
+    const w1 = { treeId: wt1.treeId, branch: wt1.branch, root: wt1.root, repoRoot: repo, goalId: 'idem-goal-1' };
+    const w2 = { treeId: wt2.treeId, branch: wt2.branch, root: wt2.root, repoRoot: repo, goalId: 'idem-goal-2' };
+    await collectTree(w1, store);
+    await collectTree(w2, store);
+  });
+});
+
+describe('rename-out-of-scope', () => {
+  it('a tracked in-scope file renamed to an out-of-scope path is caught by diffWithinScope', async () => {
+    const repo = makeTempRepo();
+    const store = new InMemoryEventStore();
+
+    // Commit an in-scope file in the base repo first so the worktree has it tracked.
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    writeFileSync(join(repo, 'src', 'tracked.ts'), 'export const x = 1;\n');
+    execFileSync('git', ['add', 'src/tracked.ts'], { cwd: repo, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'add tracked file'], { cwd: repo, stdio: 'pipe' });
+
+    const wt = await openTreeWorktree(repo, 'rename-goal', store);
+
+    // In the worktree, git mv the in-scope file to an out-of-scope path.
+    mkdirSync(join(wt.root, 'lib'), { recursive: true });
+    execFileSync('git', ['mv', 'src/tracked.ts', 'lib/moved.ts'], { cwd: wt.root, stdio: 'pipe' });
+
+    // diffWithinScope must detect the out-of-scope destination.
+    const result = diffWithinScope(wt.root, ['src/']);
+    expect(result.ok).toBe(false);
+    expect(result.scopeInsufficiency).toContain('lib/moved.ts');
+
+    // Cleanup: reset and remove worktree.
+    execFileSync('git', ['reset', '--hard', 'HEAD'], { cwd: wt.root, stdio: 'pipe' });
+    await collectTree(
+      { treeId: wt.treeId, branch: wt.branch, root: wt.root, repoRoot: repo, goalId: 'rename-goal' },
+      store,
+    );
   });
 });

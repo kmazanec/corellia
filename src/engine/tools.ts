@@ -11,6 +11,11 @@ import { normalize, isAbsolute, join, relative, dirname } from 'node:path';
 import { readFile, readdir, stat, writeFile as fsWriteFile, mkdir } from 'node:fs/promises';
 import type { Goal } from '../contract/goal.js';
 import type { ToolImpl } from '../contract/tool.js';
+// isInScope lives in library/checks.ts (single canonical definition).
+// Imported here for local use and re-exported so callers that import from
+// tools.ts keep working.
+import { isInScope } from '../library/checks.js';
+export { isInScope };
 
 // ---------------------------------------------------------------------------
 // Path safety helpers
@@ -35,21 +40,6 @@ export function resolveSandboxPath(root: string, rawPath: string): string | null
   const rel = relative(root, full);
   if (rel.startsWith('..') || isAbsolute(rel)) return null;
   return full;
-}
-
-/**
- * Check whether a relative path falls within at least one of the goal's
- * declared scope prefixes, using the same normalize + boundary-suffix match
- * as the `filesWithinScope` deterministic check.
- */
-export function isInScope(rawPath: string, scope: string[]): boolean {
-  if (scope.length === 0) return true; // No scope declared: allow all.
-  const normalized = normalize(rawPath);
-  return scope.some((prefix) => {
-    const ns = normalize(prefix);
-    const boundary = ns.endsWith('/') ? ns : ns + '/';
-    return normalized === ns || normalized.startsWith(boundary);
-  });
 }
 
 // ---------------------------------------------------------------------------

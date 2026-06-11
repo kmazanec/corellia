@@ -11,6 +11,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
 import { join, normalize, isAbsolute } from 'node:path';
+import { createHash } from 'node:crypto';
 import type { EventStore } from '../contract/events.js';
 import { isInScope } from './tools.js';
 
@@ -21,14 +22,18 @@ import { isInScope } from './tools.js';
 /**
  * Derive a filesystem- and git-ref-safe tree id from a root goal id.
  * Replaces path separators (/) and whitespace with '-'; strips characters
- * that are not safe in branch names.
+ * that are not safe in branch names. Appends an 8-hex-char sha1 content hash
+ * of the raw goalId so that distinct goal ids that sanitize to the same stem
+ * (e.g. 'a/b' and 'a-b') always produce DISTINCT tree ids.
  */
 export function sanitizeTreeId(goalId: string): string {
-  return goalId
+  const stem = goalId
     .replace(/[\s/\\]+/g, '-')
     .replace(/[^a-zA-Z0-9._-]/g, '_')
     .replace(/^[-_]+|[-_]+$/g, '') // trim leading/trailing separators
     .substring(0, 80); // cap length for filesystem safety
+  const hash = createHash('sha1').update(goalId).digest('hex').slice(0, 8);
+  return `${stem}-${hash}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -166,17 +171,12 @@ export function diffWithinScope(
   worktreeRoot: string,
   scope: string[],
 ): { ok: boolean; scopeInsufficiency?: string } {
-  // Collect changed paths: staged+unstaged via diff, untracked via ls-files.
+  // Collect changed paths: all tracked changes (staged + unstaged) via diff HEAD,
+  // plus untracked files via ls-files. diff HEAD is a strict superset of
+  // diff --cached HEAD, so the redundant --cached exec is omitted.
   const diffOutput = execFileSync(
     'git',
     ['-C', worktreeRoot, 'diff', '--name-only', 'HEAD'],
-    { stdio: 'pipe', encoding: 'utf-8' },
-  ).trim();
-
-  // Also get staged changes (index vs HEAD).
-  const stagedOutput = execFileSync(
-    'git',
-    ['-C', worktreeRoot, 'diff', '--name-only', '--cached', 'HEAD'],
     { stdio: 'pipe', encoding: 'utf-8' },
   ).trim();
 
@@ -189,7 +189,7 @@ export function diffWithinScope(
 
   // Collect all changed paths (de-duplicate).
   const all = new Set<string>();
-  for (const line of [...diffOutput.split('\n'), ...stagedOutput.split('\n'), ...untrackedOutput.split('\n')]) {
+  for (const line of [...diffOutput.split('\n'), ...untrackedOutput.split('\n')]) {
     const p = line.trim();
     if (p.length > 0) all.add(p);
   }
@@ -242,7 +242,9 @@ export async function collectTree(
 ): Promise<{ commits: string[] }> {
   const { root, repoRoot, branch, treeId, goalId } = worktree;
 
-  // Stage all changes in the worktree.
+  // Stage all changes in the worktree. Relies on the target repo's own ignore
+  // rules (git add --all respects .git/info/exclude) per ADR-016's trust posture:
+  // the operator controls the sandbox root and its contents.
   execFileSync('git', ['-C', root, 'add', '--all'], { stdio: 'pipe' });
 
   // Check if there's anything to commit.

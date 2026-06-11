@@ -9,6 +9,27 @@ import type { DeterministicCheck, CheckContext } from '../contract/goal-type.js'
 import type { Goal } from '../contract/goal.js';
 import type { Artifact } from '../contract/report.js';
 
+// ---------------------------------------------------------------------------
+// Scope containment predicate — single definition used by filesWithinScope here
+// and re-exported for diffWithinScope in engine/worktree.ts (via engine/tools.ts).
+// ---------------------------------------------------------------------------
+
+/**
+ * Check whether a relative path falls within at least one of the declared
+ * scope prefixes, using normalize + boundary-suffix matching.
+ *
+ * Empty scope means "no scope declared: allow all".
+ */
+export function isInScope(rawPath: string, scope: string[]): boolean {
+  if (scope.length === 0) return true;
+  const normalized = normalize(rawPath);
+  return scope.some((prefix) => {
+    const ns = normalize(prefix);
+    const boundary = ns.endsWith('/') ? ns : ns + '/';
+    return normalized === ns || normalized.startsWith(boundary);
+  });
+}
+
 /**
  * Pass when the artifact is non-null and non-empty — either it has at least
  * one file, or its text body is a non-empty string.
@@ -50,16 +71,11 @@ export const filesWithinScope: DeterministicCheck = {
       return { ok: true, detail: 'No files to check against scope.' };
     }
     const outOfScope = files.filter((f) => {
-      // Reject absolute paths outright
+      // Reject absolute paths outright.
       if (isAbsolute(f.path)) return true;
-      const np = normalize(f.path);
       // Reject any path that escapes its directory via ..
-      if (np.startsWith('..')) return true;
-      return !goal.scope.some((prefix) => {
-        const ns = normalize(prefix);
-        const boundary = ns.endsWith('/') ? ns : ns + '/';
-        return np === ns || np.startsWith(boundary);
-      });
+      if (normalize(f.path).startsWith('..')) return true;
+      return !isInScope(f.path, goal.scope);
     });
     if (outOfScope.length > 0) {
       const paths = outOfScope.map((f) => f.path).join(', ');
