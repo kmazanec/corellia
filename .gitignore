@@ -17,3 +17,5 @@ out/
 .env.local
 *.log
 .claude/worktrees/
+
+.playwright-mcp/
