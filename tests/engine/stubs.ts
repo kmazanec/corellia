@@ -200,54 +200,76 @@ export function rawBrain(raw: RawBrain): Brain {
   };
 }
 
+type Metered_<T> = { value: T; usage: import('../../src/contract/goal.js').Usage };
+
 export class ScriptedBrain implements Brain {
-  private decideQueue: Decision[] = [];
-  private produceQueue: Artifact[] = [];
-  private judgeQueue: Verdict[] = [];
-  private repairQueue: Artifact[] = [];
+  private decideQueue: Metered_<Decision>[] = [];
+  private produceQueue: Metered_<Artifact>[] = [];
+  private judgeQueue: Metered_<Verdict>[] = [];
+  private repairQueue: Metered_<Artifact>[] = [];
 
   queueDecide(...decisions: Decision[]): this {
-    this.decideQueue.push(...decisions);
+    this.decideQueue.push(...decisions.map((d) => ({ value: d, usage: ZERO_USAGE })));
+    return this;
+  }
+
+  queueDecideWithUsage(decision: Decision, usage: import('../../src/contract/goal.js').Usage): this {
+    this.decideQueue.push({ value: decision, usage });
     return this;
   }
 
   queueProduce(...artifacts: Artifact[]): this {
-    this.produceQueue.push(...artifacts);
+    this.produceQueue.push(...artifacts.map((a) => ({ value: a, usage: ZERO_USAGE })));
+    return this;
+  }
+
+  queueProduceWithUsage(artifact: Artifact, usage: import('../../src/contract/goal.js').Usage): this {
+    this.produceQueue.push({ value: artifact, usage });
     return this;
   }
 
   queueJudge(...verdicts: Verdict[]): this {
-    this.judgeQueue.push(...verdicts);
+    this.judgeQueue.push(...verdicts.map((v) => ({ value: v, usage: ZERO_USAGE })));
+    return this;
+  }
+
+  queueJudgeWithUsage(verdict: Verdict, usage: import('../../src/contract/goal.js').Usage): this {
+    this.judgeQueue.push({ value: verdict, usage });
     return this;
   }
 
   queueRepair(...artifacts: Artifact[]): this {
-    this.repairQueue.push(...artifacts);
+    this.repairQueue.push(...artifacts.map((a) => ({ value: a, usage: ZERO_USAGE })));
+    return this;
+  }
+
+  queueRepairWithUsage(artifact: Artifact, usage: import('../../src/contract/goal.js').Usage): this {
+    this.repairQueue.push({ value: artifact, usage });
     return this;
   }
 
   async decide(_goal: Goal, _ctx: BrainContext): Promise<Metered<Decision>> {
     const d = this.decideQueue.shift();
     if (!d) throw new Error('ScriptedBrain: no more decide results queued');
-    return { value: d, usage: ZERO_USAGE };
+    return d;
   }
 
   async produce(_goal: Goal, _ctx: BrainContext): Promise<Metered<Artifact>> {
     const a = this.produceQueue.shift();
     if (!a) throw new Error('ScriptedBrain: no more produce results queued');
-    return { value: a, usage: ZERO_USAGE };
+    return a;
   }
 
   async judge(_goal: Goal, _subject: Artifact, _rubric: string, _ctx: BrainContext): Promise<Metered<Verdict>> {
     const v = this.judgeQueue.shift();
     if (!v) throw new Error('ScriptedBrain: no more judge results queued');
-    return { value: v, usage: ZERO_USAGE };
+    return v;
   }
 
   async repair(_goal: Goal, _artifact: Artifact, _prescriptions: string[], _ctx: BrainContext): Promise<Metered<Artifact>> {
     const a = this.repairQueue.shift();
     if (!a) throw new Error('ScriptedBrain: no more repair results queued');
-    return { value: a, usage: ZERO_USAGE };
+    return a;
   }
 
   async step(

@@ -138,3 +138,26 @@ describe('fix 2 — validateSplit fan-out guard via engine', () => {
     expect(totalAttempts).toBeLessThanOrEqual(parentBudget.attempts);
   });
 });
+
+// ── F-35: debit-equality unit ────────────────────────────────────────────────
+
+describe('F-35 debit equality — tokens budget decrements by reported token count', () => {
+  it('consuming reported tokens matches consumeN(budget, tokens, promptTokens+completionTokens)', async () => {
+    const store = new MemoryEventStore();
+    const registry = buildRegistry([leafTypeDef({ judgeType: null })]);
+    const brain = new ScriptedBrain()
+      .queueProduceWithUsage(textArtifact('hello'), { promptTokens: 30, completionTokens: 10 });
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+
+    const initialTokens = 200;
+    const goal = makeGoal({ budget: { attempts: 5, tokens: initialTokens, toolCalls: 50, wallClockMs: 60000 } });
+    const report = await engine.run(goal);
+
+    expect(report.blockers).toHaveLength(0);
+
+    const produced = await store.list({ type: 'produced' });
+    const usage = (produced[0] as { usage: { promptTokens: number; completionTokens: number } }).usage;
+    const expectedDebit = usage.promptTokens + usage.completionTokens;
+    expect(expectedDebit).toBe(40);
+  });
+});

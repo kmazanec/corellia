@@ -794,12 +794,15 @@ describe('fix 3 — tokens budget exhaustion', () => {
     const store = new MemoryEventStore();
 
     const brain = new ScriptedBrain()
-      .queueProduce(textArtifact('a very long artifact that will consume many tokens'));
+      .queueProduceWithUsage(
+        textArtifact('output'),
+        { promptTokens: 500, completionTokens: 500 },
+      );
 
     const registry = buildRegistry([leafTypeDef({ deterministic: [], judgeType: null })]);
 
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
-    // tokens: 1 → produce output will exceed it
+    // tokens: 1 → produce reports 1000 tokens, debit exhausts the budget
     const goal = makeGoal({ budget: { attempts: 5, tokens: 1, toolCalls: 50, wallClockMs: 60000 } });
     const report = await engine.run(goal);
 
@@ -979,5 +982,91 @@ describe('cyclic dependency detection', () => {
     const report = await engine.run(goal);
 
     expect(report.blockers.length).toBeGreaterThan(0);
+  });
+});
+
+// ── F-35: Real usage accounting ────────────────────────────────────────────
+
+import type { FactoryEvent } from '../../src/contract/events.js';
+import type { Usage } from '../../src/contract/goal.js';
+
+describe('F-35 usage accounting — events carry usage and debit equals reported tokens', () => {
+  it('produced event carries the reported usage from the produce call', async () => {
+    const store = new MemoryEventStore();
+    const brain = new ScriptedBrain()
+      .queueProduceWithUsage(textArtifact('output'), { promptTokens: 100, completionTokens: 50, costUsd: 0.001 });
+    const registry = buildRegistry([leafTypeDef({ judgeType: null })]);
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const goal = makeGoal({ budget: { attempts: 5, tokens: 10000, toolCalls: 50, wallClockMs: 60000 } });
+    await engine.run(goal);
+
+    const produced = await store.list({ type: 'produced' });
+    expect(produced).toHaveLength(1);
+    const producedEvent = produced[0] as Extract<FactoryEvent, { type: 'produced' }>;
+    expect(producedEvent.usage.promptTokens).toBe(100);
+    expect(producedEvent.usage.completionTokens).toBe(50);
+    expect(producedEvent.usage.costUsd).toBeCloseTo(0.001);
+  });
+
+  it('judge-verdict event carries the reported usage from the judge call', async () => {
+    const store = new MemoryEventStore();
+    const brain = new ScriptedBrain()
+      .queueProduceWithUsage(textArtifact('output'), { promptTokens: 10, completionTokens: 5 })
+      .queueJudgeWithUsage({ pass: true, findings: [] }, { promptTokens: 200, completionTokens: 80, costUsd: 0.005 });
+    const registry = buildRegistry([leafTypeDef({ judgeType: 'reviewer' })]);
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const goal = makeGoal({ budget: { attempts: 5, tokens: 10000, toolCalls: 50, wallClockMs: 60000 } });
+    await engine.run(goal);
+
+    const verdicts = await store.list({ type: 'judge-verdict' });
+    expect(verdicts).toHaveLength(1);
+    const v = verdicts[0] as Extract<FactoryEvent, { type: 'judge-verdict' }>;
+    expect(v.usage?.promptTokens).toBe(200);
+    expect(v.usage?.completionTokens).toBe(80);
+    expect(v.usage?.costUsd).toBeCloseTo(0.005);
+  });
+
+  it('repair-applied event carries the reported usage from the repair call', async () => {
+    const store = new MemoryEventStore();
+    const brain = new ScriptedBrain()
+      .queueProduceWithUsage(textArtifact('output'), { promptTokens: 10, completionTokens: 5 })
+      .queueJudgeWithUsage(
+        { pass: false, findings: [{ title: 'needs fix', dimension: 'spec', severity: 'high', gating: true, prescription: 'fix it' }] },
+        { promptTokens: 80, completionTokens: 30 },
+      )
+      .queueRepairWithUsage(textArtifact('repaired'), { promptTokens: 60, completionTokens: 20, costUsd: 0.002 })
+      .queueJudgeWithUsage({ pass: true, findings: [] }, { promptTokens: 40, completionTokens: 10 });
+    const registry = buildRegistry([leafTypeDef({ judgeType: 'reviewer' })]);
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const goal = makeGoal({ budget: { attempts: 5, tokens: 10000, toolCalls: 50, wallClockMs: 60000 } });
+    await engine.run(goal);
+
+    const repairs = await store.list({ type: 'repair-applied' });
+    expect(repairs).toHaveLength(1);
+    const r = repairs[0] as Extract<FactoryEvent, { type: 'repair-applied' }>;
+    expect(r.usage?.promptTokens).toBe(60);
+    expect(r.usage?.completionTokens).toBe(20);
+    expect(r.usage?.costUsd).toBeCloseTo(0.002);
+  });
+
+  it('tokens debit equals reported promptTokens + completionTokens (not chars/4)', async () => {
+    const produceUsage: Usage = { promptTokens: 300, completionTokens: 100 };
+    const registry = buildRegistry([leafTypeDef({ judgeType: null })]);
+
+    // At 400 tokens budget: 300+100=400 debit → exhausted (≤0)
+    const store1 = new MemoryEventStore();
+    const brain1 = new ScriptedBrain().queueProduceWithUsage(textArtifact('short'), produceUsage);
+    const engine1 = new Engine({ registry, brain: brain1, store: store1, memory: new NoopMemoryView() });
+    const goal400 = makeGoal({ budget: { attempts: 5, tokens: 400, toolCalls: 50, wallClockMs: 60000 } });
+    const report400 = await engine1.run(goal400);
+    expect(report400.blockers.length).toBeGreaterThan(0);
+
+    // At 401 tokens budget: 400 debit leaves 1 remaining → passes
+    const store2 = new MemoryEventStore();
+    const brain2 = new ScriptedBrain().queueProduceWithUsage(textArtifact('short'), produceUsage);
+    const engine2 = new Engine({ registry, brain: brain2, store: store2, memory: new NoopMemoryView() });
+    const goal401 = makeGoal({ budget: { attempts: 5, tokens: 401, toolCalls: 50, wallClockMs: 60000 } });
+    const report401 = await engine2.run(goal401);
+    expect(report401.blockers).toHaveLength(0);
   });
 });
