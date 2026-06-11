@@ -712,7 +712,7 @@ describe('mapRepoCheck — dispatcher', () => {
 
 // ---------------------------------------------------------------------------
 // Deterministic gate: a failing validation cannot emit a passing report
-// AC-3: the gate catches failure before any judge is consulted
+// the gate catches failure before any judge is consulted
 // ---------------------------------------------------------------------------
 
 describe('deterministic gate — failing validation blocks output', () => {
@@ -771,7 +771,7 @@ describe('deterministic gate — failing validation blocks output', () => {
 });
 
 // ---------------------------------------------------------------------------
-// FIX 4: scoped-package version claim (version:@scope/pkg@x.y.z)
+// scoped-package version claim (version:@scope/pkg@x.y.z)
 // ---------------------------------------------------------------------------
 
 describe('stackCheck — scoped-package version claim', () => {
@@ -829,7 +829,7 @@ describe('stackCheck — scoped-package version claim', () => {
 });
 
 // ---------------------------------------------------------------------------
-// FIX 2: architectureCheck — scan and existence halves use the same root
+// architectureCheck — scan and existence halves use the same root
 // ---------------------------------------------------------------------------
 
 describe('architectureCheck — single resolved root for scan + existence', () => {

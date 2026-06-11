@@ -128,7 +128,7 @@ export type ArchScanFn = (repoRoot: string, sha: string) => Promise<ScanEdge[]>;
  *      as a node in the fresh scan (spot-edge agreement).
  *
  * The `scanFn` is the injected import-graph scanner (structurally typed so no
- * hard dependency on F-42). In tests, supply a synthetic scan function.
+ * hard dependency on the scanner module). In tests, supply a synthetic scan function.
  */
 export function architectureCheck(scanFn: ArchScanFn): DeterministicCheck {
   return {

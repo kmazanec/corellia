@@ -352,10 +352,10 @@ describe('assembly — sandbox config present', () => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// KNOWLEDGE / EYES WIRING (AC-1)
+// KNOWLEDGE / EYES WIRING
 // ───────────────────────────────────────────────────────────────────────────
 
-describe('assembly — knowledge wiring (AC-1)', () => {
+describe('assembly — knowledge wiring', () => {
   it('registers the five retrieval tools in the broker only when knowledge wiring is on', async () => {
     const repo = makeTempRepo();
     const store = new MemoryEventStore();

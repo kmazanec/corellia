@@ -2,7 +2,7 @@
  * Tests for src/library/imports.ts — the import-edge scanner and impact().
  *
  * All tests use tmp fixture trees built with writeFileSync. No network, no mocks.
- * Covers AC-1..6 from the F-42 spec.
+ * Covers the scanner spec end to end.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -35,9 +35,9 @@ function write(root: string, relPath: string, content: string): void {
   writeFileSync(abs, content, 'utf8');
 }
 
-// ── AC-1: ES/TS import forms + extension/index inference ─────────────────────
+// ── ES/TS import forms + extension/index inference ─────────────────────
 
-describe('AC-1: ES/TS import extraction and path resolution', () => {
+describe('ES/TS import extraction and path resolution', () => {
   it('resolves static import with explicit extension', () => {
     const root = makeTmp();
     write(root, 'src/a.ts', `export const x = 1;`);
@@ -120,9 +120,9 @@ describe('AC-1: ES/TS import extraction and path resolution', () => {
   });
 });
 
-// ── AC-2: Python / Go / Ruby generic patterns ─────────────────────────────────
+// ── Python / Go / Ruby generic patterns ─────────────────────────────────
 
-describe('AC-2: Python/Go/Ruby generic patterns (best-effort)', () => {
+describe('Python/Go/Ruby generic patterns (best-effort)', () => {
   it('extracts Python relative imports', () => {
     const root = makeTmp();
     write(root, 'app/utils.py', `def helper(): pass`);
@@ -156,9 +156,9 @@ describe('AC-2: Python/Go/Ruby generic patterns (best-effort)', () => {
   });
 });
 
-// ── AC-3: impact() reverse-reachability and test-file association ──────────────
+// ── impact() reverse-reachability and test-file association ──────────────
 
-describe('AC-3: impact() transitive closure and test-file association', () => {
+describe('impact() transitive closure and test-file association', () => {
   it('returns direct importers of a changed file', () => {
     const root = makeTmp();
     write(root, 'src/a.ts', `export const a = 1;`);
@@ -242,9 +242,9 @@ describe('AC-3: impact() transitive closure and test-file association', () => {
   });
 });
 
-// ── AC-4: False positives pinned (comments/strings), never false negatives ────
+// ── False positives pinned (comments/strings), never false negatives ────
 
-describe('AC-4: Comment/string false-positives accepted; plain imports never missed', () => {
+describe('Comment/string false-positives accepted; plain imports never missed', () => {
   it('never misses a plain static import', () => {
     const root = makeTmp();
     write(root, 'src/target.ts', `export const t = 1;`);
@@ -299,9 +299,9 @@ describe('AC-4: Comment/string false-positives accepted; plain imports never mis
   });
 });
 
-// ── AC-5: Determinism — identical rescan = identical graph ───────────────────
+// ── Determinism — identical rescan = identical graph ───────────────────
 
-describe('AC-5: Determinism and scannedAtSha', () => {
+describe('Determinism and scannedAtSha', () => {
   it('re-scanning an unchanged tree yields identical edges', () => {
     const root = makeTmp();
     write(root, 'src/a.ts', `export const a = 1;`);
@@ -373,9 +373,9 @@ describe('AC-5: Determinism and scannedAtSha', () => {
   });
 });
 
-// ── AC-6: Skips node_modules/.git/binary, bounded file size, no throws ───────
+// ── Skips node_modules/.git/binary, bounded file size, no throws ───────
 
-describe('AC-6: Exclusions, file-size guard, no throws on weird input', () => {
+describe('Exclusions, file-size guard, no throws on weird input', () => {
   it('skips node_modules directory', () => {
     const root = makeTmp();
     write(root, 'src/app.ts', `export const app = 1;`);

@@ -8,8 +8,8 @@
  *   2. An invalid artifact (bad pointers / bad anchors) blocks at the gate —
  *      the judge is never consulted.
  *   3. A knowledge-written event can be appended after a successful run via the
- *      inline write helper matching F-41's frozen signature.
- *      (Integration with F-41's full assembly machinery happens at assembly;
+ *      inline write helper matching frozen signature.
+ *      (Integration with full assembly machinery happens at assembly;
  *      this test uses a local inline helper to prove the event contract.)
  *
  * No network. No real import scanner (synthetic scan fns). Tmp-dir fixture
@@ -81,8 +81,8 @@ function regionFactsText(repoRoot: string, overrides: Partial<RegionFacts> = {})
 
 /**
  * Inline helper that appends a knowledge-written event to the store.
- * Matches F-41's frozen signature: { type: 'knowledge-written', at, goalId, artifact }.
- * Integration with F-41's full assembly machinery happens at assembly;
+ * Matches frozen signature: { type: 'knowledge-written', at, goalId, artifact }.
+ * Integration with full assembly machinery happens at assembly;
  * this helper is the test stand-in.
  */
 async function writeKnowledge(
@@ -205,7 +205,7 @@ describe('map-repo leaf — valid artifact', () => {
     // Gate passed
     expect(report.blockers).toHaveLength(0);
 
-    // Write the knowledge-written event (integration-at-assembly: F-41 does this in production)
+    // Write the knowledge-written event (integration-at-assembly: does this in production)
     await writeKnowledge(store, goal.id, ka);
 
     // Verify the event is in the log with the correct frozen shape

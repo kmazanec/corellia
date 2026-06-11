@@ -6,7 +6,7 @@
  *   3. onGate returning 'granted' → proceeds to emit.
  *   4. High-risk scope at entry → gate fires.
  *   5. Clean scope at entry, artifact touches .env-matching path → gate fires.
- * Plus coverage-gate tests (F-45):
+ * Plus coverage-gate tests :
  *   7. Missing knowledge → map-repo children spawned; all siblings depend on them.
  *   8. Fresh knowledge → gate passes, no extra children, no extra brain calls.
  *   9. Region-dive miss for code leaf → deep-dive-region dependency injected.
@@ -14,11 +14,11 @@
  *  11. SHA-drift + validate-fail → invalid event, refresh child injected.
  *  12. Learn-kind goals exempt from coverage gate.
  *  13. No knowledge wiring → byte-identical behavior (regression guard).
- * New gate tests (FIX 2/3/5):
+ * New gate tests (/3/5):
  *  14. injection-blows-validateSplit → blocked, not silently over-subdivided.
  *  15. double-spawn exact-count → stale+invalid category spawns EXACTLY one child.
  *  16. no-sandbox-with-knowledge → gate skipped, zero gate-checked events.
- *  17. fresh-pass brain-call count unchanged vs baseline (AC-2 tightened).
+ *  17. fresh-pass brain-call count unchanged vs baseline (tightened).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -42,7 +42,7 @@ import type { KnowledgeArtifact } from '../../src/contract/knowledge.js';
 import type { SandboxAssembly } from '../../src/engine/assembly.js';
 
 // ── Fake sandbox assembly (for gate tests that require an active sandbox) ─────
-// FIX 5: the coverage gate requires an active sandbox/assembly to obtain a
+// the coverage gate requires an active sandbox/assembly to obtain a
 // real repoRoot. Tests that exercise gate behavior must inject a fake assembly.
 
 function fakeAssembly(repoRoot = '/repo'): SandboxAssembly {
@@ -427,7 +427,7 @@ function knowledgeWiring(
 // ── 7. Missing knowledge → map-repo children spawned; siblings depend on them ─
 
 describe('coverage gate — missing knowledge spawns map-repo children', () => {
-  it('spawns map-repo children and all siblings depend on them (AC-1)', async () => {
+  it('spawns map-repo children and all siblings depend on them', async () => {
     const store = new MemoryEventStore();
 
     // Two leaf children the brain proposes
@@ -503,7 +503,7 @@ describe('coverage gate — missing knowledge spawns map-repo children', () => {
 // ── 8. Fresh knowledge → gate passes, no extra children ─────────────────────
 
 describe('coverage gate — fresh knowledge passes without extra brain calls', () => {
-  it('gate passes with ok:true and no comprehension children (AC-2)', async () => {
+  it('gate passes with ok:true and no comprehension children', async () => {
     const store = new MemoryEventStore();
 
     const splitDecision = {
@@ -564,7 +564,7 @@ describe('coverage gate — fresh knowledge passes without extra brain calls', (
 // ── 9. Region-dive miss for code leaf ────────────────────────────────────────
 
 describe('coverage gate — region-dive miss for code leaf', () => {
-  it('injects deep-dive-region child for leaf scope with no dive (AC-3)', async () => {
+  it('injects deep-dive-region child for leaf scope with no dive', async () => {
     const store = new MemoryEventStore();
 
     const splitDecision = {
@@ -641,7 +641,7 @@ describe('coverage gate — region-dive miss for code leaf', () => {
 // ── 10. SHA-drift + validate-pass → stale-validated ──────────────────────────
 
 describe('coverage gate — SHA-drift validate-pass path', () => {
-  it('emits stale-validated and proceeds without refresh child (AC-4 pass path)', async () => {
+  it('emits stale-validated and proceeds without refresh child (pass path)', async () => {
     const store = new MemoryEventStore();
 
     const splitDecision = {
@@ -702,7 +702,7 @@ describe('coverage gate — SHA-drift validate-pass path', () => {
 // ── 11. SHA-drift + validate-fail → refresh child injected ──────────────────
 
 describe('coverage gate — SHA-drift validate-fail path', () => {
-  it('emits invalid and injects refresh child as dependency (AC-4 fail path)', async () => {
+  it('emits invalid and injects refresh child as dependency (fail path)', async () => {
     const store = new MemoryEventStore();
 
     const splitDecision = {
@@ -779,7 +779,7 @@ describe('coverage gate — SHA-drift validate-fail path', () => {
 // ── 12. Learn-kind goals exempt ───────────────────────────────────────────────
 
 describe('coverage gate — learn-kind exemption', () => {
-  it('learn goals with no knowledge still pass the gate (AC-5)', async () => {
+  it('learn goals with no knowledge still pass the gate', async () => {
     const store = new MemoryEventStore();
 
     const splitDecision = {
@@ -826,10 +826,10 @@ describe('coverage gate — learn-kind exemption', () => {
   });
 });
 
-// ── 13. No knowledge wiring → byte-identical (regression guard, AC-6) ────────
+// ── 13. No knowledge wiring → byte-identical (regression guard) ────────
 
 describe('coverage gate — knowledge-absent regression guard', () => {
-  it('no knowledge wiring = no gate-checked events, no extra children (AC-6)', async () => {
+  it('no knowledge wiring = no gate-checked events, no extra children', async () => {
     const store = new MemoryEventStore();
 
     const splitDecision = {
@@ -876,10 +876,10 @@ describe('coverage gate — knowledge-absent regression guard', () => {
   });
 });
 
-// ── 14. FIX 2: injection-blows-validateSplit → blocked, not silently over-subdivided
+// ── 14. injection-blows-validateSplit → blocked, not silently over-subdivided
 
 describe('coverage gate — injection that exceeds attempt budget is blocked', () => {
-  it('blocks when minted children push fan-out over attempt budget (FIX 2)', async () => {
+  it('blocks when minted children push fan-out over attempt budget ()', async () => {
     const store = new MemoryEventStore();
 
     // Brain proposes 2 children with budgetShare ~0.5 each; budget.attempts = 3
@@ -923,10 +923,10 @@ describe('coverage gate — injection that exceeds attempt budget is blocked', (
   });
 });
 
-// ── 15. FIX 3: double-spawn exact-count — stale+invalid category → EXACTLY one child
+// ── 15. double-spawn exact-count — stale+invalid category → EXACTLY one child
 
 describe('coverage gate — invalid category yields exactly one refresh child', () => {
-  it('spawns exactly one map-repo child for an invalid stale category (FIX 3)', async () => {
+  it('spawns exactly one map-repo child for an invalid stale category ()', async () => {
     const store = new MemoryEventStore();
 
     const splitDecision = {
@@ -948,10 +948,10 @@ describe('coverage gate — invalid category yields exactly one refresh child', 
     ]);
 
     // architecture is stale and invalid (validate=false); stack is fresh.
-    // Without FIX 3, checkpointVerifyArtifacts mints one refresh child for
+    // Without , checkpointVerifyArtifacts mints one refresh child for
     // architecture AND coverageCheck would flag architecture as missing and
     // mintComprehension would mint a second child — two children for the same
-    // category. FIX 3 must ensure only one map-repo child is spawned.
+    // category. must ensure only one map-repo child is spawned.
     const staleInvalidKnowledge: KnowledgeForCoverage = {
       headSha: HEAD_SHA,
       artifacts: [
@@ -985,10 +985,10 @@ describe('coverage gate — invalid category yields exactly one refresh child', 
   });
 });
 
-// ── 16. FIX 5: no-sandbox-with-knowledge → gate skipped, zero gate-checked events
+// ── 16. no-sandbox-with-knowledge → gate skipped, zero gate-checked events
 
 describe('coverage gate — no sandbox skips gate entirely', () => {
-  it('skips gate when knowledge is wired but no sandbox is active (FIX 5)', async () => {
+  it('skips gate when knowledge is wired but no sandbox is active ()', async () => {
     const store = new MemoryEventStore();
 
     const splitDecision = {
@@ -1037,10 +1037,10 @@ describe('coverage gate — no sandbox skips gate entirely', () => {
   });
 });
 
-// ── 17. FIX 2 / AC-2: fresh-pass asserts brain call count unchanged vs baseline
+// ── 17. fresh-pass asserts brain call count unchanged vs baseline
 
 describe('coverage gate — fresh knowledge does not add brain calls vs no-wiring baseline', () => {
-  it('brain call count with fresh knowledge equals baseline (AC-2 tightened)', async () => {
+  it('brain call count with fresh knowledge equals baseline (tightened)', async () => {
     const splitDecision = {
       kind: 'split' as const,
       children: [

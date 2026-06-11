@@ -204,7 +204,7 @@ class TransportError extends Error {
 /**
  * Build the OpenAI-compatible chat-completions request body for one step.
  * Pure and deterministic: given the same inputs in the same order, produces
- * byte-identical JSON serialization (prefix stability, AC-6).
+ * byte-identical JSON serialization (prefix stability).
  *
  * Transcript mapping:
  * - 'context' role: first message → system; subsequent → user

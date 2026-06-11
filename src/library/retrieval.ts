@@ -10,9 +10,9 @@
  * for registration in the broker's dispatch table.
  *
  * Design notes (consume frozen surfaces, stub siblings):
- * - F-42 (scanImports / impact graph) is consumed via `deps.scan` — injected
+ * - (scanImports / impact graph) is consumed via `deps.scan` — injected
  *   at assembly, stubbed in tests with synthetic graphs.
- * - F-41 (projectKnowledge) is consumed via `deps.knowledge` — injected at
+ * - (projectKnowledge) is consumed via `deps.knowledge` — injected at
  *   assembly, stubbed in tests with synthetic artifacts.
  * - Real wiring is the assembly feature's job.
  */
@@ -23,11 +23,11 @@ import type { KnowledgeArtifact } from '../contract/knowledge.js';
 import type { Goal } from '../contract/goal.js';
 
 // ---------------------------------------------------------------------------
-// Structural types for the import graph (F-42 frozen surface)
+// Structural types for the import graph (frozen surface)
 // ---------------------------------------------------------------------------
 
 /**
- * The import graph produced by F-42's scanner. `edges` maps each file
+ * The import graph produced by scanner. `edges` maps each file
  * (repo-relative path) to the set of files it imports.
  */
 export interface ImportGraph {
@@ -58,19 +58,19 @@ export interface ImpactResult {
  *
  * Assembly wires:
  *   - `repoRoot`: the absolute path to the target repo
- *   - `scan`: F-42's `scanImports(root)` — produces an ImportGraph
- *   - `knowledge`: F-41's `projectKnowledge()` — produces the artifact list
+ *   - `scan`: `scanImports(root)` — produces an ImportGraph
+ *   - `knowledge`: `projectKnowledge()` — produces the artifact list
  */
 export interface RetrievalDeps {
   /** Absolute path to the target repo. Required for symbol/stack search. */
   repoRoot: string;
   /**
-   * F-42: scan the repo and produce an import graph. Injected at assembly;
+   * seam: scan the repo and produce an import graph. Injected at assembly;
    * tests supply a synthetic function returning a fixture graph.
    */
   scan?: (root: string) => Promise<ImportGraph> | ImportGraph;
   /**
-   * F-41: return the current knowledge artifacts for the repo. Injected at
+   * seam: return the current knowledge artifacts for the repo. Injected at
    * assembly; tests supply a synthetic function returning fixture artifacts.
    */
   knowledge?: () => Promise<KnowledgeArtifact[]> | KnowledgeArtifact[];
@@ -164,7 +164,7 @@ function isTestFile(path: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// AC-1: find_symbol — definition-site candidates by name
+// find_symbol — definition-site candidates by name
 // ---------------------------------------------------------------------------
 
 /**
@@ -233,7 +233,7 @@ export async function findSymbol(name: string, deps: RetrievalDeps): Promise<Fin
 }
 
 // ---------------------------------------------------------------------------
-// AC-2: find_exemplar — conventions-artifact pointer search
+// find_exemplar — conventions-artifact pointer search
 // ---------------------------------------------------------------------------
 
 /**
@@ -328,7 +328,7 @@ export async function findExemplar(pattern: string, deps: RetrievalDeps): Promis
 }
 
 // ---------------------------------------------------------------------------
-// AC-3: conventions_for — artifact pointers + rules for a surface
+// conventions_for — artifact pointers + rules for a surface
 // ---------------------------------------------------------------------------
 
 /**
@@ -398,7 +398,7 @@ export async function conventionsFor(surface: string, deps: RetrievalDeps): Prom
 }
 
 // ---------------------------------------------------------------------------
-// AC-4: stack_versions — package.json + lockfile-v1 parse
+// stack_versions — package.json + lockfile-v1 parse
 // ---------------------------------------------------------------------------
 
 /**
@@ -503,12 +503,12 @@ export async function stackVersions(deps: RetrievalDeps): Promise<StackVersionsR
 }
 
 // ---------------------------------------------------------------------------
-// AC-5: impact — wraps F-42 over the injected graph
+// impact — wraps over the injected graph
 // ---------------------------------------------------------------------------
 
 /**
  * Compute which files are impacted by changes to `files`, using the injected
- * import graph from F-42. Returns impacted files (reverse transitive reach)
+ * import graph from the scanner module. Returns impacted files (reverse transitive reach)
  * and the subset that are test files.
  *
  * When `deps.scan` is absent, reports that the import scanner is not wired yet.
@@ -585,7 +585,7 @@ export async function impact(files: string[], deps: RetrievalDeps): Promise<Impa
 }
 
 // ---------------------------------------------------------------------------
-// AC-6: retrievalTools(deps) — ToolImpl wrappers for the broker
+// retrievalTools(deps) — ToolImpl wrappers for the broker
 // ---------------------------------------------------------------------------
 
 /**

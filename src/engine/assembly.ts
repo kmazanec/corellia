@@ -61,7 +61,7 @@ export interface SandboxConfig {
   /** The declared script entry points (name → repo-relative path) run_script may invoke. */
   declaredScripts: DeclaredScripts;
   /**
-   * Optional knowledge/eyes wiring (F-46). When truthy, the assembly registers
+   * Optional knowledge/eyes wiring . When truthy, the assembly registers
    * the five read-only retrieval ToolImpls (find_symbol / find_exemplar /
    * conventions_for / stack_versions / impact) in the broker table, backed by
    * the real import scanner and the store's knowledge projection. When absent or
@@ -187,7 +187,7 @@ export async function openSandboxAssembly(
 
   const fileTools = createFileTools(root);
 
-  // ── Retrieval tools (F-46) ───────────────────────────────────────────────
+  // ── Retrieval tools  ───────────────────────────────────────────────
   // When knowledge wiring is enabled, register the five read-only retrieval
   // ToolImpls backed by the REAL import scanner (scanImports over the worktree
   // root) and the store's knowledge projection (latest artifacts for the target
@@ -222,12 +222,12 @@ export async function openSandboxAssembly(
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// KNOWLEDGE / EYES WIRING (F-46)
+// KNOWLEDGE / EYES WIRING 
 // ───────────────────────────────────────────────────────────────────────────
 
 /**
  * The real ArchScanFn the architecture check consumes — backed by the
- * deterministic import scanner (F-42). The check passes (root, generatedAtSha);
+ * deterministic import scanner . The check passes (root, generatedAtSha);
  * we scan `root` and project scanImports' edge list onto the {from,to} ScanEdge
  * shape the check expects. The artifact's claimed SHA is advisory only here: the
  * scanner reads the live worktree, which is the ground truth the check validates
@@ -322,7 +322,7 @@ function gitHeadSha(repoRoot: string): string {
 }
 
 /**
- * The per-category self-validation map (F-44's checks). The architecture check
+ * The per-category self-validation map (checks). The architecture check
  * is bound to the REAL scanImports-backed ArchScanFn — replacing the no-op
  * scanner that starter-types registers (see {@link rebindKnowledgeScan}).
  */
@@ -393,7 +393,7 @@ export function defaultMintComprehension(
 }
 
 /**
- * Parse a learn-leaf artifact and persist it via F-41's write helpers. map-repo
+ * Parse a learn-leaf artifact and persist it via write helpers. map-repo
  * leaves emit a KnowledgeArtifact JSON in artifact.text → knowledge-written;
  * deep-dive-region leaves emit a RegionFacts JSON → knowledge-facts-written.
  *
@@ -437,7 +437,7 @@ async function persistLearnArtifact(
  * The composed knowledge wiring the engine's coverage gate + checkpoint consume,
  * built over the REAL parts: store-backed projection (filtered to repoRoot),
  * git HEAD, per-category self-validation (architecture bound to the real
- * scanImports ArchScanFn), default comprehension minting, and the F-41-backed
+ * scanImports ArchScanFn), default comprehension minting, and the event-store-backed
  * persist hook. Pass the result as EngineOptions.knowledge.
  *
  * NOTE: the engine only fires the split checkpoint (verify-on-read before

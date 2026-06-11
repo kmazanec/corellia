@@ -1,5 +1,5 @@
 /**
- * The scripted full-stack EYES convergence (F-46, AC-2). Drives the WHOLE
+ * The scripted full-stack EYES convergence. Drives the WHOLE
  * composed knowledge path with a scripted brain against a real tmp git fixture
  * repo. Zero network.
  *
@@ -303,7 +303,7 @@ describe('convergence-eyes — full-stack scripted path', () => {
     // The code leaf depends on all three comprehension children (maps before fan-out).
     expect(codeSpawn?.type === 'child-spawned' && codeSpawn.dependsOn.length).toBe(3);
 
-    // ── knowledge events landed (persist hook over F-41 helpers) ─────────────
+    // ── knowledge events landed (persist hook over helpers) ─────────────
     const kWritten = events.filter((e) => e.type === 'knowledge-written');
     const kFacts = events.filter((e) => e.type === 'knowledge-facts-written');
     expect(kWritten).toHaveLength(2);
@@ -334,7 +334,7 @@ describe('convergence-eyes — full-stack scripted path', () => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// 2. SHA drift mid-run → knowledge-checked + refresh path (AC-16)
+// 2. SHA drift mid-run → knowledge-checked + refresh path
 // ───────────────────────────────────────────────────────────────────────────
 
 describe('convergence-eyes — SHA drift triggers verify-on-read', () => {

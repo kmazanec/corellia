@@ -55,7 +55,7 @@ export interface CoverageRegionFact {
 }
 
 /** The knowledge shape the gate consumes. Structurally typed so assembly wires
- *  the real F-41/F-42 implementations and tests inject synthetics. */
+ *  the real store/scanner implementations and tests inject synthetics. */
 export interface KnowledgeForCoverage {
   /** Latest artifact per category (undefined = never generated). */
   artifacts: CoverageArtifact[];

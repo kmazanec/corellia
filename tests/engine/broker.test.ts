@@ -328,7 +328,7 @@ describe('unregistered tool', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Retrieval tool grant allow/refuse (AC-6)
+// Retrieval tool grant allow/refuse
 // ---------------------------------------------------------------------------
 
 describe('retrieval tool grants', () => {

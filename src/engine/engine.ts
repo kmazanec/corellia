@@ -51,7 +51,7 @@ const DEFAULT_SPEND_CEILING_USD = 15;
 
 /**
  * Worst-case price constant for the conservative token-only ceiling fallback
- * (AC-5, ADR-017). Used when an endpoint reports tokens but not cost.
+ * (ADR-017). Used when an endpoint reports tokens but not cost.
  * Covers output-token worst-case for opus-class models (~$0.000025/token).
  * The fallback fires only on cost-silent endpoints; over-conservatism just
  * halts earlier, which is preferable to under-bounding real spend.
@@ -150,7 +150,7 @@ export interface EngineOptions {
    * would be ''); knowledge wiring requires a sandbox.
    *
    * When absent, behavior is byte-identical to a run without this option —
-   * zero new events, no new brain calls (regression guard, AC-6).
+   * zero new events, no new brain calls (regression guard).
    *
    * The wiring object is structurally typed so assembly supplies the real
    * implementations while tests inject synthetic stubs.
@@ -187,11 +187,11 @@ export interface EngineOptions {
     mintComprehension: (missing: MissingRequirement[]) => ChildPlan[];
     /**
      * Persist a learn-type leaf's artifact after it passes its deterministic
-     * gate, per F-44's emission convention: map-repo emits a KnowledgeArtifact
+     * gate, per emission convention: map-repo emits a KnowledgeArtifact
      * as JSON in artifact.text, deep-dive-region emits a RegionFacts. The engine
      * calls this exactly once, at each leaf-success emission site, AFTER the gate
      * verdict passes — the assembly parses artifact.text and appends the
-     * knowledge-written / knowledge-facts-written event via F-41's helpers. A
+     * knowledge-written / knowledge-facts-written event via helpers. A
      * non-learn goal, a malformed artifact, or a missing hook is a no-op.
      *
      * Optional: tests that do not exercise persistence omit it. When absent, a
@@ -335,7 +335,7 @@ export class Engine {
     try {
       report = await this._run(goal, treeState);
 
-      // ── EMISSION diff ⊆ scope (tree-level, AC-6) ──────────────────────────
+      // ── EMISSION diff ⊆ scope (tree-level) ──────────────────────────
       // The worktree is shared by the whole tree, so a per-leaf diff check would
       // see siblings' work. The sound v1 enforcement is at the TREE ROOT's
       // emission against the ROOT goal's scope: the worktree's total diff must
@@ -757,7 +757,7 @@ export class Engine {
               decision.children, treeState,
             );
           } catch (gateErr) {
-            // FIX 2: coverage gate threw a structural split error (injection
+            // coverage gate threw a structural split error (injection
             // pushed children over the budget). Block through the existing
             // structural-error block path rather than silently over-subdividing.
             const msg = gateErr instanceof Error ? gateErr.message : String(gateErr);
@@ -931,7 +931,7 @@ export class Engine {
 
   /**
    * Persist a passing leaf's artifact through the assembly-supplied knowledge
-   * hook (F-41 helpers over F-44's emission convention). Called at every
+   * hook (helpers over emission convention). Called at every
    * leaf-success emission site in the attempt loop, AFTER the gate verdict has
    * passed and BEFORE the 'emitted' event is appended, so a knowledge-written /
    * knowledge-facts-written event lands ahead of the leaf's emission in the log.
@@ -1789,7 +1789,7 @@ export class Engine {
     const kw = this.knowledge;
     if (kw === undefined) return children;
 
-    // FIX 5: knowledge wiring requires a sandbox with a real repoRoot.
+    // knowledge wiring requires a sandbox with a real repoRoot.
     // Without a sandbox the gate cannot query meaningful knowledge — skip it
     // entirely so callers never query with repoRoot '' by accident.
     if (this._activeAssembly === undefined) return children;
@@ -1808,7 +1808,7 @@ export class Engine {
     // Build a goal model for coverageCheck — use the parent's kind and split status.
     // For a root split, the check covers architecture + stack.
     // Additionally, when children are make-kind leaves with scope, check their
-    // regions for deep-dive coverage too (AC-3: region-dive miss for code leaves).
+    // regions for deep-dive coverage too (region-dive misses for code leaves).
     const coverageGoal = {
       kind,
       isRootSplit: !this.registry.get(goal.type).leafOnly,
@@ -1832,7 +1832,7 @@ export class Engine {
 
     const result = coverageCheck(effectiveCoverageGoal, knowledgeState, validatedOk);
 
-    // FIX 3: filter out categories already covered by a refresh child so that
+    // filter out categories already covered by a refresh child so that
     // an invalid-then-refreshed category never produces two children for the
     // same category (one from checkpointVerifyArtifacts and one from
     // mintComprehension). Each category gets exactly one child.
@@ -1862,7 +1862,7 @@ export class Engine {
     const comprehensionChildren: ChildPlan[] =
       filteredResult.ok ? [] : kw.mintComprehension(filteredResult.missing);
 
-    // FIX 3: strip dependsOn on minted children to prevent cycles by construction
+    // strip dependsOn on minted children to prevent cycles by construction
     const safeComprehensionChildren = comprehensionChildren.map((c) => ({
       ...c,
       dependsOn: [],
@@ -1890,7 +1890,7 @@ export class Engine {
       })),
     ];
 
-    // FIX 2: re-validate the augmented split against the parent budget.
+    // re-validate the augmented split against the parent budget.
     // Comprehension/refresh injection can push the child count past the parent's
     // attempt budget — that is a structural split error. Throw so the caller
     // catches it and routes through the existing structural-error block path,
@@ -1935,7 +1935,7 @@ export class Engine {
     const t = this.now;
     const refreshChildren: ChildPlan[] = [];
     const validatedOk = new Set<import('../contract/knowledge.js').KnowledgeCategory>();
-    // FIX 3: track which categories already have a refresh child so
+    // track which categories already have a refresh child so
     // mintComprehension does not spawn a second child for the same category.
     const refreshedCategories = new Set<import('../contract/knowledge.js').KnowledgeCategory>();
 
@@ -2248,7 +2248,7 @@ export class Engine {
     if (usage.costUsd !== undefined) {
       treeState.spentUsd += usage.costUsd;
     } else {
-      // Conservative token-only fallback (AC-5, ADR-017): when the endpoint
+      // Conservative token-only fallback (ADR-017): when the endpoint
       // reports tokens but not cost, use the documented worst-case price constant
       // to bound spend. This prevents uncapped execution on cost-silent endpoints.
       const tokens = usage.promptTokens + usage.completionTokens;
