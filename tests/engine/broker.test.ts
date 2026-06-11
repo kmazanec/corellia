@@ -1,0 +1,292 @@
+/**
+ * Tests for the Broker mediator: grant refusal, scope refusal, traversal
+ * refusal, event emission, and successful dispatch. Uses InMemoryEventStore
+ * and createRegistry(starterTypes()) for realistic grant lookups.
+ */
+
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { Broker } from '../../src/engine/broker.js';
+import { InMemoryEventStore } from '../../src/eventlog/memory-store.js';
+import { createRegistry } from '../../src/library/registry.js';
+import { starterTypes } from '../../src/library/starter-types.js';
+import { createFileTools } from '../../src/engine/tools.js';
+import type { Goal } from '../../src/contract/goal.js';
+import type { ToolCall } from '../../src/contract/tool.js';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeGoal(overrides: Partial<Goal> = {}): Goal {
+  return {
+    id: 'g1',
+    type: 'implement',
+    parentId: null,
+    title: 'test goal',
+    spec: {},
+    intent: 'production',
+    scope: ['src/'],
+    budget: { attempts: 3, tokens: 1000, toolCalls: 10, wallClockMs: 60000 },
+    memories: [],
+    ...overrides,
+  };
+}
+
+function makeCall(overrides: Partial<ToolCall> = {}): ToolCall {
+  return {
+    id: 'call-1',
+    name: 'read_file',
+    args: { path: 'src/index.ts' },
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+let sandboxRoot: string;
+let store: InMemoryEventStore;
+let broker: Broker;
+
+const registry = createRegistry(starterTypes());
+
+beforeEach(async () => {
+  sandboxRoot = await mkdtemp(join(tmpdir(), 'corellia-broker-test-'));
+  await mkdir(join(sandboxRoot, 'src'), { recursive: true });
+  await writeFile(join(sandboxRoot, 'src', 'index.ts'), 'export const x = 1;\n');
+
+  store = new InMemoryEventStore();
+  const tools = createFileTools(sandboxRoot);
+  broker = new Broker({
+    root: sandboxRoot,
+    registry,
+    store,
+    tools: [tools.readFile, tools.writeFile, tools.listDir, tools.search],
+  });
+});
+
+afterEach(async () => {
+  await rm(sandboxRoot, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// Successful grant + dispatch
+// ---------------------------------------------------------------------------
+
+describe('granted read_file', () => {
+  it('returns ok:true with file content', async () => {
+    // 'implement' type has fs.read grant.
+    const goal = makeGoal({ type: 'implement', scope: ['src/'] });
+    const call = makeCall({ name: 'read_file', args: { path: 'src/index.ts' } });
+    const result = await broker.execute(goal, call);
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain('x = 1');
+    expect(result.callId).toBe(call.id);
+  });
+
+  it('appends a "ran" tool-call event', async () => {
+    const goal = makeGoal({ type: 'implement', scope: ['src/'] });
+    const call = makeCall({ name: 'read_file', args: { path: 'src/index.ts' } });
+    await broker.execute(goal, call);
+    const events = await store.list({ goalId: goal.id, type: 'tool-call' });
+    expect(events).toHaveLength(1);
+    const e = events[0];
+    if (e?.type === 'tool-call') {
+      expect(e.outcome).toBe('ran');
+      expect(e.tool).toBe('read_file');
+      expect(e.callId).toBe(call.id);
+      expect(e.goalId).toBe(goal.id);
+    }
+  });
+});
+
+describe('granted list_dir', () => {
+  it('returns ok:true with directory listing', async () => {
+    const goal = makeGoal({ type: 'implement' });
+    const call = makeCall({ name: 'list_dir', args: { path: 'src' } });
+    const result = await broker.execute(goal, call);
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain('index.ts');
+  });
+});
+
+describe('granted write_file', () => {
+  it('writes the file and returns ok:true', async () => {
+    // 'implement' type has fs.write grant.
+    const goal = makeGoal({ type: 'implement', scope: ['src/'] });
+    const call = makeCall({ name: 'write_file', args: { path: 'src/new.ts', content: 'export {}' } });
+    const result = await broker.execute(goal, call);
+    expect(result.ok).toBe(true);
+    // Verify the file was actually written via a read.
+    const readCall = makeCall({ id: 'call-2', name: 'read_file', args: { path: 'src/new.ts' } });
+    const readResult = await broker.execute(goal, readCall);
+    expect(readResult.ok).toBe(true);
+    expect(readResult.output).toBe('export {}');
+  });
+
+  it('appends two "ran" events (write + read)', async () => {
+    const goal = makeGoal({ type: 'implement', scope: ['src/'] });
+    await broker.execute(goal, makeCall({ id: 'c1', name: 'write_file', args: { path: 'src/x.ts', content: 'a' } }));
+    await broker.execute(goal, makeCall({ id: 'c2', name: 'read_file', args: { path: 'src/x.ts' } }));
+    const events = await store.list({ goalId: goal.id, type: 'tool-call' });
+    expect(events).toHaveLength(2);
+    expect(events.every((e) => e.type === 'tool-call' && e.outcome === 'ran')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Grant refusal
+// ---------------------------------------------------------------------------
+
+describe('grant refusal', () => {
+  it('refuses write_file for a type that lacks fs.write', async () => {
+    // 'freeze-contract' has fs.read + fs.write. Use 'judge-split' (no grants).
+    const goal = makeGoal({ type: 'judge-split' });
+    const call = makeCall({ name: 'write_file', args: { path: 'src/x.ts', content: 'x' } });
+    const result = await broker.execute(goal, call);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('fs.write');
+    expect(result.callId).toBe(call.id);
+  });
+
+  it('appends a "refused" event naming the required grant', async () => {
+    const goal = makeGoal({ type: 'judge-split' });
+    const call = makeCall({ name: 'write_file', args: { path: 'src/x.ts', content: 'x' } });
+    await broker.execute(goal, call);
+    const events = await store.list({ goalId: goal.id, type: 'tool-call' });
+    expect(events).toHaveLength(1);
+    const e = events[0];
+    if (e?.type === 'tool-call') {
+      expect(e.outcome).toBe('refused');
+      expect(e.reason).toContain('fs.write');
+      expect(e.tool).toBe('write_file');
+    }
+  });
+
+  it('refuses read_file for a type that lacks fs.read', async () => {
+    // 'promote-memory' only has memory.write
+    const goal = makeGoal({ type: 'promote-memory' });
+    const call = makeCall({ name: 'read_file', args: { path: 'src/index.ts' } });
+    const result = await broker.execute(goal, call);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('fs.read');
+  });
+
+  it('refuses an unknown tool name', async () => {
+    const goal = makeGoal({ type: 'implement' });
+    const call = makeCall({ name: 'nonexistent_tool', args: {} });
+    const result = await broker.execute(goal, call);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('nonexistent_tool');
+  });
+
+  it('appends a refused event for an unknown tool', async () => {
+    const goal = makeGoal({ type: 'implement' });
+    const call = makeCall({ name: 'unknown_tool', args: {} });
+    await broker.execute(goal, call);
+    const events = await store.list({ type: 'tool-call' });
+    expect(events).toHaveLength(1);
+    if (events[0]?.type === 'tool-call') {
+      expect(events[0].outcome).toBe('refused');
+    }
+  });
+
+  it('does not crash when goal type is unknown', async () => {
+    const goal = makeGoal({ type: 'nonexistent-type' });
+    const call = makeCall({ name: 'read_file', args: { path: 'src/index.ts' } });
+    const result = await broker.execute(goal, call);
+    expect(result.ok).toBe(false);
+    expect(result.callId).toBe(call.id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scope refusal (write_file)
+// ---------------------------------------------------------------------------
+
+describe('scope refusal (write_file)', () => {
+  it('refuses write outside the goal scope', async () => {
+    // 'implement' has fs.write, but scope is ['src/'] — tests/ is out of scope.
+    const goal = makeGoal({ type: 'implement', scope: ['src/'] });
+    const call = makeCall({ name: 'write_file', args: { path: 'tests/bad.ts', content: 'x' } });
+    const result = await broker.execute(goal, call);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('scope');
+  });
+
+  it('appends a "ran" event even when the tool itself returns ok:false', async () => {
+    // The broker records 'ran' for granted calls; the tool's own refusal is in output.
+    const goal = makeGoal({ type: 'implement', scope: ['src/'] });
+    const call = makeCall({ name: 'write_file', args: { path: 'tests/bad.ts', content: 'x' } });
+    await broker.execute(goal, call);
+    const events = await store.list({ goalId: goal.id, type: 'tool-call' });
+    expect(events).toHaveLength(1);
+    // The broker dispatched to the impl (which refused scope internally) — outcome is 'ran'.
+    if (events[0]?.type === 'tool-call') {
+      expect(events[0].outcome).toBe('ran');
+    }
+  });
+
+  it('refuses traversal path that escapes root for a granted type', async () => {
+    const goal = makeGoal({ type: 'implement', scope: ['src/'] });
+    const call = makeCall({ name: 'write_file', args: { path: '../escape.ts', content: 'x' } });
+    const result = await broker.execute(goal, call);
+    expect(result.ok).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Event emission discipline (every call appears in the log)
+// ---------------------------------------------------------------------------
+
+describe('event log completeness', () => {
+  it('logs every call in order regardless of outcome', async () => {
+    const granted = makeGoal({ type: 'implement', scope: ['src/'] });
+    const ungrantedGoal = makeGoal({ id: 'g2', type: 'judge-split' });
+    await broker.execute(granted, makeCall({ id: 'c1', name: 'read_file', args: { path: 'src/index.ts' } }));
+    await broker.execute(ungrantedGoal, makeCall({ id: 'c2', name: 'write_file', args: { path: 'src/x.ts', content: 'x' } }));
+    await broker.execute(granted, makeCall({ id: 'c3', name: 'list_dir', args: { path: 'src' } }));
+    const all = await store.list({ type: 'tool-call' });
+    expect(all).toHaveLength(3);
+    expect(all.map((e) => e.type === 'tool-call' ? e.callId : '')).toEqual(['c1', 'c2', 'c3']);
+  });
+
+  it('filters events by goalId correctly', async () => {
+    const g1 = makeGoal({ id: 'g1', type: 'implement', scope: ['src/'] });
+    const g2 = makeGoal({ id: 'g2', type: 'implement', scope: ['src/'] });
+    await broker.execute(g1, makeCall({ id: 'c1', name: 'read_file', args: { path: 'src/index.ts' } }));
+    await broker.execute(g2, makeCall({ id: 'c2', name: 'read_file', args: { path: 'src/index.ts' } }));
+    const g1Events = await store.list({ goalId: 'g1', type: 'tool-call' });
+    expect(g1Events).toHaveLength(1);
+    if (g1Events[0]?.type === 'tool-call') {
+      expect(g1Events[0].callId).toBe('c1');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tool not registered in this broker (implementation missing)
+// ---------------------------------------------------------------------------
+
+describe('unregistered tool', () => {
+  it('refuses when the impl is absent from the dispatch table', async () => {
+    // Build a broker with only readFile — write_file is granted but unregistered.
+    const tools = createFileTools(sandboxRoot);
+    const sparseBroker = new Broker({
+      root: sandboxRoot,
+      registry,
+      store,
+      tools: [tools.readFile], // write_file NOT registered
+    });
+    const goal = makeGoal({ type: 'implement', scope: ['src/'] });
+    const call = makeCall({ name: 'write_file', args: { path: 'src/x.ts', content: 'x' } });
+    const result = await sparseBroker.execute(goal, call);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('write_file');
+    expect(result.output).toContain('not registered');
+  });
+});
