@@ -84,13 +84,13 @@ PRs); daemonized listener front door.
 | F-34 | Tree worktree lifecycle | [04](./iterations/03-hands/04-tree-worktree.md) | in-memory artifacts → isolated branch with real diffs | — |
 | F-35 | Usage accounting + ceiling | [05](./iterations/03-hands/05-real-accounting.md) | chars/4 guess → provider-reported usage, $15 halt | — |
 | F-36 | Live step adapter | [06](./iterations/03-hands/06-live-step-adapter.md) | one-shot completions → live model drives the loop | — |
+| F-37 | Assembly: engine wiring + convergence | [07](./iterations/03-hands/07-assembly.md) | six unwired modules → the composed engine + the done-when checks | F-31..F-36 (hard) |
 
-**Zero hard edges** — every feature builds against the frozen barrier
-(ADR-002 discipline), so all six fan out once contracts land.
-**Overlap note for the build:** F-32/F-34/F-35 all modify
-`src/engine/engine.ts` — schedule them in worktrees folded back by
-cherry-pick, or serialize just those three on one trunk; the other three are
-collision-free.
+**One hard node** — F-31..F-36 build against the frozen barrier with zero
+hard edges among them; F-37 (assembly) genuinely consumes all six
+implementations and builds last. **Scheduling (per the approved plan):**
+F-31/F-33/F-36 fan out in worktrees; F-32 → F-35 → F-34 serialize on the
+trunk (`engine.ts` overlap); F-37 closes on the trunk after fold-back.
 
 ## Cross-cutting contracts — iteration 3's barrier
 

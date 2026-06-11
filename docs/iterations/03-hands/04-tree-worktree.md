@@ -87,6 +87,17 @@ None.
 
 ## Build plan (approved)
 
+> **Scope note (approval review, 2026-06-11):** this feature delivers the
+> worktree *module* — lifecycle primitives, the real-diff scope check, the
+> lifecycle events — with its own integration tests against tmp git repos.
+> **Wiring the engine** (calling `openTreeWorktree` at tree start, invoking
+> `diffWithinScope` on the emission path, collect/teardown on completion) is
+> owned by **F-37 (assembly)**; spec AC-2's "when it attempts to emit" is
+> therefore proven end-to-end by F-37's scripted convergence test, while this
+> feature proves the underlying functions. As a result F-34 does **not**
+> modify `src/engine/engine.ts`, but it remains scheduled at the end of the
+> serial chain so its module lands on the trunk F-37 wires up.
+
 ### Chunk 1: Git lifecycle primitives in a worktree module (open + create branch + ensure-gitignored)
 
 - [ ] **Delivers:** openTreeWorktree(repoRoot, rootGoalId) creates a git worktree on a fresh branch under <repoRoot>/.claude/worktrees/<sanitized-tree-id>/, ensures .claude/worktrees is gitignored (appends to .git/info/exclude when the tracked .gitignore is absent or should not be touched; leaves a present tracked .gitignore unmodified), and returns { treeId, branch, root } with root as the absolute worktree path a future broker binds to. Implemented with node:child_process execFileSync passing git args as an array (no shell string), reusing nothing external — no new deps. **Satisfies:** AC-1 (a worktree exists on a fresh branch under .claude/worktrees/<tree-id>/ and .claude/worktrees is ensured gitignored via .git/info/exclude when tracked .gitignore is absent or should not change). **Tests:** tests/engine/worktree.test.ts — describe('open worktree'): asserts branch exists, worktree dir exists at the returned absolute root, .git/info/exclude contains the .claude/worktrees entry when no tracked .gitignore exists, and a present tracked .gitignore is left byte-for-byte unmodified. Tmp repo via fs.mkdtemp + git init. **Contract touchpoint:** none.

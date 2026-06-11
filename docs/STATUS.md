@@ -13,14 +13,14 @@ Next up: plan iteration 03-hands.
 |---|-----------|--------|-------------|-------|
 | 01 | Walking skeleton | Shipped | — | engine, evals, budgets, event log (PR #1) |
 | 02 | Substrate + live brain | Shipped | — | Postgres, gates, listener, flywheel, OpenRouter (PR #2) |
-| 03 | Hands | Specified | A | 6 features, zero hard deps — one barrier, full fan-out |
+| 03 | Hands | Planned + approved | A | 7 features: F-31..F-36 fan out behind one barrier; F-37 (assembly) wires them, last |
 | 04 | Eyes | Arc only | — | gate brief + specs after 03 ships (JIT) |
 | 05 | Taste | Arc only | — | after 04 |
 | 06 | Self-hosting | Arc only | — | after 05; closes the PRD's success bar |
 
 ## What's next
 
-Plan iteration 03: freeze the barrier contracts (concrete signatures per the
-roadmap's contracts table, consistent with ADR-014..018), then build — all
-six features fan out behind one barrier (mind the `engine.ts` overlap note
-for F-32/F-34/F-35).
+Build iteration 03 from the approved BUILD-PLAN-03-hands.md: barrier commit
+first (incl. mechanical compile-true propagation), then F-31/F-33/F-36 in
+worktrees + F-32 → F-35 → F-34 on the trunk, then F-37 (assembly +
+convergence) last. Launch is operator-triggered.
