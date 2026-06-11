@@ -4,6 +4,7 @@
  */
 
 import type { GoalTypeDef } from '../contract/goal-type.js';
+import { loadFamilySkill } from './skills.js';
 
 /**
  * Lint a set of GoalTypeDef objects and return a list of human-readable
@@ -58,6 +59,18 @@ export function lintLibrary(defs: GoalTypeDef[]): string[] {
     if (def.tier.ladder.length > 0 && def.tier.ladder[0] !== def.tier.default) {
       violations.push(
         `Type "${def.name}" tier ladder does not start at default tier "${def.tier.default}" (starts at "${def.tier.ladder[0]}")`,
+      );
+    }
+
+    // Family skill file must exist and contain a section for this type
+    const skill = loadFamilySkill(def.family);
+    if (skill === null) {
+      violations.push(
+        `Type "${def.name}" family skill file missing: src/library/skills/${def.family}.md`,
+      );
+    } else if (skill.sectionFor(def.name) === null) {
+      violations.push(
+        `Type "${def.name}" has no section in src/library/skills/${def.family}.md (add ## ${def.name})`,
       );
     }
   }
