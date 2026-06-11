@@ -264,6 +264,7 @@ describe('FactoryEvent switch exhaustiveness', () => {
         case 'ceiling-reached': return 'ceiling-reached';
         case 'transport-retry': return 'transport-retry';
         case 'malformation-reprompt': return 'malformation-reprompt';
+        case 'golden-candidate': return 'golden-candidate';
       }
     }
 

@@ -41,6 +41,14 @@ export interface BrainContext {
    * relied on upstream; a hint is the factory saying "this shape worked before."
    */
   patternHint?: SplitMemo;
+  /**
+   * The JSON-Schema for the artifact this call must emit (ADR-023). Set only on
+   * the dedicated emit call of an explore-then-emit leaf; the adapter translates
+   * it into the provider's `response_format: { type: 'json_schema', … }` on that
+   * call, so the final artifact is well-formed by construction. Absent on every
+   * exploratory step and on types without an `outputSchema`.
+   */
+  outputSchema?: Record<string, unknown>;
 }
 
 /**

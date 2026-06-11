@@ -50,7 +50,13 @@ export interface GoalTypeDef {
   name: string;
   /** The locked eval-shape class this type belongs to; its grant must fit the kind's ceiling. */
   kind: Kind;
-  /** The code-reuse family in the factory repo whose skeleton and skills this type includes. */
+  /**
+   * The skill-bundle key (ADR-022): the family whose markdown skill file and
+   * per-type section the loader resolves and the engine injects into this type's
+   * harness. Families are defined in GOAL-TYPES.md (the name in parentheses on
+   * each type row, e.g. `build`, `arbiter`, `critique`, `curate`, `comprehend`).
+   * A registered type whose family file is missing fails the constitution lint.
+   */
   family: string;
   /**
    * Whether this type may never spawn children — a guaranteed structural base
@@ -84,6 +90,14 @@ export interface GoalTypeDef {
    * them before committing, instead of a single roll on an unfamiliar shape.
    */
   scan?: { k: number; lenses: string[] };
+  /**
+   * A JSON-Schema object describing this type's artifact (ADR-023). Its presence
+   * switches the leaf to explore-then-emit: the engine runs the tool loop to
+   * explore, then makes one dedicated emit call with {@link BrainContext.outputSchema}
+   * set so well-formedness is the provider's guarantee. Types without it behave
+   * exactly as today — the deterministic gate remains the semantic check either way.
+   */
+  outputSchema?: Record<string, unknown>;
 }
 
 /**

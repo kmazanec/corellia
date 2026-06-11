@@ -81,7 +81,16 @@ export type FactoryEvent =
   /** A deep-dive's anchored region facts were appended — keeps dive output evented (ADR-003/ADR-019). */
   | { type: 'knowledge-facts-written'; at: number; goalId: string; facts: RegionFacts }
   /** A consumer ran the checkpoint freshness check on an artifact (verify-on-read, ADR-019). */
-  | { type: 'knowledge-checked'; at: number; goalId: string; repoRoot: string; category: KnowledgeCategory; sha: string; outcome: 'fresh' | 'stale-validated' | 'invalid' };
+  | { type: 'knowledge-checked'; at: number; goalId: string; repoRoot: string; category: KnowledgeCategory; sha: string; outcome: 'fresh' | 'stale-validated' | 'invalid' }
+  /**
+   * A judge verdict on a real (non-scripted) run was captured as a golden-set
+   * candidate (ADR-024): the `goldenCandidates` projection collects these per
+   * judge-type for later human curation. References the judged context by digest
+   * — the artifact and rubric are not duplicated into the log. Outcome labels
+   * arrive later from exogenous signals (the operator's merge/rejection); capture
+   * here is provenance, not promotion.
+   */
+  | { type: 'golden-candidate'; at: number; goalId: string; judgeType: string; artifactDigest: string; rubricDigest: string; verdictPass: boolean; tier: Tier; model?: string };
 
 /**
  * The append-only event store. The append is the serialization point — the

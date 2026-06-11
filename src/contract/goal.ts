@@ -98,6 +98,13 @@ export interface Usage {
   completionTokens: number;
   /** The provider-reported dollar cost of this call, when the endpoint reports it. */
   costUsd?: number;
+  /**
+   * Prompt tokens served from the provider's cache, when the endpoint reports
+   * them — a subset of {@link promptTokens}, billed at the cache-read rate. Lets
+   * the cost summary credit cache hits (e.g. the explore-then-emit transcript
+   * prefix, ADR-023) instead of pricing every prompt token at the full rate.
+   */
+  cachedPromptTokens?: number;
 }
 
 /** The zero-usage sentinel: no tokens, no cost. Used by non-metering paths. */
