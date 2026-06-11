@@ -4,14 +4,14 @@ title: Import-edge scanner + impact()
 iteration: 04-eyes
 type: implement
 intent: production
-status: not-started
+status: shipped
 dependsOn: []
 contracts: [ADR-020]
 ---
 
 # Feature: Import-edge scanner + impact()
 
-**ID:** F-42 · **Iteration:** 04-eyes · **Status:** Not started
+**ID:** F-42 · **Iteration:** 04-eyes · **Status:** Shipped (build/04-eyes)
 
 ## What this delivers (before → after)
 
@@ -60,14 +60,14 @@ ImportGraph`, `impact(graph, files) => { files, testFiles }`.
 
 ## Build plan (approved)
 
-- [ ] **Pattern extraction + path resolution** — `src/library/imports.ts`:
+- [x] **Pattern extraction + path resolution** — `src/library/imports.ts`:
   per-language regex table (named const, auditable), repo-relative
   resolution with extension/index inference, exclusion rules. Tests:
   `tests/library/imports.test.ts` over tmp fixture trees (AC-1/2/4/6).
-- [ ] **Graph + impact()** — reverse adjacency, transitive closure
+- [x] **Graph + impact()** — reverse adjacency, transitive closure
   (cycle-safe), test-file association heuristics. Tests: same file
   (AC-3, cycles, self-import, unknown file → empty).
-- [ ] **Determinism + drift** — stable ordering, `scannedAtSha` from git
+- [x] **Determinism + drift** — stable ordering, `scannedAtSha` from git
   HEAD (plumbing optional: accept injected sha), identical-rescan pin
   (AC-5).
 
@@ -77,3 +77,7 @@ Pure unit tests on tmp fixture trees, zero network, zero deps. The regex
 table is the risk concentration: the fixture set IS the spec of what we
 claim to parse — keep it explicit and extensible. Per-chunk named file; one
 typecheck + full suite at end.
+
+## Implementation notes
+
+Built as planned plus review repairs: default skip set reduced to {node_modules, .git} (the wider set silently dropped source under dirs named build/ — an ADR-020 violation caught by the judge), opt-in extraSkipDirs, seed-inclusion documented, multiline/export-star/side-effect forms pinned.

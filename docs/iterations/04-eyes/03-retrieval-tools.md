@@ -4,14 +4,14 @@ title: Typed retrieval API as granted tools
 iteration: 04-eyes
 type: implement
 intent: production
-status: not-started
+status: shipped
 dependsOn: []
 contracts: [ADR-020, ADR-014]
 ---
 
 # Feature: The typed retrieval API as granted tools
 
-**ID:** F-43 · **Iteration:** 04-eyes · **Status:** Not started
+**ID:** F-43 · **Iteration:** 04-eyes · **Status:** Shipped (build/04-eyes)
 
 ## What this delivers (before → after)
 
@@ -63,12 +63,12 @@ with fixture graphs in tests; real integration at F-46. Consumes
 
 ## Build plan (approved)
 
-- [ ] **Library functions** — `src/library/retrieval.ts`: the five
+- [x] **Library functions** — `src/library/retrieval.ts`: the five
   functions, knowledge-projection-aware (2/3 read artifacts; 1/4/5 read the
   repo/scan), all returning transcript-friendly text + structured form.
   Tests: `tests/library/retrieval.test.ts` (fixture repo + synthetic
   artifacts/graph; ACs 1–5).
-- [ ] **ToolImpls + grant wiring** — `retrievalTools(deps)` returning the
+- [x] **ToolImpls + grant wiring** — `retrievalTools(deps)` returning the
   five ToolImpls (mirror `runScriptTool`'s shape); broker-level tests for
   grant refusal/allow using the barrier's extended `GRANT_TOOL_MAP`
   (`tests/engine/broker.test.ts` extend; AC-6).
@@ -78,3 +78,7 @@ with fixture graphs in tests; real integration at F-46. Consumes
 Unit tests over fixtures and synthetic projections; broker tests reuse the
 existing refusal idiom. No engine imports (assembly registers the tools at
 F-46). No network. Per-chunk named files; one typecheck + full suite at end.
+
+## Implementation notes
+
+Built as planned plus hardening (posix-stable impact keys, symbol-cap/default-export/arrow pins, regex fallback). RetrievalDeps is fully structural; assembly wires scanImports + the knowledge projection.

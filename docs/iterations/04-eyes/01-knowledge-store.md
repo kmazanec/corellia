@@ -4,14 +4,14 @@ title: Knowledge store + projection
 iteration: 04-eyes
 type: implement
 intent: production
-status: not-started
+status: shipped
 dependsOn: []
 contracts: [ADR-019, ADR-003]
 ---
 
 # Feature: Knowledge store + projection
 
-**ID:** F-41 · **Iteration:** 04-eyes · **Status:** Not started
+**ID:** F-41 · **Iteration:** 04-eyes · **Status:** Shipped (build/04-eyes)
 
 ## What this delivers (before → after)
 
@@ -55,16 +55,16 @@ None hard — builds on the barrier's `src/contract/knowledge.ts` and the
 
 ## Build plan (approved)
 
-- [ ] **Projection + freshness state** — `projectKnowledge` in
+- [x] **Projection + freshness state** — `projectKnowledge` in
   `src/eventlog/projections.ts`: latest artifact per repo×category, freshness
   from interleaved checked events; exhaustive switch arms for the new
   members everywhere the union is switched. Tests:
   `tests/eventlog/projections.test.ts` (new describe — replace/latest, stale
   transitions, point-in-time replay). Run only that file.
-- [ ] **Store round-trips** — `tests/eventlog/stores.test.ts` extends:
+- [x] **Store round-trips** — `tests/eventlog/stores.test.ts` extends:
   knowledge events through InMemory, JSONL, and (skip-without-DATABASE_URL)
   pg stores.
-- [ ] **Write helper** — a small `writeKnowledge(store, artifact)` /
+- [x] **Write helper** — a small `writeKnowledge(store, artifact)` /
   `recordKnowledgeCheck(...)` pair (library-side) so producers don't
   hand-roll events; used by F-44/F-45. Tests in the projection file.
 
@@ -74,3 +74,7 @@ Pure projection/store unit tests, zero network, mirroring the
 `projectMemory`/`costSummary` test idiom. Per-chunk: named file only; one
 repo typecheck + full suite at feature end (barrier members force exhaustive
 switches repo-wide).
+
+## Implementation notes
+
+Built as planned plus review repairs (real pg pool in the round-trip tests — the private-field string-key access would have crashed under a live DATABASE_URL; deep-copied pointers; bidirectional freshness pinned). Exported KnowledgeView keyed `repoRoot::category`.

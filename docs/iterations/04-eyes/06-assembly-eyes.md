@@ -4,14 +4,14 @@ title: "Assembly: eyes wired + convergence"
 iteration: 04-eyes
 type: implement
 intent: production
-status: not-started
+status: shipped
 dependsOn: [F-41, F-42, F-43, F-44, F-45]
 contracts: [ADR-019, ADR-020, ADR-021]
 ---
 
 # Feature: Assembly — eyes wired + the convergence checks
 
-**ID:** F-46 · **Iteration:** 04-eyes · **Status:** Not started
+**ID:** F-46 · **Iteration:** 04-eyes · **Status:** Shipped (build/04-eyes)
 *(The lesson of iteration 03, pre-applied: integration has an explicit
 owner with honest hard deps.)*
 
@@ -67,16 +67,16 @@ F-41..F-45 — genuine hard deps: this wires their implementations.
 
 ## Build plan (approved)
 
-- [ ] **Knowledge wiring in the assembly** — extend `SandboxConfig` /
+- [x] **Knowledge wiring in the assembly** — extend `SandboxConfig` /
   `openSandboxAssembly` with the knowledge source (store-backed projection +
   scanner); register `retrievalTools` in the broker table; supply the
   gate/checkpoint query functions. Regression: knowledge-absent config
   byte-identical. Tests: `tests/engine/assembly.test.ts` extend.
-- [ ] **Scripted convergence test** — `tests/engine/convergence-eyes.test.ts`
+- [x] **Scripted convergence test** — `tests/engine/convergence-eyes.test.ts`
   per AC-2, split into 2–3 focused tests if the mega-test gets brittle (the
   AC-16 drift path may be its own test). This is the done-when, scripted
   half.
-- [ ] **live:eyes** — `examples/live-eyes.ts` + package script per AC-3/4:
+- [x] **live:eyes** — `examples/live-eyes.ts` + package script per AC-3/4:
   repo-path argument (default: corellia's own root), read-only goal plan
   (map four categories + one dive), ceiling-bounded, prints artifacts/
   coverage/cost. Never run by builders or CI — the operator runs it.
@@ -95,3 +95,7 @@ one typecheck + full suite at end.
   checks anchors/edges, not insight). Capture transcripts; that evidence
   feeds iteration 5's harness work. A failed live run is evidence, not a
   build failure.
+
+## Implementation notes
+
+Built green with one named escalation (no-worktree read-only mode needs an engine seam — deferred; live-eyes tears down completely instead, proven byte-identical on cats). Post-judge fixes: gitdir-aware exclude restore, tilde expansion. The live runs then exposed a CROSS-ITERATION bug all prior judges missed: the step transcript never carried the goal (models worked blind; live:hands had only succeeded because its task was discoverable from the fixture). Fixed in the engine with a prefix-stable harness message; pinned by test.

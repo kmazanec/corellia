@@ -38,7 +38,7 @@ green, and the report printed real totals ($0.0658). Scope-violation
 refusals are pinned by the scripted convergence suite. Outcomes + debts in
 the build notes.
 
-### Iteration 4 — Eyes: brownfield comprehension *(specified, awaiting plan approval)*
+### Iteration 4 — Eyes: brownfield comprehension *(built — PR open)*
 
 Decisions locked in ADR-019/020/021 (event-projected artifacts with
 SHA-anchored freshness; hybrid impact graph — deterministic scanner +
@@ -47,11 +47,13 @@ architecture, stack, conventions, test-scaffold. Specs in
 [iterations/04-eyes/](./iterations/04-eyes/) (F-41..F-46, assembly-owned
 integration pre-applied).
 
-*Done when:* the scripted convergence passes (gate spawns maps as deps; a
-leaf consults `impact()` through the broker before its first write; SHA
-drift triggers validation+refresh), `live:eyes` maps corellia itself with
-self-validating artifacts, and one operator-named foreign repo maps
-read-only (early AC-3 evidence).
+*Done:* scripted convergence green (gate→maps-as-deps, impact-before-write,
+drift→refresh, phantom-pointer caught). Live mapping PARTIAL: every category
+validated live at least once on corellia, never 5/5 in one run; cats run
+blocked cleanly with byte-identical teardown (the hygiene half proven).
+The reliability gap is named harness debt carried to iteration 5
+(structured-output emission). Evidence + the cross-iteration transcript bug
+it exposed: build notes.
 
 ### Iteration 5 — Taste: the library at full strength
 

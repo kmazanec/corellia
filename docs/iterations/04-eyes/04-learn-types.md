@@ -4,14 +4,14 @@ title: map-repo + deep-dive-region goal types
 iteration: 04-eyes
 type: implement
 intent: production
-status: not-started
+status: shipped
 dependsOn: []
 contracts: [ADR-019, ADR-021]
 ---
 
 # Feature: `map-repo` + `deep-dive-region` goal types
 
-**ID:** F-44 · **Iteration:** 04-eyes · **Status:** Not started
+**ID:** F-44 · **Iteration:** 04-eyes · **Status:** Shipped (build/04-eyes)
 
 ## What this delivers (before → after)
 
@@ -64,17 +64,17 @@ sandboxed validation runs; no product-file writes).
 
 ## Build plan (approved)
 
-- [ ] **Type definitions + harness content** — extend
+- [x] **Type definitions + harness content** — extend
   `src/library/starter-types.ts` with both types (specs, grants, tiers,
   eval wiring) and their prompt content following the existing type-card
   style. Tests: `tests/library/registry.test.ts` extend (registration,
   lints — AC-1).
-- [ ] **Per-category validation checks** — `src/library/knowledge-checks.ts`:
+- [x] **Per-category validation checks** — `src/library/knowledge-checks.ts`:
   the four category validators as DeterministicChecks (consuming
   CheckContext for the executing ones) + the anchor-existence check for
   dives. Tests: `tests/library/knowledge-checks.test.ts` over fixture repos
   + synthetic artifacts (AC-2/3/4 deterministic halves).
-- [ ] **End-to-end through the engine (scripted)** — a scripted `map-repo`
+- [x] **End-to-end through the engine (scripted)** — a scripted `map-repo`
   leaf produces an artifact, validation gates it, `knowledge-written` lands;
   a scripted dive produces anchored facts. Tests:
   `tests/engine/engine.test.ts` extend or a small new file (AC-3/5).
@@ -84,3 +84,7 @@ sandboxed validation runs; no product-file writes).
 Fixture repos in tmp dirs (reusing iteration-03 patterns), scripted brains
 only, validation checks proven red AND green. No network. Per-chunk named
 files; one typecheck + full suite at end.
+
+## Implementation notes
+
+Built as planned plus review repairs: one validation root for scan+existence, testScaffoldCheck delegates to runScriptCheck, version claims anchored to `version:<name>@<version>` notes. Post-review live evidence drove two amendments: packaging tolerance (fenced/single-file JSON) in the shared extractArtifactPayload, and map-repo default tier bumped haiku→sonnet (instrumented from four live runs).

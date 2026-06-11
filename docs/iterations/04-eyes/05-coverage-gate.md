@@ -4,14 +4,14 @@ title: Mechanical coverage gate + JIT comprehension spawning
 iteration: 04-eyes
 type: implement
 intent: production
-status: not-started
+status: shipped
 dependsOn: []
 contracts: [ADR-021, ADR-019]
 ---
 
 # Feature: Mechanical coverage gate + JIT comprehension spawning
 
-**ID:** F-45 · **Iteration:** 04-eyes · **Status:** Not started
+**ID:** F-45 · **Iteration:** 04-eyes · **Status:** Shipped (build/04-eyes)
 
 ## What this delivers (before → after)
 
@@ -67,18 +67,18 @@ runtime — scripted tests register stub types). **Touches
 
 ## Build plan (approved)
 
-- [ ] **Policy table + coverage query** — `src/library/coverage.ts`: the
+- [x] **Policy table + coverage query** — `src/library/coverage.ts`: the
   ADR-021 table + `coverageCheck(goal, knowledge, graph)` returning
   `{ok, missing: CategoryRequirement[]}`. Pure. Tests:
   `tests/library/coverage.test.ts` (every table row, exemptions, scope-aware
   architecture coverage).
-- [ ] **Gate integration + dependency injection** — engine split-gate seam:
+- [x] **Gate integration + dependency injection** — engine split-gate seam:
   run the query when knowledge wiring is present; on misses synthesize
   comprehension ChildPlans (depended-on by all sibling children), emit
   `gate-checked` with `missing`; scripted tests prove sequencing (map
   children complete before the fan-out spawns). Tests:
   `tests/engine/gates.test.ts` extend (AC-1/2/3/5/6).
-- [ ] **Checkpoint verify-on-read** — at the existing decide/split/integrate
+- [x] **Checkpoint verify-on-read** — at the existing decide/split/integrate
   checkpoints: SHA-compare consumed artifacts, run self-validation on drift,
   spawn refresh dependency on failure; events recorded. Tests:
   `tests/engine/gates.test.ts` or a focused file (AC-4: both the
@@ -90,3 +90,7 @@ Scripted brains + synthetic knowledge projections + fixture repos for the
 SHA-drift cases (commit, then mutate). The regression guard (AC-6) re-runs
 the existing engine suite untouched. No network. Per-chunk named files; one
 typecheck + full suite at end.
+
+## Implementation notes
+
+FAILED first judgment: the builder left the validatedCategories parameter UNCOMMITTED (committed HEAD didn't typecheck), injected children bypassed validateSplit, the invalid path double-spawned, and a docstring claimed checkpoints that don't exist. All repaired; integrate checkpoint is HONESTLY deferred (split checkpoint full; docstrings now tell the truth). Coverage requires an active sandbox.
