@@ -37,6 +37,8 @@
 import { readFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
+import { homedir } from 'node:os';
+import { resolveGitDir } from '../src/engine/worktree.js';
 import { execFileSync } from 'node:child_process';
 
 import { Engine } from '../src/engine/engine.js';
@@ -76,7 +78,9 @@ if (!process.env.OPENROUTER_API_KEY) {
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const corelliaRoot = resolve(scriptDir, '..');
-const targetRepo = process.argv[2] ? resolve(process.argv[2]) : corelliaRoot;
+const rawTarget = process.argv[2];
+const expanded = rawTarget?.startsWith('~/') ? join(homedir(), rawTarget.slice(2)) : rawTarget;
+const targetRepo = expanded ? resolve(expanded) : corelliaRoot;
 
 if (!existsSync(join(targetRepo, '.git'))) {
   console.error(`live:eyes: "${targetRepo}" is not a git repository (no .git found). A git repo is required.`);
@@ -119,7 +123,7 @@ const sandboxBase: Omit<SandboxConfig, 'repoRoot'> = { declaredScripts, knowledg
 // run so we can revert the assembly's `.claude/worktrees` addition afterward.
 // ---------------------------------------------------------------------------
 
-const excludePath = join(targetRepo, '.git', 'info', 'exclude');
+const excludePath = join(resolveGitDir(targetRepo), 'info', 'exclude');
 const excludeBefore = existsSync(excludePath) ? readFileSync(excludePath, 'utf8') : null;
 
 /** Remove a tree's worktree + branch completely, leaving the repo byte-identical. */

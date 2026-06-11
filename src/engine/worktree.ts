@@ -60,32 +60,32 @@ export interface TreeWorktree {
 
 const WORKTREES_PATTERN = '.claude/worktrees/';
 
-function ensureGitignored(repoRoot: string): void {
-  // Find the real .git directory (handles worktree .git files too).
+/**
+ * Resolve the real .git directory for a repo root, following the `gitdir:`
+ * indirection a linked worktree's .git FILE carries. Consumers that read or
+ * write .git/info/exclude must use this so they target the same file the
+ * lifecycle writes.
+ */
+export function resolveGitDir(repoRoot: string): string {
   const gitFile = join(repoRoot, '.git');
-  let gitDir: string;
-
   if (existsSync(gitFile)) {
     const st = statSync(gitFile);
     if (st.isFile()) {
-      // It's a worktree .git file — read the gitdir reference.
       const content = readFileSync(gitFile, 'utf-8').trim();
       if (content.startsWith('gitdir:')) {
-        // worktreeGitDir is something like /path/to/repo/.git/worktrees/name
-        // The main .git is two levels up.
+        // The worktree gitdir is <main>/.git/worktrees/<name>; main .git is two up.
         const worktreeGitDir = content.slice('gitdir:'.length).trim();
-        gitDir = join(worktreeGitDir, '..', '..');
-      } else {
-        gitDir = gitFile;
+        return join(worktreeGitDir, '..', '..');
       }
-    } else {
-      // It's a real .git directory (normal repo).
-      gitDir = gitFile;
+      return gitFile;
     }
-  } else {
-    gitDir = gitFile; // Will fail if absent, but that's expected.
+    return gitFile;
   }
+  return gitFile;
+}
 
+function ensureGitignored(repoRoot: string): void {
+  const gitDir = resolveGitDir(repoRoot);
   const infoDir = join(gitDir, 'info');
   const excludeFile = join(infoDir, 'exclude');
 
