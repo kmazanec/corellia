@@ -143,10 +143,17 @@ type WireMessage =
   | WireToolCallMessage
   | WireToolResultMessage;
 
+interface WireJsonSchema {
+  name: string;
+  strict: boolean;
+  schema: Record<string, unknown>;
+}
+
 interface StepRequest {
   model: string;
   messages: WireMessage[];
   tools: WireToolParam[];
+  response_format?: { type: 'json_schema'; json_schema: WireJsonSchema };
 }
 
 interface StepChoiceMessage {
@@ -216,6 +223,7 @@ function buildStepRequest(
   transcript: StepTranscript,
   tools: ToolDef[],
   model: string,
+  outputSchema?: Record<string, unknown>,
 ): StepRequest {
   let contextCount = 0;
   const messages: WireMessage[] = [];
@@ -264,7 +272,16 @@ function buildStepRequest(
     },
   }));
 
-  return { model, messages, tools: wireTools };
+  const responseFormat: StepRequest['response_format'] = outputSchema !== undefined
+    ? { type: 'json_schema', json_schema: { name: 'artifact', strict: true, schema: outputSchema } }
+    : undefined;
+
+  return {
+    model,
+    messages,
+    tools: wireTools,
+    ...(responseFormat !== undefined ? { response_format: responseFormat } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -694,7 +711,7 @@ export class LlmBrain implements Brain {
      * Retried calls contribute no usage; each retry is recorded as an incident.
      */
     const fetchWithRetry = async (): Promise<StepResponse> => {
-      const requestBody = buildStepRequest(transcript, tools, model);
+      const requestBody = buildStepRequest(transcript, tools, model, ctx.outputSchema);
       let attempt = 0;
       while (true) {
         let response: Response;
