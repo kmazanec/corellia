@@ -352,3 +352,75 @@ bugs no scripted test could see:
 - Dangerous-grant regexes live in tests; promote into the constitution lint.
 - Integration-judge verdicts are excluded from golden capture (pinned as
   intentional; wire when the integration site emits judge-verdict events).
+
+---
+
+# Iteration 6 — F-66 container packaging
+
+Container-ready packaging for the front-door daemon (ADR-026: container ships
+this iteration; cloud deployment deferred). Four chunks, no `src/` changes.
+
+## What was added
+
+| File | What it is |
+| --- | --- |
+| `Dockerfile` | multi-stage on `node:22-slim`; builder runs `npm ci` + `npm run typecheck`; runtime adds `git`, runs non-root (uid 1001 `corellia`), copies full `node_modules` from builder (tsx is the runtime runner) |
+| `compose.yaml` | `daemon` + `postgres` services, named volume `corellia-pgdata`, `DATABASE_URL` wired to the `postgres` service via `env_file`, `pg_isready` gate + daemon `GET /status` bearer-token healthcheck (HTTP 200) |
+| `.env.example` (extended) | new `CONTAINER DEPLOYMENT (F-66)` section — every required key, placeholder values only |
+| `docs/container.md` | operator runbook: build → up → smoke → down; migrate-on-boot; target-repo toolchain constraint |
+| `scripts/smoke-container.ts` | operator-run smoke: `POST /intents` a trivial `write-prd`, poll `GET /status` until emitted, print report + cost |
+| `tsconfig.json` (1 line) | added `scripts` to `include` so the smoke script is covered by `npm run typecheck` |
+
+## Decisions (with why)
+
+1. **Image runs `tsx`, not compiled `dist/`.** `package.json` has no
+   `build`/`tsc`-emit script (`typecheck` is `tsc --noEmit`); there is no
+   `dist/` to run. ENTRYPOINT is `node node_modules/.bin/tsx src/daemon/daemon.ts`,
+   matching the dev invocation documented in `daemon.ts`. A future `build` step
+   flips this to `node dist/src/daemon/daemon.js`.
+2. **Migrate-on-cold-boot is the daemon's own path, not a separate migration
+   job.** `daemon.ts` calls `store.ensureSchema()` when `DATABASE_URL` is set;
+   that runs the Pg store's `CREATE TABLE IF NOT EXISTS corellia_events` +
+   indexes (`src/substrate/pg-event-store.ts`). The `postgres` `pg_isready`
+   healthcheck gates the daemon's `depends_on` so the migration never races an
+   unready DB.
+3. **Secrets via `env_file` only (ADR-012).** No `environment:` literals in
+   compose, nothing baked into the image. The healthcheck reads the token from
+   the container's own `process.env.FRONT_DOOR_TOKEN` (`$$`-escaped so compose
+   doesn't interpolate it). `grep -r 'FRONT_DOOR_TOKEN\|GITHUB_TOKEN' Dockerfile
+   compose.yaml` finds only env-var-NAME references, no assigned values.
+4. **Target-repo toolchain constraint (v1):** target-repo scripts run INSIDE
+   the container; the image ships Node only, so v1 supports Node/TypeScript
+   target repos only. Documented in the runbook, not silently failed.
+
+## Evidence (operator to fill — placeholders)
+
+`docker build` / `docker compose up` are operator-verified (NOT CI-gated).
+
+- [x] `docker build --target builder` (chunk 1): **PASSED** — typecheck green,
+  ~2.8 s (run during build, pre-socket-reset).
+- [x] `docker compose config`: **validated, exit 0** (with a throwaway
+  placeholder `.env`).
+- [ ] `docker compose build` (full runtime stage): _operator to run_ — paste
+  result here.
+- [ ] `docker compose up -d` + `docker compose ps`: _operator to run_ — both
+  services `healthy`? paste here.
+- [ ] `GET /status` 200 with bearer token: _operator to paste_ the
+  `curl -w '%{http_code}'` line.
+- [ ] Schema migration on cold boot: _operator to paste_
+  `\dt corellia_events` after first `up`.
+- [ ] `npx tsx scripts/smoke-container.ts`: _operator to paste_ the
+  `[smoke] PASS` line, the printed report JSON, and the `cost:` line.
+
+> Honesty note: the shipped daemon wires a NULL engine (`daemon.ts`) that
+> rejects every run, so against the shipped image the smoke run proves the
+> webhook + admission + status surface; a real converged report+cost requires
+> the live-engine entrypoint (F-67).
+
+## What is / isn't CI-gated
+
+- **CI-gated:** `npm run typecheck` (now covers `scripts/smoke-container.ts`),
+  `npm run lint`, `vitest run`. These test source, not the image.
+- **NOT CI-gated (operator-verified):** `docker build`, `docker compose up`,
+  `scripts/smoke-container.ts`. The vitest suite is never run inside the
+  container (runtime stage carries no test deps).

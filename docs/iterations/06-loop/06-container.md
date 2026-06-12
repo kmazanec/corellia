@@ -129,3 +129,56 @@ Document this limitation explicitly.
 
 ## Implementation notes
 
+**dist vs tsx — the image runs `tsx`.** `package.json` has no `build`/`tsc`-emit
+script; `typecheck` is `tsc --noEmit`, so no `dist/` is ever produced. The
+runtime stage therefore runs the daemon via tsx — `ENTRYPOINT ["node",
+"node_modules/.bin/tsx", "src/daemon/daemon.ts"]` — matching the dev invocation
+documented in `src/daemon/daemon.ts`. The builder stage still runs
+`npm run typecheck` so the image build fails fast on type errors. The full
+`node_modules` (incl. devDep `tsx` + its esbuild) is copied from the builder to
+the runtime stage rather than cherry-picking tsx. If a future iteration adds a
+`build` step, flip the ENTRYPOINT to `node dist/src/daemon/daemon.js` and copy
+`dist/` only.
+
+**Migrate-on-boot.** No separate migration job. `daemon.ts` calls
+`store.ensureSchema()` at startup when `DATABASE_URL` is set, which runs the Pg
+store's idempotent `CREATE TABLE IF NOT EXISTS corellia_events (...)` plus its
+two indexes (`src/substrate/pg-event-store.ts`). In compose, the `postgres`
+service's `pg_isready` healthcheck gates the daemon's `depends_on:
+{ condition: service_healthy }`, so the cold-boot migration never races an
+unready database.
+
+**Healthcheck.** The daemon service healthcheck runs a tiny `node -e` `fetch`
+against `GET /status` with the bearer token and exits non-zero unless the status
+is exactly 200. The token is read from the container's own
+`process.env.FRONT_DOOR_TOKEN` (`$$`-escaped in compose so it is not
+interpolated at parse time) — never written into the file.
+
+**Env-only config / secret hygiene (ADR-012).** All config arrives via
+`env_file: [.env]` for both services; there are no `environment:` secret
+literals and nothing baked into the image. `.env` is already gitignored.
+`grep -r 'FRONT_DOOR_TOKEN\|GITHUB_TOKEN' Dockerfile compose.yaml` returns only
+env-var-NAME references (comments + the healthcheck's `process.env` read), no
+assigned values. `.env.example` carries every required key with placeholder
+values only.
+
+**Target-repo toolchain constraint (v1, documented honestly).** Scripts declared
+in a target repo's `package.json` execute INSIDE this container. The image ships
+Node + npm only, so v1 supports **Node/TypeScript target repos only**; other
+runtimes (Python/Ruby/Go/…) require extending the image. Stated explicitly in
+`docs/container.md` and `.env.example`.
+
+**Smoke script.** `scripts/smoke-container.ts` is operator-run (not CI):
+`POST /intents` a trivial `write-prd`, poll `GET /status` until the intent
+leaves running/queued/parked, then best-effort read the emitted report + cost
+from a host-readable JSONL log (`CORELLIA_EVENTS_PATH`) via the existing
+`costSummary` projection — otherwise it points the operator at the Postgres
+event store. It is covered by `npm run typecheck` (chunk 4 added `scripts` to
+the tsconfig `include`). Honesty note: the shipped daemon wires a null engine,
+so the smoke run proves the webhook + admission + status surface; a real
+converged report requires the live-engine entrypoint (F-67).
+
+**Validation status:** `npm run typecheck` PASS (now incl. the smoke script);
+`docker build --target builder` PASSED locally (typecheck green); `docker
+compose config` validated (exit 0). Full `docker compose up` + the smoke run are
+operator-verified, not CI-gated.
