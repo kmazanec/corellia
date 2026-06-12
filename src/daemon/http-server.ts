@@ -116,7 +116,7 @@ function parseRoute(req: IncomingMessage): ParsedRoute {
  */
 function projectStatus(listener: Listener): FrontDoorStatus {
   const s = listener.status();
-  return {
+  const status: FrontDoorStatus = {
     running: s.running,
     queued: s.queued,
     parked: s.parked.map((p) => ({
@@ -125,6 +125,12 @@ function projectStatus(listener: Listener): FrontDoorStatus {
       deadline: p.deadline,
     })),
   };
+  // Include parkedImprovement only when non-empty so the payload stays terse
+  // for product-only setups (ADR-027: visible in GET /status per AC 4).
+  if (s.parkedImprovement.length > 0) {
+    status.parkedImprovement = s.parkedImprovement;
+  }
+  return status;
 }
 
 // ── FrontDoorServer ───────────────────────────────────────────────────────────
