@@ -1036,3 +1036,116 @@ describe('knowledge artifact pointer with null line is tolerated by checks', () 
     expect(r.ok).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Field-level verdict detail — missing/invalid field names in failure messages
+// ---------------------------------------------------------------------------
+
+describe('field-level verdict detail — KnowledgeArtifact shape failures', () => {
+  it('names the missing field when generatedAtSha is absent', async () => {
+    const bad = {
+      repoRoot: '/repo',
+      category: 'stack',
+      // generatedAtSha omitted
+      confidence: 'high',
+      status: 'provisional',
+      pointers: [],
+      summary: 'test',
+    };
+    const r = await stackCheck().run(baseGoal, textArt(JSON.stringify(bad)));
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('generatedAtSha');
+  });
+
+  it('names multiple missing fields when several are absent', async () => {
+    const bad = {
+      repoRoot: '/repo',
+      category: 'conventions',
+      // confidence, status, summary all omitted
+      pointers: [],
+    };
+    const r = await conventionsCheck().run(baseGoal, textArt(JSON.stringify(bad)));
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('confidence');
+    expect(r.detail).toContain('status');
+    expect(r.detail).toContain('summary');
+    // All three must appear in a single detail message
+    expect(r.detail).toMatch(/missing or invalid/i);
+  });
+
+  it('names the missing field when pointers is absent (not an array)', async () => {
+    const bad = {
+      repoRoot: '/repo',
+      category: 'architecture',
+      generatedAtSha: 'abc',
+      confidence: 'high',
+      status: 'provisional',
+      pointers: 'not-an-array', // wrong type
+      summary: 'test',
+    };
+    const r = await architectureCheck(noScanFn).run(baseGoal, textArt(JSON.stringify(bad)));
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('pointers');
+  });
+
+  it('names the missing field when repoRoot is absent', async () => {
+    const bad = {
+      // repoRoot omitted
+      category: 'stack',
+      generatedAtSha: 'abc',
+      confidence: 'high',
+      status: 'provisional',
+      pointers: [],
+      summary: 'test',
+    };
+    const r = await stackCheck().run(baseGoal, textArt(JSON.stringify(bad)));
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('repoRoot');
+  });
+});
+
+describe('field-level verdict detail — RegionFacts shape failures', () => {
+  it('names the missing field when generatedAtSha is absent from RegionFacts', async () => {
+    const bad = {
+      repoRoot: '/repo',
+      region: 'src/auth',
+      // generatedAtSha omitted
+      facts: [],
+    };
+    const r = await diveAnchorCheck().run(baseGoal, textArt(JSON.stringify(bad)));
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('generatedAtSha');
+  });
+
+  it('names the missing field when region is absent from RegionFacts', async () => {
+    const bad = {
+      repoRoot: '/repo',
+      // region omitted
+      generatedAtSha: 'abc',
+      facts: [],
+    };
+    const r = await diveAnchorCheck().run(baseGoal, textArt(JSON.stringify(bad)));
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('region');
+  });
+
+  it('names multiple missing fields from RegionFacts in a single message', async () => {
+    const bad = {
+      repoRoot: '/repo',
+      // region and generatedAtSha omitted; facts also wrong type
+      facts: 'not-an-array',
+    };
+    const r = await diveAnchorCheck().run(baseGoal, textArt(JSON.stringify(bad)));
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('region');
+    expect(r.detail).toContain('generatedAtSha');
+    expect(r.detail).toContain('facts');
+  });
+
+  it('detail contains "missing or invalid" phrasing for RegionFacts failures', async () => {
+    const bad = { wrong: 'shape' };
+    const r = await diveAnchorCheck().run(baseGoal, textArt(JSON.stringify(bad)));
+    expect(r.ok).toBe(false);
+    expect(r.detail).toMatch(/missing or invalid/i);
+  });
+});

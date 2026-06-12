@@ -81,23 +81,28 @@ function parseArtifactJson(artifact: Artifact | null): { ok: true; value: unknow
 
 /**
  * Narrow an unknown value to KnowledgeArtifact by checking the required
- * structural fields. Returns null when the shape does not match.
+ * structural fields. Returns a result object so callers can surface field-level
+ * detail on failure instead of a generic "does not match shape" message.
  * Sanitizes pointer `line: null` → omitted (undefined) so strict-mode schemas
  * that emit null for the absent-line case are handled correctly at runtime.
  */
-function toKnowledgeArtifact(value: unknown): KnowledgeArtifact | null {
-  if (typeof value !== 'object' || value === null) return null;
+function toKnowledgeArtifactResult(
+  value: unknown,
+): { ok: true; value: KnowledgeArtifact } | { ok: false; detail: string } {
+  if (typeof value !== 'object' || value === null) {
+    return { ok: false, detail: 'Artifact JSON is not an object.' };
+  }
   const v = value as Record<string, unknown>;
-  if (
-    typeof v['repoRoot'] !== 'string' ||
-    typeof v['category'] !== 'string' ||
-    typeof v['generatedAtSha'] !== 'string' ||
-    typeof v['confidence'] !== 'string' ||
-    typeof v['status'] !== 'string' ||
-    !Array.isArray(v['pointers']) ||
-    typeof v['summary'] !== 'string'
-  ) {
-    return null;
+  const missing: string[] = [];
+  if (typeof v['repoRoot'] !== 'string') missing.push('repoRoot');
+  if (typeof v['category'] !== 'string') missing.push('category');
+  if (typeof v['generatedAtSha'] !== 'string') missing.push('generatedAtSha');
+  if (typeof v['confidence'] !== 'string') missing.push('confidence');
+  if (typeof v['status'] !== 'string') missing.push('status');
+  if (!Array.isArray(v['pointers'])) missing.push('pointers');
+  if (typeof v['summary'] !== 'string') missing.push('summary');
+  if (missing.length > 0) {
+    return { ok: false, detail: `KnowledgeArtifact shape mismatch — missing or invalid: ${missing.join(', ')}` };
   }
   const sanitized = {
     ...v,
@@ -109,24 +114,48 @@ function toKnowledgeArtifact(value: unknown): KnowledgeArtifact | null {
       return p;
     }),
   };
-  return sanitized as unknown as KnowledgeArtifact;
+  return { ok: true, value: sanitized as unknown as KnowledgeArtifact };
+}
+
+/**
+ * Narrow an unknown value to KnowledgeArtifact by checking the required
+ * structural fields. Returns null when the shape does not match.
+ * @deprecated Use toKnowledgeArtifactResult for field-level detail on failure.
+ */
+function toKnowledgeArtifact(value: unknown): KnowledgeArtifact | null {
+  const result = toKnowledgeArtifactResult(value);
+  return result.ok ? result.value : null;
+}
+
+/**
+ * Narrow an unknown value to RegionFacts. Returns a result object so callers
+ * can surface field-level detail on failure.
+ */
+function toRegionFactsResult(
+  value: unknown,
+): { ok: true; value: RegionFacts } | { ok: false; detail: string } {
+  if (typeof value !== 'object' || value === null) {
+    return { ok: false, detail: 'Artifact JSON is not an object.' };
+  }
+  const v = value as Record<string, unknown>;
+  const missing: string[] = [];
+  if (typeof v['repoRoot'] !== 'string') missing.push('repoRoot');
+  if (typeof v['region'] !== 'string') missing.push('region');
+  if (typeof v['generatedAtSha'] !== 'string') missing.push('generatedAtSha');
+  if (!Array.isArray(v['facts'])) missing.push('facts');
+  if (missing.length > 0) {
+    return { ok: false, detail: `RegionFacts shape mismatch — missing or invalid: ${missing.join(', ')}` };
+  }
+  return { ok: true, value: value as RegionFacts };
 }
 
 /**
  * Narrow an unknown value to RegionFacts.
+ * @deprecated Use toRegionFactsResult for field-level detail on failure.
  */
 function toRegionFacts(value: unknown): RegionFacts | null {
-  if (typeof value !== 'object' || value === null) return null;
-  const v = value as Record<string, unknown>;
-  if (
-    typeof v['repoRoot'] !== 'string' ||
-    typeof v['region'] !== 'string' ||
-    typeof v['generatedAtSha'] !== 'string' ||
-    !Array.isArray(v['facts'])
-  ) {
-    return null;
-  }
-  return value as RegionFacts;
+  const result = toRegionFactsResult(value);
+  return result.ok ? result.value : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -177,10 +206,11 @@ export function architectureCheck(scanFn: ArchScanFn): DeterministicCheck {
       const parsed = parseArtifactJson(artifact);
       if (!parsed.ok) return { ok: false, detail: parsed.detail };
 
-      const ka = toKnowledgeArtifact(parsed.value);
-      if (ka === null) {
-        return { ok: false, detail: 'Artifact JSON does not match KnowledgeArtifact shape.' };
+      const kaResult = toKnowledgeArtifactResult(parsed.value);
+      if (!kaResult.ok) {
+        return { ok: false, detail: kaResult.detail };
       }
+      const ka = kaResult.value;
 
       if (ka.category !== 'architecture') {
         return { ok: false, detail: `Expected category "architecture"; got "${ka.category}".` };
@@ -311,10 +341,11 @@ export function stackCheck(): DeterministicCheck {
       const parsed = parseArtifactJson(artifact);
       if (!parsed.ok) return { ok: false, detail: parsed.detail };
 
-      const ka = toKnowledgeArtifact(parsed.value);
-      if (ka === null) {
-        return { ok: false, detail: 'Artifact JSON does not match KnowledgeArtifact shape.' };
+      const kaResult = toKnowledgeArtifactResult(parsed.value);
+      if (!kaResult.ok) {
+        return { ok: false, detail: kaResult.detail };
       }
+      const ka = kaResult.value;
 
       if (ka.category !== 'stack') {
         return { ok: false, detail: `Expected category "stack"; got "${ka.category}".` };
@@ -398,10 +429,11 @@ export function conventionsCheck(): DeterministicCheck {
       const parsed = parseArtifactJson(artifact);
       if (!parsed.ok) return { ok: false, detail: parsed.detail };
 
-      const ka = toKnowledgeArtifact(parsed.value);
-      if (ka === null) {
-        return { ok: false, detail: 'Artifact JSON does not match KnowledgeArtifact shape.' };
+      const kaResult = toKnowledgeArtifactResult(parsed.value);
+      if (!kaResult.ok) {
+        return { ok: false, detail: kaResult.detail };
       }
+      const ka = kaResult.value;
 
       if (ka.category !== 'conventions') {
         return { ok: false, detail: `Expected category "conventions"; got "${ka.category}".` };
@@ -460,10 +492,11 @@ export function testScaffoldCheck(): DeterministicCheck {
       const parsed = parseArtifactJson(artifact);
       if (!parsed.ok) return { ok: false, detail: parsed.detail };
 
-      const ka = toKnowledgeArtifact(parsed.value);
-      if (ka === null) {
-        return { ok: false, detail: 'Artifact JSON does not match KnowledgeArtifact shape.' };
+      const kaResult = toKnowledgeArtifactResult(parsed.value);
+      if (!kaResult.ok) {
+        return { ok: false, detail: kaResult.detail };
       }
+      const ka = kaResult.value;
 
       if (ka.category !== 'test-scaffold') {
         return { ok: false, detail: `Expected category "test-scaffold"; got "${ka.category}".` };
@@ -514,10 +547,11 @@ export function mapRepoCheck(scanFn: ArchScanFn): DeterministicCheck {
       const parsed = parseArtifactJson(artifact);
       if (!parsed.ok) return { ok: false, detail: parsed.detail };
 
-      const ka = toKnowledgeArtifact(parsed.value);
-      if (ka === null) {
-        return { ok: false, detail: 'Artifact JSON does not match KnowledgeArtifact shape.' };
+      const kaResult = toKnowledgeArtifactResult(parsed.value);
+      if (!kaResult.ok) {
+        return { ok: false, detail: kaResult.detail };
       }
+      const ka = kaResult.value;
 
       switch (ka.category) {
         case 'architecture':
@@ -563,10 +597,11 @@ export function diveAnchorCheck(): DeterministicCheck {
       const parsed = parseArtifactJson(artifact);
       if (!parsed.ok) return { ok: false, detail: parsed.detail };
 
-      const rf = toRegionFacts(parsed.value);
-      if (rf === null) {
-        return { ok: false, detail: 'Artifact JSON does not match RegionFacts shape.' };
+      const rfResult = toRegionFactsResult(parsed.value);
+      if (!rfResult.ok) {
+        return { ok: false, detail: rfResult.detail };
       }
+      const rf = rfResult.value;
 
       const root = ctx?.sandboxRoot ?? rf.repoRoot;
       const failures: string[] = [];
