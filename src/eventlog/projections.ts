@@ -581,8 +581,8 @@ export interface GoldenCandidate {
  * Fold `golden-candidate` events into a per-judgeType index.
  *
  * Latest-appended order within each judgeType group is preserved. All other
- * event members are visited but do not contribute. Exhaustive switch ensures
- * the union is covered as new members are added (ADR-003).
+ * event members are visited but do not contribute. Only `golden-candidate`
+ * events contribute; all others are skipped via the type-guard if-check.
  */
 export function goldenCandidates(events: FactoryEvent[]): Record<string, GoldenCandidate[]> {
   const result: Record<string, GoldenCandidate[]> = {};

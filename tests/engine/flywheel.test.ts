@@ -143,7 +143,7 @@ describe('flywheel — trusted memo skips brain.decide', () => {
     const registry = buildRegistry([
       nonLeafTypeDef({ name: 'splitter', judgeType: 'judge-split' }),
       leafTypeDef({ name: 'leaf' }),
-      leafTypeDef({ name: 'judge-split', leafOnly: true, judgeType: null }),
+      leafTypeDef({ name: 'judge-split', kind: 'judge', leafOnly: true, judgeType: null }),
     ]);
 
     const engine = new Engine({
@@ -291,7 +291,7 @@ describe('flywheel — terraced scan', () => {
         scan: { k: 3, lenses: ['architect', 'reuse', 'contrarian'] },
       }),
       leafTypeDef({ name: 'leaf' }),
-      leafTypeDef({ name: 'judge-split', leafOnly: true, judgeType: null }),
+      leafTypeDef({ name: 'judge-split', kind: 'judge', leafOnly: true, judgeType: null }),
     ]);
 
     const engine = new Engine({
@@ -342,7 +342,7 @@ describe('flywheel — terraced scan', () => {
         scan: { k: 3, lenses: ['l1', 'l2', 'l3'] },
       }),
       leafTypeDef({ name: 'leaf' }),
-      leafTypeDef({ name: 'judge-split', leafOnly: true, judgeType: null }),
+      leafTypeDef({ name: 'judge-split', kind: 'judge', leafOnly: true, judgeType: null }),
     ]);
 
     const engine = new Engine({
@@ -388,7 +388,7 @@ describe('flywheel — terraced scan', () => {
         scan: { k: 3, lenses: ['l1', 'l2', 'l3'] },
       }),
       leafTypeDef({ name: 'leaf' }),
-      leafTypeDef({ name: 'judge-split', leafOnly: true, judgeType: null }),
+      leafTypeDef({ name: 'judge-split', kind: 'judge', leafOnly: true, judgeType: null }),
     ]);
 
     const engine = new Engine({
@@ -454,7 +454,7 @@ describe('flywheel — terraced scan', () => {
         scan: { k: 3, lenses: ['l1', 'l2', 'l3'] },
       }),
       leafTypeDef({ name: 'leaf' }),
-      leafTypeDef({ name: 'judge-split', leafOnly: true, judgeType: null }),
+      leafTypeDef({ name: 'judge-split', kind: 'judge', leafOnly: true, judgeType: null }),
     ]);
 
     const engine = new Engine({
@@ -511,7 +511,7 @@ describe('flywheel — terraced scan', () => {
         scan: { k: 1, lenses: ['architect'] }, // k=1 → no scan
       }),
       leafTypeDef({ name: 'leaf' }),
-      leafTypeDef({ name: 'judge-split', leafOnly: true, judgeType: null }),
+      leafTypeDef({ name: 'judge-split', kind: 'judge', leafOnly: true, judgeType: null }),
     ]);
 
     const engine = new Engine({

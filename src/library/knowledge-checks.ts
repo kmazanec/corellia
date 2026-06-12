@@ -117,15 +117,6 @@ function toKnowledgeArtifactResult(
   return { ok: true, value: sanitized as unknown as KnowledgeArtifact };
 }
 
-/**
- * Narrow an unknown value to KnowledgeArtifact by checking the required
- * structural fields. Returns null when the shape does not match.
- * @deprecated Use toKnowledgeArtifactResult for field-level detail on failure.
- */
-function toKnowledgeArtifact(value: unknown): KnowledgeArtifact | null {
-  const result = toKnowledgeArtifactResult(value);
-  return result.ok ? result.value : null;
-}
 
 /**
  * Narrow an unknown value to RegionFacts. Returns a result object so callers
@@ -149,14 +140,6 @@ function toRegionFactsResult(
   return { ok: true, value: value as RegionFacts };
 }
 
-/**
- * Narrow an unknown value to RegionFacts.
- * @deprecated Use toRegionFactsResult for field-level detail on failure.
- */
-function toRegionFacts(value: unknown): RegionFacts | null {
-  const result = toRegionFactsResult(value);
-  return result.ok ? result.value : null;
-}
 
 // ---------------------------------------------------------------------------
 // Architecture check

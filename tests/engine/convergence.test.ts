@@ -166,7 +166,20 @@ describe('convergence — scripted full-stack composed path', () => {
       },
     ]);
 
-    const registry = buildRegistry([implType()]);
+    const registry = buildRegistry([
+      implType(),
+      // critique-code must be registered as a judge kind since implType.judgeType references it
+      {
+        name: 'critique-code',
+        kind: 'judge' as const,
+        family: 'build',
+        leafOnly: true,
+        tier: { default: 'sonnet', ladder: ['sonnet', 'opus'] },
+        deterministic: [],
+        judgeType: null,
+        grants: [],
+      },
+    ]);
     const engine = new Engine({
       registry,
       brain,

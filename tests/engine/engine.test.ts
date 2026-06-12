@@ -59,6 +59,7 @@ describe('deterministic fail → judge never called', () => {
         judgeType: 'judge',  // judge should never be called
         tier: { default: 'haiku', ladder: ['haiku', 'sonnet'] },
       }),
+      leafTypeDef({ name: 'judge', kind: 'judge', judgeType: null }),
     ]);
 
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
@@ -124,6 +125,7 @@ describe('repair rung', () => {
         deterministic: [],
         judgeType: 'judge-leaf',
       }),
+      leafTypeDef({ name: 'judge-leaf', kind: 'judge', judgeType: null }),
     ]);
 
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
@@ -157,6 +159,7 @@ describe('escalation ladder', () => {
         judgeType: 'judge-leaf',
         tier: { default: 'haiku', ladder: ['haiku', 'sonnet', 'opus'] },
       }),
+      leafTypeDef({ name: 'judge-leaf', kind: 'judge', judgeType: null }),
     ]);
 
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
@@ -189,6 +192,7 @@ describe('escalation ladder', () => {
         judgeType: 'judge-leaf',
         tier: { default: 'haiku', ladder: ['haiku', 'sonnet', 'opus'] },
       }),
+      leafTypeDef({ name: 'judge-leaf', kind: 'judge', judgeType: null }),
     ]);
 
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
@@ -211,6 +215,7 @@ describe('escalation ladder', () => {
         deterministic: [],
         judgeType: 'judge-leaf',
       }),
+      leafTypeDef({ name: 'judge-leaf', kind: 'judge', judgeType: null }),
     ]);
 
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
@@ -375,6 +380,7 @@ describe('budget accounting', () => {
         judgeType: 'judge-leaf',
         tier: { default: 'haiku', ladder: ['haiku'] },  // single-rung ladder → no escalation possible
       }),
+      leafTypeDef({ name: 'judge-leaf', kind: 'judge', judgeType: null }),
     ]);
 
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
@@ -720,6 +726,7 @@ describe('fix 1 — repair does not consume a second attempt', () => {
         deterministic: [],
         judgeType: 'judge-leaf',
       }),
+      leafTypeDef({ name: 'judge-leaf', kind: 'judge', judgeType: null }),
     ]);
 
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
@@ -823,7 +830,7 @@ describe('fix 5 — failing integration verdict produces non-empty blockers', ()
     const registry = buildRegistry([
       nonLeafTypeDef({ name: 'splitter', judgeType: 'judge-integration' }),
       leafTypeDef({ name: 'leaf', judgeType: null }),
-      leafTypeDef({ name: 'judge-integration', leafOnly: true, judgeType: null }),
+      leafTypeDef({ name: 'judge-integration', kind: 'judge', leafOnly: true, judgeType: null }),
     ]);
 
     const childA: ChildPlan = {
@@ -929,6 +936,7 @@ describe('fix 8 — escalated findings consult onBrief', () => {
         deterministic: [],
         judgeType: 'judge-leaf',
       }),
+      leafTypeDef({ name: 'judge-leaf', kind: 'judge', judgeType: null }),
     ]);
 
     const engine = new Engine({
@@ -1014,7 +1022,10 @@ describe('usage accounting — events carry usage and debit equals reported toke
     const brain = new ScriptedBrain()
       .queueProduceWithUsage(textArtifact('output'), { promptTokens: 10, completionTokens: 5 })
       .queueJudgeWithUsage({ pass: true, findings: [] }, { promptTokens: 200, completionTokens: 80, costUsd: 0.005 });
-    const registry = buildRegistry([leafTypeDef({ judgeType: 'reviewer' })]);
+    const registry = buildRegistry([
+      leafTypeDef({ judgeType: 'reviewer' }),
+      leafTypeDef({ name: 'reviewer', kind: 'judge', judgeType: null }),
+    ]);
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
     const goal = makeGoal({ budget: { attempts: 5, tokens: 10000, toolCalls: 50, wallClockMs: 60000 } });
     await engine.run(goal);
@@ -1037,7 +1048,10 @@ describe('usage accounting — events carry usage and debit equals reported toke
       )
       .queueRepairWithUsage(textArtifact('repaired'), { promptTokens: 60, completionTokens: 20, costUsd: 0.002 })
       .queueJudgeWithUsage({ pass: true, findings: [] }, { promptTokens: 40, completionTokens: 10 });
-    const registry = buildRegistry([leafTypeDef({ judgeType: 'reviewer' })]);
+    const registry = buildRegistry([
+      leafTypeDef({ judgeType: 'reviewer' }),
+      leafTypeDef({ name: 'reviewer', kind: 'judge', judgeType: null }),
+    ]);
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
     const goal = makeGoal({ budget: { attempts: 5, tokens: 10000, toolCalls: 50, wallClockMs: 60000 } });
     await engine.run(goal);

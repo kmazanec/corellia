@@ -98,4 +98,21 @@ describe('lintLibrary violations', () => {
     const violations = lintLibrary(defs);
     expect(violations.some((v) => v.includes('Duplicate type name'))).toBe(true);
   });
+
+  it('reports a judgeType that names an unregistered def', () => {
+    const defs: GoalTypeDef[] = [
+      { ...baseLeaf, name: 'worker', judgeType: 'nonexistent-judge' },
+    ];
+    const violations = lintLibrary(defs, { checkSkills: false });
+    expect(violations.some((v) => v.includes('not registered'))).toBe(true);
+  });
+
+  it('reports a judgeType that names a non-judge-kind def', () => {
+    const defs: GoalTypeDef[] = [
+      { ...baseLeaf, name: 'worker', judgeType: 'make-type' },
+      { ...baseLeaf, name: 'make-type', kind: 'make', judgeType: null },
+    ];
+    const violations = lintLibrary(defs, { checkSkills: false });
+    expect(violations.some((v) => v.includes('make-type') && v.includes('kind'))).toBe(true);
+  });
 });

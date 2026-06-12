@@ -3,7 +3,8 @@
  *
  * At every brain.judge call site the rubric is enriched with:
  *   (a) the judge type's family skill section + preamble
- *   (b) an intent line: "The goal's intent is <intent>. Apply the bar that intent demands per the skill."
+ *   (b) the family's '## The intent dial' section when present (GATING-1 fix)
+ *   (c) an intent line: "The goal's intent is <intent>. Apply the bar that intent demands per the skill."
  *
  * Behavioral tests verify:
  *   1. The rubric captured by the scripted brain contains the intent line.
@@ -11,6 +12,12 @@
  *      DIFFERENT rubric text (the dial is in the rubric).
  *   3. A scripted brain that returns pass-for-spike / fail-for-production keyed
  *      off the rubric text demonstrates the dial end-to-end.
+ *
+ * REAL-SKILL tests (GATING-1) verify with the ACTUAL skill files:
+ *   4. A critique-doc judge rubric under intent:production contains 'Mimicry bar'.
+ *   5. A critique-doc judge rubric under intent:spike contains 'Answers-the-question'.
+ *   6. A judge-split rubric under intent:spike contains the structural-invariant
+ *      protection text ('never waived by intent').
  *
  * HARD INVARIANT: deterministic checks never receive the intent line — that
  * would be tested by absence (deterministic checks use the artifact directly,
@@ -34,6 +41,8 @@ import type { Goal } from '../../src/contract/goal.js';
 import type { Artifact } from '../../src/contract/report.js';
 import type { Verdict } from '../../src/contract/verdict.js';
 import { ZERO_USAGE } from '../../src/contract/goal.js';
+import { starterTypes } from '../../src/library/starter-types.js';
+import { _clearSkillCache } from '../../src/library/skills.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -52,6 +61,7 @@ function judgedType(judgeTypeName: string) {
 function judgeTypeDef(name: string) {
   return leafTypeDef({
     name,
+    kind: 'judge',
     family: 'test',
     grants: [],
     judgeType: null,
@@ -222,5 +232,212 @@ describe('intent dial end-to-end: brain passes for spike, fails for production k
       budget: { attempts: 2, tokens: 100_000, toolCalls: 10, wallClockMs: 60_000 },
     }));
     expect(prodReport.blockers.length).toBeGreaterThan(0);
+  });
+});
+
+// ── REAL-SKILL tests (GATING-1) ───────────────────────────────────────────────
+// Drive enrichRubric through the actual skill files (critique.md, arbiter.md) and
+// assert that the intent dial section reaches the judge rubric.
+
+/** Build a registry from the full starter set. */
+function realRegistry() {
+  const defs = starterTypes();
+  const map = new Map(defs.map((d) => [d.name, d]));
+  return {
+    get(name: string) {
+      const def = map.get(name);
+      if (!def) throw new Error(`Unknown type: ${name}`);
+      return def;
+    },
+    has(name: string): boolean { return map.has(name); },
+    names(): string[] { return [...map.keys()]; },
+  };
+}
+
+/** A goal type whose judge is the given real judge type name. */
+function realJudgedType(workerName: string, judgeTypeName: string) {
+  return leafTypeDef({
+    name: workerName,
+    family: 'critique',  // must be a family with a real skill file
+    judgeType: judgeTypeName,
+    deterministic: [],
+    grants: [],
+  });
+}
+
+/** A brain that captures rubrics and always passes. */
+function captureBrain(): Brain & { rubrics: string[] } {
+  const rubrics: string[] = [];
+  return {
+    rubrics,
+    async decide() { throw new Error('not used'); },
+    async produce() { return { value: textArtifact('doc content'), usage: ZERO_USAGE }; },
+    async judge(_g: Goal, _a: Artifact, rubric: string) {
+      rubrics.push(rubric);
+      return { value: { pass: true, findings: [] }, usage: ZERO_USAGE };
+    },
+    async repair() { throw new Error('not used'); },
+    async step(): Promise<StepOutput> { throw new Error('not used'); },
+  };
+}
+
+describe('REAL-SKILL: critique-doc enrichRubric includes intent dial section', () => {
+  it('critique-doc rubric under intent:production contains "Mimicry bar"', async () => {
+    _clearSkillCache();
+
+    // Use the real starter registry (which has critique-doc registered as a
+    // judge kind in the critique family) plus a worker type that names it.
+    const registry = realRegistry();
+    // We need a worker type that is not a judge kind but references critique-doc
+    // as its judgeType. Add a synthetic worker alongside the starter types.
+    const workerDef = leafTypeDef({
+      name: 'write-doc-worker',
+      kind: 'make',
+      family: 'critique',
+      judgeType: 'critique-doc',
+      deterministic: [],
+      grants: [],
+    });
+    const defs = [...starterTypes(), workerDef];
+    const map = new Map(defs.map((d) => [d.name, d]));
+    const mixedRegistry = {
+      get(name: string) {
+        const def = map.get(name);
+        if (!def) throw new Error(`Unknown type: ${name}`);
+        return def;
+      },
+      has(name: string): boolean { return map.has(name); },
+      names(): string[] { return [...map.keys()]; },
+    };
+
+    const store = new MemoryEventStore();
+    const brain = captureBrain();
+    const engine = new Engine({ registry: mixedRegistry, brain, store, memory: new NoopMemoryView() });
+
+    await engine.run(makeGoal({ type: 'write-doc-worker', intent: 'production' }));
+
+    expect(brain.rubrics.length).toBeGreaterThanOrEqual(1);
+    const rubric = brain.rubrics[0]!;
+    // The intent dial section from critique.md must be present for production intent
+    expect(rubric).toContain('Mimicry bar');
+  });
+
+  it('critique-doc rubric under intent:spike contains "Answers-the-question"', async () => {
+    _clearSkillCache();
+
+    const workerDef = leafTypeDef({
+      name: 'write-doc-worker',
+      kind: 'make',
+      family: 'critique',
+      judgeType: 'critique-doc',
+      deterministic: [],
+      grants: [],
+    });
+    const defs = [...starterTypes(), workerDef];
+    const map = new Map(defs.map((d) => [d.name, d]));
+    const mixedRegistry = {
+      get(name: string) {
+        const def = map.get(name);
+        if (!def) throw new Error(`Unknown type: ${name}`);
+        return def;
+      },
+      has(name: string): boolean { return map.has(name); },
+      names(): string[] { return [...map.keys()]; },
+    };
+
+    const store = new MemoryEventStore();
+    const brain = captureBrain();
+    const engine = new Engine({ registry: mixedRegistry, brain, store, memory: new NoopMemoryView() });
+
+    await engine.run(makeGoal({ type: 'write-doc-worker', intent: 'spike' }));
+
+    expect(brain.rubrics.length).toBeGreaterThanOrEqual(1);
+    const rubric = brain.rubrics[0]!;
+    // The intent dial section from critique.md must be present for spike intent
+    expect(rubric).toContain('Answers-the-question');
+  });
+});
+
+describe('REAL-SKILL: judge-split enrichRubric includes arbiter structural-invariant protection', () => {
+  it('judge-split rubric under intent:spike contains structural-invariants-never-waived text', async () => {
+    _clearSkillCache();
+
+    // Build a non-leaf root type that returns a split, and a leaf child type so the
+    // recursion terminates. The split eval invokes judge-split via enrichRubric.
+    const splitRootDef: import('../../src/contract/goal-type.js').GoalTypeDef = {
+      name: 'split-root',
+      kind: 'make',
+      family: 'deliver',
+      leafOnly: false,
+      tier: { default: 'haiku', ladder: ['haiku', 'sonnet', 'opus'] },
+      deterministic: [],
+      judgeType: null,
+      grants: [],
+    };
+    const leafChildDef: import('../../src/contract/goal-type.js').GoalTypeDef = {
+      name: 'leaf-child',
+      kind: 'make',
+      family: 'build',
+      leafOnly: true,
+      tier: { default: 'haiku', ladder: ['haiku', 'sonnet', 'opus'] },
+      deterministic: [],
+      judgeType: null,
+      grants: [],
+    };
+    const defs = [...starterTypes(), splitRootDef, leafChildDef];
+    const map = new Map(defs.map((d) => [d.name, d]));
+    const mixedRegistry = {
+      get(name: string) {
+        const def = map.get(name);
+        if (!def) throw new Error(`Unknown type: ${name}`);
+        return def;
+      },
+      has(name: string): boolean { return map.has(name); },
+      names(): string[] { return [...map.keys()]; },
+    };
+
+    const capturedJudgeSplitRubrics: string[] = [];
+
+    // Brain that decides to split (root only) and produces for leaves
+    const captureSplitBrain: Brain = {
+      async decide(_goal: Goal) {
+        // Always split into one leaf child — the leaf will produce not split
+        return {
+          value: {
+            kind: 'split' as const,
+            children: [
+              {
+                localId: 'c1',
+                type: 'leaf-child',
+                title: 'child 1',
+                spec: {},
+                scope: [],
+                budgetShare: 1,
+                dependsOn: [],
+              },
+            ],
+          },
+          usage: ZERO_USAGE,
+        };
+      },
+      async produce() { return { value: textArtifact('leaf result'), usage: ZERO_USAGE }; },
+      async judge(_g: Goal, _a: Artifact, rubric: string) {
+        capturedJudgeSplitRubrics.push(rubric);
+        return { value: { pass: true, findings: [] }, usage: ZERO_USAGE };
+      },
+      async repair() { throw new Error('not used'); },
+      async step(): Promise<StepOutput> { throw new Error('not used'); },
+    };
+
+    const store = new MemoryEventStore();
+    const engine = new Engine({ registry: mixedRegistry, brain: captureSplitBrain, store, memory: new NoopMemoryView() });
+
+    await engine.run(makeGoal({ type: 'split-root', intent: 'spike' }));
+
+    // enrichRubric for judge-split should have been called at least once during split eval
+    expect(capturedJudgeSplitRubrics.length).toBeGreaterThanOrEqual(1);
+    const rubric = capturedJudgeSplitRubrics[0]!;
+    // The arbiter's intent dial section states structural invariants are 'never waived by intent'
+    expect(rubric).toContain('never waived by intent');
   });
 });

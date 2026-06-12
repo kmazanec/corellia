@@ -19,6 +19,8 @@ import {
   NoopMemoryView,
   buildRegistry,
   leafTypeDef,
+  nonLeafTypeDef,
+  ScriptedBrain,
   makeGoal,
   textArtifact,
   passVerdict,
@@ -28,6 +30,7 @@ import type { Brain, StepOutput, StepTranscript } from '../../src/contract/brain
 import type { Goal } from '../../src/contract/goal.js';
 import type { Artifact } from '../../src/contract/report.js';
 import type { ToolDef, BrainContext } from '../../src/contract/brain.js';
+import type { ChildPlan } from '../../src/contract/decision.js';
 
 function simpleBrain(): Brain {
   return {
@@ -42,7 +45,7 @@ function simpleBrain(): Brain {
 function judgedRegistry() {
   return buildRegistry([
     leafTypeDef({ name: 'impl', judgeType: 'judge-impl', deterministic: [] }),
-    leafTypeDef({ name: 'judge-impl', judgeType: null }),
+    leafTypeDef({ name: 'judge-impl', kind: 'judge', judgeType: null }),
   ]);
 }
 
@@ -160,5 +163,50 @@ describe('golden capture: goldenCapture flag controls emission', () => {
     const d1 = await runAndGetDigest('artifact-alpha');
     const d2 = await runAndGetDigest('artifact-beta');
     expect(d1).not.toBe(d2);
+  });
+});
+
+describe('golden capture: integration-judge site is explicitly excluded', () => {
+  it('goldenCapture:true emits NO golden-candidate for the judge-integration call site', async () => {
+    // The integration-judge call in runSplit does NOT call maybeAppendGoldenCandidate.
+    // This test locks that documented exclusion: even with goldenCapture:true, no
+    // golden-candidate event is emitted for the judge-integration verdict.
+    const store = new MemoryEventStore();
+
+    const childA: ChildPlan = {
+      localId: 'a',
+      type: 'leaf',
+      title: 'child A',
+      spec: {},
+      dependsOn: [],
+      scope: [],
+      budgetShare: 1.0,
+    };
+
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'splitter', judgeType: null }),
+      leafTypeDef({ name: 'leaf', judgeType: null }),
+      leafTypeDef({ name: 'judge-integration', leafOnly: true, judgeType: null }),
+    ]);
+
+    const brain = new ScriptedBrain()
+      .queueDecide({ kind: 'split', children: [childA] })
+      .queueProduce(textArtifact('child output'))
+      .queueJudge(passVerdict()); // judge-integration passes
+
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      goldenCapture: true,
+    });
+
+    await engine.run(makeGoal({ type: 'splitter' }));
+
+    // No golden-candidate events should have been emitted — the integration
+    // judge call site does not participate in golden capture.
+    const goldenEvents = (await store.list()).filter((e) => e.type === 'golden-candidate');
+    expect(goldenEvents).toHaveLength(0);
   });
 });

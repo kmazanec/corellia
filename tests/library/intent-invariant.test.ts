@@ -323,17 +323,21 @@ describe('static invariant — "intent" is absent from check source files', () =
   // tests/library/ → ../../src/library/
   const srcRoot = join(thisFile, '..', '..', '..', 'src', 'library');
 
-  it('src/library/checks.ts does not contain the string "intent"', () => {
+  it('src/library/checks.ts does not contain the word "intent" as a whole word', () => {
     const source = readFileSync(join(srcRoot, 'checks.ts'), 'utf8');
-    // The word 'intent' must not appear in the file at all.
+    // The word 'intent' (as a whole word) must not appear in the file.
     // This enforces constitution rule 5: deterministic gates take no intent input.
-    expect(source).not.toMatch(/intent/);
+    // Using \b word-boundary so incidental substrings (e.g. 'intentional') do not
+    // trigger false positives.
+    expect(source).not.toMatch(/\bintent\b/);
   });
 
-  it('src/library/knowledge-checks.ts does not contain the string "intent"', () => {
+  it('src/library/knowledge-checks.ts does not contain the word "intent" as a whole word', () => {
     const source = readFileSync(join(srcRoot, 'knowledge-checks.ts'), 'utf8');
-    // The word 'intent' must not appear in the file at all.
+    // The word 'intent' (as a whole word) must not appear in the file.
     // This enforces constitution rule 5: deterministic gates take no intent input.
-    expect(source).not.toMatch(/intent/);
+    // Using \b word-boundary so incidental substrings (e.g. 'intentional') do not
+    // trigger false positives.
+    expect(source).not.toMatch(/\bintent\b/);
   });
 });

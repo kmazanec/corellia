@@ -28,6 +28,9 @@ export function lintLibrary(defs: GoalTypeDef[], opts: LintOptions = {}): string
   const checkSkills = opts.checkSkills !== false;
   const violations: string[] = [];
 
+  // Build a fast lookup map by name for the judgeType validity check below.
+  const byName = new Map<string, GoalTypeDef>(defs.map((d) => [d.name, d]));
+
   // Duplicate type names
   const seen = new Set<string>();
   for (const def of defs) {
@@ -75,6 +78,23 @@ export function lintLibrary(defs: GoalTypeDef[], opts: LintOptions = {}): string
       violations.push(
         `Type "${def.name}" tier ladder does not start at default tier "${def.tier.default}" (starts at "${def.tier.ladder[0]}")`,
       );
+    }
+
+    // judgeType validity: when judgeType is non-null it must name a registered
+    // def whose kind === 'judge'. A judgeType pointing at an unknown name or a
+    // non-judge kind is a misconfiguration that would produce silent misbehaviour
+    // at runtime (enrichRubric would find no skill section for the wrong family).
+    if (def.judgeType !== null) {
+      const judgeTarget = byName.get(def.judgeType);
+      if (judgeTarget === undefined) {
+        violations.push(
+          `Type "${def.name}" has judgeType "${def.judgeType}" which is not registered`,
+        );
+      } else if (judgeTarget.kind !== 'judge') {
+        violations.push(
+          `Type "${def.name}" has judgeType "${def.judgeType}" but that type has kind "${judgeTarget.kind}" (must be "judge")`,
+        );
+      }
     }
 
     // Family skill file must exist and contain a section for this type.

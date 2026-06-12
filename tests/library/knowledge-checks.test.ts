@@ -28,6 +28,10 @@ import {
   KNOWLEDGE_ARTIFACT_SCHEMA,
   REGION_FACTS_SCHEMA,
 } from '../../src/library/knowledge-schemas.js';
+import {
+  PRD_SCHEMA,
+  FINDINGS_SCHEMA,
+} from '../../src/library/pm-schemas.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -978,6 +982,16 @@ describe('strict-mode schema compliance (required ⊇ keys(properties))', () => 
 
   it('REGION_FACTS_SCHEMA satisfies strict-mode: every object node has required ⊇ properties', () => {
     const violations = findStrictViolations(REGION_FACTS_SCHEMA);
+    expect(violations).toEqual([]);
+  });
+
+  it('PRD_SCHEMA satisfies strict-mode: every object node has required ⊇ properties', () => {
+    const violations = findStrictViolations(PRD_SCHEMA);
+    expect(violations).toEqual([]);
+  });
+
+  it('FINDINGS_SCHEMA satisfies strict-mode: every object node has required ⊇ properties', () => {
+    const violations = findStrictViolations(FINDINGS_SCHEMA);
     expect(violations).toEqual([]);
   });
 });
