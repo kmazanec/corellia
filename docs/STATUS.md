@@ -16,10 +16,10 @@ live with family skills, structured emission, and the intent dial.
 | 03 | Hands | Shipped (PR #3) | — | 555 tests; live convergence run green at $0.07 |
 | 04 | Eyes | Shipped (PR #4) | — | 826 tests; scripted convergence green; live mapping partial (debt → 05) |
 | 05 | Taste | Built (PR open) | — | 1076 tests; 19 types; live best 4/5 at ~$2; four real bugs fixed by live runs |
-| 06 | Self-hosting | Arc only | — | after 05; closes the PRD's success bar |
+| 06 | Self-hosting | Plan approved | — | gate brief locked 2026-06-12 (ADR-025/026/027 + PRD §4 amendment); BUILD-PLAN-06-loop approved, ready to build |
 
 ## What's next
 
 Push main (closes PRs #3 and #4). Review/merge the iteration-05 PR. Then
-iteration 06 (self-hosting) gets its gate brief — carried debt list in the
-build notes feeds it.
+launch the 06-loop build from the approved
+[BUILD-PLAN-06-loop](./iterations/06-loop/BUILD-PLAN-06-loop.md).

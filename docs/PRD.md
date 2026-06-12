@@ -79,12 +79,18 @@ physical); every run is reconstructable from the event log after the fact.
 14. Target repos qualify **via their own declared scripts** (test, build,
     check entry points) — the factory drives a repo only through commands the
     repo itself declares; no per-language adapters.
+15. **Hosted single-operator operation** *(amended 2026-06-12, iteration 06
+    gate brief)*: a daemonized listener front door with webhook-style
+    ingress, container-packaged; a REPL for local development.
 
 ### Out of Scope
 
 1. Team surfaces: ownership maps, multi-reviewer routing, Slack/issue-comment
    notification (the operator works at a terminal).
-2. Hosted/multi-tenant operation; the factory runs on the operator's machine.
+2. Multi-tenant operation; the factory serves a single operator. *(Amended
+   2026-06-12: hosted single-operator containerized deployment moved in
+   scope — see In Scope 15. Originally: "Hosted/multi-tenant operation; the
+   factory runs on the operator's machine.")*
 3. Web UI dashboards (terminal projections of the event log suffice).
 4. Factory-factory recursion and token-efficiency self-improvement (deferred
    by design; see DESIGN.md).

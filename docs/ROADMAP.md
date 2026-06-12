@@ -72,10 +72,22 @@ build notes.
 
 ### Iteration 6 — The loop closes: self-hosting
 
-The PR-opening boundary (branch → push → PR with proof artifacts +
-`learned`); the factory builds a real feature on its own repo (PRD AC-2)
-and on a foreign repo (AC-3); improvement loop v1 (blockers → factory-repo
-PRs); daemonized listener front door.
+Decisions locked in ADR-025/026/027 (PR-opening as brokered tools with
+engine-held credentials; hosted front door — webhook ingress + dev REPL,
+container-ready, Brief contract frozen per ADR-008's named trigger;
+improvement loop v1 — listener mints, the improvement goal routes, under a
+standing envelope) plus the PRD §4 amendment (hosted single-operator
+operation in scope; multi-tenant stays out). Seven features ship: the
+PR-opening boundary (branch → push → PR with proof artifacts + `learned`);
+the daemonized front door; improvement loop v1 (blockers → factory-repo
+PRs, AC-21); run economics (provider pinning for cache affinity +
+duplicate-call refusal — the carried A7/A8 levers); the debt sweep (leaf
+tournament, dangerous-grant lint, integration-judge capture, read-only
+learn mode); container packaging (Dockerfile + compose; deployment
+deferred); and assembly — the factory builds a real feature on its own
+repo (AC-2) and on cats (AC-3), with eyes-on-cats retested as an explicit
+early checkpoint. Specs in [iterations/06-loop/](./iterations/06-loop/)
+(F-61..F-67).
 
 *Done when:* the PRD's Desired Outcome — both halves.
 
