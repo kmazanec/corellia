@@ -57,7 +57,12 @@ export function improveTypes(): GoalTypeDef[] {
       kind: 'evolve',
       family: 'improve',
       leafOnly: false,
-      tier: { default: 'high', ladder: ['high'] },
+      // Tier: high is the default (bad harness output poisons every run beneath
+      // it). The ladder allows escalation to a higher-capability model when the
+      // generality judgment is uncertain — "am I looking at a repo-specific
+      // lesson or a general harness gap?" is exactly the question where a richer
+      // context window and stronger reasoning pays. ADR-027.
+      tier: { default: 'high', ladder: ['high', 'high'] },
       deterministic: [],
       judgeType: null,
       grants: ['event-log.read', 'repo.branch', 'repo.pr'],
