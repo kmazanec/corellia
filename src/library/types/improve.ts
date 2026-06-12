@@ -1,0 +1,64 @@
+import type { GoalTypeDef } from '../../contract/goal-type.js';
+
+export function improveTypes(): GoalTypeDef[] {
+  return [
+    /**
+     * `propose-pattern` — abstract a recurrence cluster from the event log into
+     * a provisional split memo. Reads the event log to locate goals that share a
+     * structural shape with similar runtime splits, drafts a split-memo for that
+     * shape, and writes it to the pattern store as `provisional` only. The engine
+     * never self-trusts: promotion to `trusted` requires the human signoff — the
+     * authority gap the machine cannot close on its own.
+     *
+     * Grants: event-log.read + pattern-store.write-provisional only. No product
+     * repo access. No memory-store writes.
+     *
+     * Tier: opus (weighing alternatives — which shape to abstract, how general
+     * to make the memo). Escalates to human when the cluster is ambiguous or
+     * when the proposed shape would subsume an existing trusted memo.
+     *
+     * Deep harness content (cluster-detection heuristics, generality threshold,
+     * memo-format guidance) is iteration 6 work — the current harness section
+     * carries the family skill plus the minimal type card.
+     */
+    {
+      name: 'propose-pattern',
+      kind: 'evolve',
+      family: 'improve',
+      leafOnly: true,
+      tier: { default: 'opus', ladder: ['opus'] },
+      deterministic: [],
+      judgeType: null,
+      grants: ['event-log.read', 'pattern-store.write-provisional'],
+    },
+
+    /**
+     * `improve-factory` — translate blocker reports and stated rejection reasons
+     * that implicate the harness into a factory-repo PR: prompts, skills,
+     * scripts, eval sets, or new type definitions. Route by generality: lessons
+     * specific to one project re-route to `promote-memory`; general harness
+     * failures land here. May spawn children (investigate, draft, test).
+     *
+     * Grants: factory-repo branch + PR (factory-repo.branch, factory-repo.pr).
+     * May spawn. No product-repo write capability. No merge or approval grant.
+     *
+     * Tier: opus (bad harness output poisons every run beneath or after it).
+     * Terminates at a factory-maintainer-reviewed PR — the human gate is the
+     * proof of non-self-approval.
+     *
+     * Deep harness content (routing logic, generality threshold, eval-set
+     * authoring guidance) is iteration 6 work — the current harness section
+     * carries the family skill plus the minimal type card.
+     */
+    {
+      name: 'improve-factory',
+      kind: 'evolve',
+      family: 'improve',
+      leafOnly: false,
+      tier: { default: 'opus', ladder: ['opus'] },
+      deterministic: [],
+      judgeType: null,
+      grants: ['event-log.read', 'factory-repo.branch', 'factory-repo.pr'],
+    },
+  ];
+}

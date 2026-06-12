@@ -22,11 +22,25 @@ import { comprehendTypes } from './types/comprehend.js';
 import { authorTypes } from './types/author.js';
 import { researchTypes } from './types/research.js';
 import { diagnoseTypes } from './types/diagnose.js';
+import { improveTypes } from './types/improve.js';
 
 /**
- * The fourteen starter goal-types. Each corresponds directly to a row in the
- * GOAL-TYPES.md kind tables. The six iteration-05 types (write-prd, design-arch,
- * research-external, investigate) are appended after the original ten.
+ * The starter goal-types — the full GOAL-TYPES.md library. Each entry
+ * corresponds directly to a row in the kind tables.
+ *
+ * The starter goal-types. Each corresponds directly to a row in the
+ * GOAL-TYPES.md kind tables. The evolve family's improve types
+ * (propose-pattern, improve-factory) and the curate type consolidate-memory
+ * were added in iteration 05 (F-55).
+ *
+ * Tier ladders read left-to-right: the first element is the default; subsequent
+ * elements are the escalation rungs the control loop climbs on eval failure.
+ *
+ * Grants are descriptive strings (e.g. 'fs.read'); the engine enforces them at
+ * runtime; this definition carries the data shape.
+ *
+ * Per-family modules own their definitions; this aggregator re-exports the
+ * combined starterTypes() surface unchanged.
  */
 export function starterTypes(): GoalTypeDef[] {
   return [
@@ -39,5 +53,6 @@ export function starterTypes(): GoalTypeDef[] {
     ...authorTypes(),
     ...researchTypes(),
     ...diagnoseTypes(),
+    ...improveTypes(),
   ];
 }
