@@ -128,3 +128,38 @@ None beyond env vars for operator-run live demos.
 
 ## Implementation notes
 
+### Generality-routing decision mechanism
+The routing decision lives entirely inside the `improve-factory` skill harness
+(not in the listener). The listener is purely a routing point — it mints one
+commission per run carrying blocker texts and the `eventLogPointer` (the
+originating goalId). The harness reads the event log via `event-log.read`,
+diagnoses the root cause, and makes a binary decision:
+- **Repo-specific lesson**: call `promote-memory` (project-memory write); emit
+  no branch or PR. The `memory-written` event in the log is the completion proof.
+- **Repo-agnostic fix**: call `push_branch` then `open_pr` on the factory repo.
+  The `pr-opened` event is the completion proof. The architecture-locked constraint
+  is enforced by the factory repo's CI constitution check (not by the harness itself).
+When the model is uncertain, the tier ladder allows escalation (default `high`,
+ladder `['high', 'high']` — same tier, but signals the loop is allowed to retry
+with the strongest available model on the next attempt).
+
+### Where envelope decrement happens
+The `envelopeSpentUsd` counter lives on the `Listener` instance and is
+incremented by `runImprovementIntent()` after each improvement tree completes
+(whether or not the run succeeded). The decrement is nominal (1 unit per tree)
+in v1 — actual USD cost tracking requires `Usage.costUsd` from the engine, which
+is wired in a future iteration. The `spendCeilingUsd` comparison is the admission
+gate in `hasEnvelopeHeadroom()`. Top-up is operator config only: the listener
+never auto-increments the ceiling; operators must restart the daemon with a
+higher `STANDING_SPEND_CEILING_USD` value.
+
+### How the runaway-loop guard is enforced
+The guard is structural, not heuristic: `isImprovementCommission(input)` checks
+whether the originating commission id starts with the `improve-` prefix. The
+`mintImprovementCommission()` function is only called when this check returns
+`false`. An improvement commission that itself reports blockers when it completes
+will NOT re-trigger the mint path because `runImprovementIntent()` calls
+`runIntent()` with the improvement commission as input, and `runIntent()` checks
+`isImprovementCommission(input)` before minting. This is pinned by
+`tests/integration/improvement-loop.test.ts` (AC 5 — runaway-loop guard test).
+
