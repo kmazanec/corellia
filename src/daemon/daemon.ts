@@ -10,14 +10,8 @@
  *   - SIGTERM: preserve in-flight trees, drain the tick, close the server,
  *     exit 0 (ADR-026 preserve-don't-await policy)
  *
- * Substrate selection (AC 7):
- *   - DATABASE_URL set → PgEventStore (for container/hosted runs where
- *     the filesystem is ephemeral per ADR-026)
- *   - else → JsonlEventStore at CORELLIA_EVENTS_PATH
- *
- * Standing envelope (F-63 seam): STANDING_BUDGET_JSON and
- * STANDING_SPEND_CEILING_USD are read and logged at startup but not
- * acted on by this daemon — F-63 owns the improvement-loop admission gate.
+ * Substrate selection (AC 7): see src/daemon/config.ts → buildStore().
+ * Standing envelope (F-63 seam): see src/daemon/config.ts → buildStandingEnvelope().
  *
  * Daemon entrypoint path (for F-66 container build):
  *   src/daemon/daemon.ts
@@ -30,14 +24,12 @@
  */
 
 import { loadDotEnv } from '../env.js';
-import { JsonlEventStore } from '../eventlog/jsonl-store.js';
 import { PgEventStore } from '../substrate/pg-event-store.js';
 import { Listener } from '../listener/listener.js';
 import { preserveTree, sanitizeTreeId } from '../engine/worktree.js';
 import type { Engine } from '../engine/engine.js';
-import type { StandingEnvelope } from '../contract/brief.js';
-import type { EventStore } from '../contract/events.js';
 import { FrontDoorServer } from './http-server.js';
+import { buildStore, buildStandingEnvelope } from './config.js';
 import { join } from 'node:path';
 
 // ── Load env ─────────────────────────────────────────────────────────────────
@@ -54,55 +46,9 @@ if (!token) {
 
 // ── Substrate selection (AC 7) ────────────────────────────────────────────────
 
-/**
- * Substrate selection: DATABASE_URL → Pg else JSONL.
- * The selection logic lives in this block; F-67 may import buildStore() if it
- * needs to create a compatible store for integration tests without launching
- * the daemon process.
- */
-export function buildStore(): { store: EventStore; close: () => Promise<void> } {
-  const dbUrl = process.env['DATABASE_URL'];
-  if (dbUrl) {
-    const pg = new PgEventStore(dbUrl);
-    return {
-      store: pg,
-      close: () => pg.close(),
-    };
-  }
-
-  const eventsPath =
-    process.env['CORELLIA_EVENTS_PATH'] ?? join(process.cwd(), 'out', 'events.jsonl');
-  const jsonl = new JsonlEventStore(eventsPath);
-  // JsonlEventStore has no close(); return a no-op.
-  return {
-    store: jsonl,
-    close: () => Promise.resolve(),
-  };
-}
-
 const { store, close: closeStore } = buildStore();
 
 // ── Standing envelope (F-63 seam) ─────────────────────────────────────────────
-
-/**
- * Read the standing envelope from the environment. The daemon carries it on
- * its config surface and logs it at startup; F-63 owns the admission-gate
- * semantics (ADR-027). We parse here so F-63 can import buildStandingEnvelope()
- * and get the same value without re-reading the environment.
- */
-export function buildStandingEnvelope(): StandingEnvelope | undefined {
-  const budgetJson = process.env['STANDING_BUDGET_JSON'];
-  const ceilingStr = process.env['STANDING_SPEND_CEILING_USD'];
-  if (!budgetJson || !ceilingStr) return undefined;
-  try {
-    const budget = JSON.parse(budgetJson) as StandingEnvelope['budget'];
-    const spendCeilingUsd = parseFloat(ceilingStr);
-    return { budget, spendCeilingUsd };
-  } catch {
-    console.warn('STANDING_BUDGET_JSON is not valid JSON — standing envelope disabled');
-    return undefined;
-  }
-}
 
 const standingEnvelope = buildStandingEnvelope();
 if (standingEnvelope) {

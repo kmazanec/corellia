@@ -76,25 +76,25 @@ None — can start as soon as the iteration's contracts are frozen.
 None required for scripted tests.
 
 ## Build plan (approved)
-- [ ] Chunk 1 — Brief contract freeze + listener consumption: create
+- [x] Chunk 1 — Brief contract freeze + listener consumption: create
   `src/contract/brief.ts` with all four shapes; update `listener.ts` imports;
   delete duplicate inline definitions; satisfies AC 1; tests:
   `tests/contract/brief.test.ts` (shape round-trip); contract touchpoint:
   `brief.ts` barrier shapes.
-- [ ] Chunk 2 — `node:http` server with bearer auth and three routes: `POST
+- [x] Chunk 2 — `node:http` server with bearer auth and three routes: `POST
   /intents`, `POST /intents/:id/answer`, `GET /status`; satisfies AC 2, 3;
   tests: `tests/daemon/http.test.ts` (ephemeral port, scripted brain);
   contract touchpoint: `FrontDoorStatus` wire shape.
-- [ ] Chunk 3 — Daemon entrypoint: periodic `tick()` clock, substrate
+- [x] Chunk 3 — Daemon entrypoint: periodic `tick()` clock, substrate
   selection (`DATABASE_URL` → Pg else JSONL), SIGTERM handler calling
   `preserveTree`; satisfies AC 4, 5, 7; tests:
   `tests/daemon/sigterm.test.ts` (child-process spawn); contract touchpoint:
   `StandingEnvelope` on daemon config.
-- [ ] Chunk 4 — REPL mode: stdin readline drives commission/answer/status
+- [x] Chunk 4 — REPL mode: stdin readline drives commission/answer/status
   against the same in-process listener; satisfies AC 6; tests:
   `tests/daemon/repl.test.ts` (piped stdin); contract touchpoint: ADR-008
   single-authority pin.
-- [ ] Chunk 5 — Integration + signal suite: full HTTP lifecycle + SIGTERM +
+- [x] Chunk 5 — Integration + signal suite: full HTTP lifecycle + SIGTERM +
   auth + substrate selection; satisfies AC 2–7; tests:
   `tests/integration/front-door.test.ts`.
 
@@ -121,4 +121,30 @@ None beyond token env vars for operator-run live demos.
   them as part of this chunk.
 
 ## Implementation notes
+
+### Daemon entrypoint (F-66 needs this)
+- **File:** `src/daemon/daemon.ts`
+- **Invocation (dev):** `npx tsx src/daemon/daemon.ts`
+- **Invocation (compiled):** `node dist/src/daemon/daemon.js`
+- Required env: `FRONT_DOOR_TOKEN` (required), `FRONT_DOOR_PORT` (default 8080),
+  `FRONT_DOOR_HOST` (default 0.0.0.0), `CORELLIA_TICK_MS` (default 5000),
+  `CORELLIA_EVENTS_PATH` (JSONL path, default `out/events.jsonl`),
+  `DATABASE_URL` (Pg URL; if set, overrides JSONL).
+
+### Substrate selection logic location
+- **File:** `src/daemon/config.ts` → `buildStore()`
+- `DATABASE_URL` set → `PgEventStore(DATABASE_URL)`; else `JsonlEventStore(CORELLIA_EVENTS_PATH)`
+- `buildStore()` is exported from `config.ts` (not `daemon.ts`) so tests and
+  F-67 can import it without triggering daemon startup side-effects.
+
+### F-67 seams
+- **`buildStore()`** in `src/daemon/config.ts`: import to create a compatible
+  event store without spawning the daemon process.
+- **`buildStandingEnvelope()`** in `src/daemon/config.ts`: import to read the
+  standing envelope for the improvement-loop admission gate (ADR-027, F-63).
+- **`FrontDoorServer`** in `src/daemon/http-server.ts`: can be instantiated with
+  an externally-constructed `Listener` and `Engine` for live integration tests.
+- **`startRepl()`** in `src/daemon/repl.ts`: can be wired to any `Listener`.
+- The null engine in `daemon.ts` (`buildNullEngine()`) should be replaced with a
+  real `Engine` construction when live LLM calls are needed (F-67 live evidence).
 
