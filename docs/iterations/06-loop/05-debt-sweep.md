@@ -4,14 +4,14 @@ title: "Debt sweep: tournament, lint, capture, read-only"
 iteration: 06-loop
 type: implement
 intent: production
-status: Not started
+status: Shipped
 dependsOn: []
 contracts: [ADR-024, ADR-013, ADR-003]
 ---
 
 # Feature: Debt sweep — tournament, lint, capture, read-only
 
-**ID:** F-65 · **Iteration:** 06-loop · **Status:** Not started
+**ID:** F-65 · **Iteration:** 06-loop · **Status:** Shipped
 
 ## What this delivers (before → after)
 **Before:** four named debts ride from iterations 04/05 — design-arch's

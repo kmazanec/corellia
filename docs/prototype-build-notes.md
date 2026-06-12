@@ -518,3 +518,86 @@ PLACEHOLDER — operator to fill after running live:foreign
 | `npx vitest run` | PASS — 1335 passed / 21 skipped / 0 failed |
 | `tests/integration/convergence-loop.test.ts` (12 tests) | PASS — zero network confirmed |
 
+
+---
+
+# Iteration 06 — convergence summary (the loop closes)
+
+**Build branch:** `build/06-loop` · linear by construction (every feature stacked
+on the frozen barrier; no merge commits). Built orchestrated-manually (the
+build workflow's outline, run by hand with Sonnet-class builders, one Opus
+reviewer, and an adversarial skeptic on the high-severity finding). 37 commits
+on top of the barrier.
+
+## Feature roster — all Shipped
+
+| ID | Feature | Outcome |
+|---|---|---|
+| barrier | Frozen contracts | brief.ts, GRANT_TOOL_MAP push/pr, 3 event members, StepRequest.provider — green on the barrier alone |
+| F-61 | PR-opening boundary tools | push_branch/open_pr; GIT_ASKPASS token (0700 tmpfile, deleted in finally, never in argv/output/events); process-clean gate; idempotence |
+| F-62 | Daemonized front door | node:http daemon, bearer auth, REPL, SIGTERM→preserveTree, substrate select |
+| F-63 | Improvement loop v1 | mint-on-complete, blocker-routed, StandingEnvelope admission (never starves product), runaway guard; harness asserts the REAL improve.md |
+| F-64 | Run economics | provider pinning, duplicate-call refusal (read-only only, write-invalidated), cache-hit share in costSummary |
+| F-65 | Debt sweep | A9 leaf tournament, A10 dangerous-grant lint, A11 integration-judge capture, A12 read-only learn roots (no worktree) |
+| F-66 | Container packaging | multi-stage Dockerfile (tsx runtime, non-root, git present), compose.yaml, env-only config, smoke script |
+| F-67 | Assembly: the closed loop | live-engine wiring, scripted convergence suite (12 tests, zero network — the CI gate), live harnesses (authored, operator-run) |
+
+## Final gate status
+
+| Gate | Status |
+|---|---|
+| `npm run typecheck` | PASS |
+| `npm run lint` | PASS |
+| `npx vitest run` | PASS — **1345 passed / 21 skipped / 0 failed** |
+| `tests/integration/convergence-loop.test.ts` (12) | PASS — zero network |
+
+## Reconciliation + review record (what the orchestration caught beyond green tests)
+
+1. **F-62 daemon-spawn defect (orchestrator, at wave-1 fold):** SIGTERM tests
+   spawned `npx` (ENOENT on the child's PATH) with a cwd hardcoded to the
+   deleted f62 build worktree — both would have failed permanently post-fold;
+   the builders had dismissed them as "flake." Fixed to spawn
+   `process.execPath` + tsx CLI from a path resolved via `import.meta.url`.
+2. **F-65 self-caught:** its A12 no-worktree learn path was too aggressive and
+   regressed `convergence-eyes`; the builder re-guarded script-granting learn
+   goals back into the sandbox.
+3. **Opus review — 2 gating + 4 non-gating findings, all fixed:**
+   - GATING: process-clean gate blocked the improvement loop's own PRs (the
+     gate rejects factory vocabulary that self-improvement PRs necessarily
+     contain). Fixed: target-aware gate.
+   - GATING: null-engine daemon couldn't deliver "through the daemonized front
+     door" (AC-3). Fixed: env-guarded live engine in daemon.ts
+     (`OPENROUTER_API_KEY` present → live, else null stub for keyless smoke).
+   - NON-GATING: HTTP input validation at POST /intents (422 on bad
+     scope/budget); two-compose-file shadowing (explicit `-f` flag documented).
+4. **Adversarial skeptic re-check on the high-severity fix — found a real hole:**
+   the target-aware gate keyed on `goal.type === 'improve-factory'` as a *proxy*
+   for "targets the factory's own repo." That proxy is not enforced: on the
+   `live:foreign` + improvement-loop path, one engine has `repoRoot = cats`, so
+   an improve-factory tree could push factory vocabulary onto a foreign cats PR
+   with the gate wrongly narrowed. **Re-fixed:** the gate now narrows only when
+   the real push target `repoSlug === factoryRepoSlug` (configured at assembly
+   time; set by live:self, unset by live:foreign and the daemon unless
+   `FACTORY_REPO_SLUG` is set). The leak path is regression-pinned.
+
+## What remains operator-run (live evidence, not CI)
+
+The scripted convergence suite is the CI gate and is green. The live harnesses
+are authored but NOT run by the build (they cost real spend and need a human +
+real `GITHUB_TOKEN`/`OPENROUTER_API_KEY`):
+- `npm run live:foreign-eyes` — cats comprehension early checkpoint (target 5/5;
+  honest record either way) — the de-risk gate **before** any deliver spend.
+- `npm run live:self` — AC-2: a real corellia feature through the daemon to a
+  corellia PR (strange-loop isolation watched).
+- `npm run live:foreign` — AC-3: the same on cats.
+Evidence placeholders for these are in the F-66/F-67 sections above; fill PR
+URLs, costs, and cache-hit share after the live runs.
+
+## Carried notes for next iteration
+
+- A thin live-daemon entrypoint that calls `buildLiveEngine()` at startup exists
+  via the env guard in `daemon.ts`; the container still defaults to the null
+  stub when keyless.
+- Two compose files coexist (`docker-compose.yml` dev-DB helper vs `compose.yaml`
+  full stack); documented with explicit `-f`, not renamed (README/ADR-004
+  reference the old name).

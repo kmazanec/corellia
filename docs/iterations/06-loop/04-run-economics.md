@@ -4,14 +4,14 @@ title: "Run economics: provider pinning + duplicate-call refusal"
 iteration: 06-loop
 type: implement
 intent: production
-status: Not started
+status: Shipped
 dependsOn: []
 contracts: [ADR-005, ADR-017]
 ---
 
 # Feature: Run economics: provider pinning + duplicate-call refusal
 
-**ID:** F-64 · **Iteration:** 06-loop · **Status:** Not started
+**ID:** F-64 · **Iteration:** 06-loop · **Status:** Shipped
 
 ## What this delivers (before → after)
 **Before:** cache-hit share reads 0.0% on every live run (OpenRouter provider

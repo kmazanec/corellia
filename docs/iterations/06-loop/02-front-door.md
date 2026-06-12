@@ -4,14 +4,14 @@ title: "Daemonized front door + frozen Brief"
 iteration: 06-loop
 type: implement
 intent: production
-status: Not started
+status: Shipped
 dependsOn: []
 contracts: [ADR-026, ADR-008]
 ---
 
 # Feature: Daemonized front door + frozen Brief
 
-**ID:** F-62 · **Iteration:** 06-loop · **Status:** Not started
+**ID:** F-62 · **Iteration:** 06-loop · **Status:** Shipped
 
 ## What this delivers (before → after)
 **Before:** the Listener (`src/listener/listener.ts`) is a clockless library

@@ -4,14 +4,14 @@ title: "PR-opening boundary tools"
 iteration: 06-loop
 type: implement
 intent: production
-status: Not started
+status: Shipped
 dependsOn: []
 contracts: [ADR-025, ADR-003]
 ---
 
 # Feature: PR-opening boundary tools
 
-**ID:** F-61 · **Iteration:** 06-loop · **Status:** Not started
+**ID:** F-61 · **Iteration:** 06-loop · **Status:** Shipped
 
 ## What this delivers (before → after)
 **Before:** a tree ends at a local `tree/<id>` branch (`collectTree` in

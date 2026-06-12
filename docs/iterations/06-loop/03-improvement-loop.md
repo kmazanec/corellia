@@ -4,14 +4,14 @@ title: "Improvement loop v1"
 iteration: 06-loop
 type: implement
 intent: production
-status: Not started
+status: Shipped
 dependsOn: [F-61]
 contracts: [ADR-027, ADR-025, ADR-003]
 ---
 
 # Feature: Improvement loop v1
 
-**ID:** F-63 · **Iteration:** 06-loop · **Status:** Not started
+**ID:** F-63 · **Iteration:** 06-loop · **Status:** Shipped
 
 ## What this delivers (before → after)
 **Before:** `Report.blockers` and `blocked` events are recorded and read by no

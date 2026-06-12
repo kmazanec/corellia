@@ -4,7 +4,7 @@ title: "Container packaging"
 iteration: 06-loop
 type: implement
 intent: production
-status: Not started
+status: Shipped
 dependsOn: [F-62]
 contracts: [ADR-026, ADR-012]
 stack: docker
@@ -12,7 +12,7 @@ stack: docker
 
 # Feature: Container packaging
 
-**ID:** F-66 · **Iteration:** 06-loop · **Status:** Not started
+**ID:** F-66 · **Iteration:** 06-loop · **Status:** Shipped
 
 ## What this delivers (before → after)
 **Before:** the daemon exists only as a local node process; nothing is

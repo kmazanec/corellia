@@ -4,14 +4,14 @@ title: "Assembly: the closed loop"
 iteration: 06-loop
 type: implement
 intent: production
-status: Not started
+status: Shipped
 dependsOn: [F-61, F-62, F-63, F-64, F-65, F-66]
 contracts: [ADR-025, ADR-026, ADR-027]
 ---
 
 # Feature: Assembly — the closed loop
 
-**ID:** F-67 · **Iteration:** 06-loop · **Status:** Not started
+**ID:** F-67 · **Iteration:** 06-loop · **Status:** Shipped
 
 ## What this delivers (before → after)
 **Before:** six shipped features, unwired; the PRD's Desired Outcome unproven.
