@@ -7,9 +7,9 @@
  *   export OPENROUTER_API_KEY=sk-or-...
  *
  * Optional model overrides:
- *   export CORELLIA_MODEL_HAIKU=anthropic/claude-haiku-latest
- *   export CORELLIA_MODEL_SONNET=anthropic/claude-sonnet-latest
- *   export CORELLIA_MODEL_OPUS=anthropic/claude-opus-4-5
+ *   export CORELLIA_MODEL_LOW=deepseek/deepseek-v4-flash
+ *   export CORELLIA_MODEL_MID=deepseek/deepseek-v4-pro
+ *   export CORELLIA_MODEL_HIGH=qwen/qwen3-235b-a22b
  *
  * Run:
  *   npm run live

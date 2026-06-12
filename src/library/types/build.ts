@@ -8,7 +8,7 @@ export function buildTypes(): GoalTypeDef[] {
       kind: 'make',
       family: 'build',
       leafOnly: true,
-      tier: { default: 'opus', ladder: ['opus'] },
+      tier: { default: 'high', ladder: ['high'] },
       deterministic: [artifactPresent, filesWithinScope, processClean],
       judgeType: 'critique-code',
       grants: ['fs.read', 'fs.write', 'test.run_scoped'],
@@ -19,7 +19,7 @@ export function buildTypes(): GoalTypeDef[] {
       kind: 'make',
       family: 'build',
       leafOnly: true,
-      tier: { default: 'sonnet', ladder: ['sonnet', 'opus'] },
+      tier: { default: 'mid', ladder: ['mid', 'high'] },
       deterministic: [artifactPresent, filesWithinScope, processClean],
       judgeType: 'critique-code',
       grants: [
@@ -39,7 +39,7 @@ export function buildTypes(): GoalTypeDef[] {
       kind: 'make',
       family: 'build',
       leafOnly: true,
-      tier: { default: 'sonnet', ladder: ['sonnet', 'opus'] },
+      tier: { default: 'mid', ladder: ['mid', 'high'] },
       deterministic: [artifactPresent, filesWithinScope],
       judgeType: 'critique-code',
       // Characterize writes only to test directories; no production-code writes.

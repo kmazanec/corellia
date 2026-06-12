@@ -13,7 +13,7 @@ export function diagnoseTypes(): GoalTypeDef[] {
      * Eval: confidence threshold via judge (critique-doc judges the evidence
      * chain quality; the confidence field gates pass/fail).
      *
-     * Tier: sonnet → opus.
+     * Tier: mid → high.
      * Grants: spawn (its probes are children); retrieval API; read-only on the
      * repo. No write grants — investigation produces a finding, not a change.
      *
@@ -24,7 +24,7 @@ export function diagnoseTypes(): GoalTypeDef[] {
       kind: 'learn',
       family: 'diagnose',
       leafOnly: false,
-      tier: { default: 'sonnet', ladder: ['sonnet', 'opus'] },
+      tier: { default: 'mid', ladder: ['mid', 'high'] },
       deterministic: [artifactPresent],
       judgeType: 'critique-doc',
       grants: ['fs.read', 'retrieval.api', 'spawn'],

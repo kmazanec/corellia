@@ -11,7 +11,7 @@ export function authorTypes(): GoalTypeDef[] {
      * the intent or a finding; acceptance criteria are Given/When/Then
      * near-executable scenarios.
      *
-     * Tier: sonnet (structured interview craft) → opus (escalation).
+     * Tier: mid (structured interview craft) → high (escalation).
      * Grants: doc read/write in workspace; retrieval API.
      * Per ADR-023: outputSchema drives structured emission so the provider
      * guarantees the JSON envelope; the deterministic gate checks semantics.
@@ -21,7 +21,7 @@ export function authorTypes(): GoalTypeDef[] {
       kind: 'make',
       family: 'author',
       leafOnly: true,
-      tier: { default: 'sonnet', ladder: ['sonnet', 'opus'] },
+      tier: { default: 'mid', ladder: ['mid', 'high'] },
       deterministic: [artifactPresent, prdShapeCheck],
       judgeType: 'critique-doc',
       grants: ['fs.read', 'fs.write', 'retrieval.api'],
@@ -39,7 +39,7 @@ export function authorTypes(): GoalTypeDef[] {
      * shapes. Lenses are the three diversity axes named in DESIGN.md:
      * architect's cut, reuse-maximizing cut, contrarian's cut.
      *
-     * Tier: opus → human (a bad architecture poisons every sibling).
+     * Tier: high → human (a bad architecture poisons every sibling).
      * Grants: doc read/write; retrieval API.
      */
     {
@@ -47,7 +47,7 @@ export function authorTypes(): GoalTypeDef[] {
       kind: 'make',
       family: 'author',
       leafOnly: true,
-      tier: { default: 'opus', ladder: ['opus'] },
+      tier: { default: 'high', ladder: ['high'] },
       deterministic: [artifactPresent, archSectionCheck],
       judgeType: 'critique-doc',
       grants: ['fs.read', 'fs.write', 'retrieval.api'],

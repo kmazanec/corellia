@@ -37,7 +37,7 @@ export type Intent = 'production' | 'spike' | 'characterization';
  * failure bumps it up the ladder via the control loop. Specification quality,
  * not stakes, picks the tier — a well-specified goal runs cheaper.
  */
-export type Tier = 'haiku' | 'sonnet' | 'opus';
+export type Tier = 'low' | 'mid' | 'high';
 
 /**
  * The resource allowance a goal may spend, inherited from its parent and

@@ -54,9 +54,9 @@ describe('starterTypes', () => {
       expect(def.leafOnly).toBe(false);
     });
 
-    it('uses opus as default tier', () => {
+    it('uses high as default tier', () => {
       const reg = createRegistry(starterTypes());
-      expect(reg.get('deliver-intent').tier.default).toBe('opus');
+      expect(reg.get('deliver-intent').tier.default).toBe('high');
     });
 
     it('delegates to judge-integration', () => {
@@ -79,8 +79,8 @@ describe('starterTypes', () => {
       expect(def.leafOnly).toBe(true);
     });
 
-    it('uses opus as default tier', () => {
-      expect(createRegistry(starterTypes()).get('freeze-contract').tier.default).toBe('opus');
+    it('uses high as default tier', () => {
+      expect(createRegistry(starterTypes()).get('freeze-contract').tier.default).toBe('high');
     });
 
     it('has three deterministic checks: artifact-present, files-within-scope, process-clean', () => {
@@ -103,10 +103,10 @@ describe('starterTypes', () => {
       expect(def.leafOnly).toBe(true);
     });
 
-    it('uses sonnet as default tier, escalates to opus', () => {
+    it('uses mid as default tier, escalates to high', () => {
       const def = createRegistry(starterTypes()).get('implement');
-      expect(def.tier.default).toBe('sonnet');
-      expect(def.tier.ladder).toContain('opus');
+      expect(def.tier.default).toBe('mid');
+      expect(def.tier.ladder).toContain('high');
     });
 
     it('has three deterministic checks', () => {
@@ -128,10 +128,10 @@ describe('starterTypes', () => {
       expect(def.leafOnly).toBe(true);
     });
 
-    it('uses sonnet as default tier, escalates to opus', () => {
+    it('uses mid as default tier, escalates to high', () => {
       const def = createRegistry(starterTypes()).get('characterize');
-      expect(def.tier.default).toBe('sonnet');
-      expect(def.tier.ladder).toContain('opus');
+      expect(def.tier.default).toBe('mid');
+      expect(def.tier.ladder).toContain('high');
     });
 
     it('has two deterministic checks: artifact-present and files-within-scope (no process-clean)', () => {
@@ -179,12 +179,12 @@ describe('starterTypes', () => {
       expect(grants.some((g) => g.includes('write'))).toBe(false);
     });
 
-    it.each(judgeNames)('%s uses sonnet default tier', (name) => {
-      expect(createRegistry(starterTypes()).get(name).tier.default).toBe('sonnet');
+    it.each(judgeNames)('%s uses mid default tier', (name) => {
+      expect(createRegistry(starterTypes()).get(name).tier.default).toBe('mid');
     });
 
-    it.each(judgeNames)('%s ladder includes opus', (name) => {
-      expect(createRegistry(starterTypes()).get(name).tier.ladder).toContain('opus');
+    it.each(judgeNames)('%s ladder includes high', (name) => {
+      expect(createRegistry(starterTypes()).get(name).tier.ladder).toContain('high');
     });
 
     it('judge-split belongs to the arbiter family', () => {
@@ -276,8 +276,8 @@ describe('starterTypes', () => {
       expect(createRegistry(starterTypes()).get('promote-memory').family).toBe('curate');
     });
 
-    it('uses sonnet as default tier', () => {
-      expect(createRegistry(starterTypes()).get('promote-memory').tier.default).toBe('sonnet');
+    it('uses mid as default tier', () => {
+      expect(createRegistry(starterTypes()).get('promote-memory').tier.default).toBe('mid');
     });
 
     it('has null judgeType', () => {
@@ -301,10 +301,10 @@ describe('starterTypes', () => {
       expect(createRegistry(starterTypes()).get('map-repo').family).toBe('comprehend');
     });
 
-    it('uses sonnet as default tier, escalates to opus', () => {
+    it('uses mid as default tier, escalates to high', () => {
       const def = createRegistry(starterTypes()).get('map-repo');
-      expect(def.tier.default).toBe('sonnet');
-      expect(def.tier.ladder).toEqual(['sonnet', 'opus']);
+      expect(def.tier.default).toBe('mid');
+      expect(def.tier.ladder).toEqual(['mid', 'high']);
     });
 
     it('has null judgeType', () => {
@@ -342,10 +342,10 @@ describe('starterTypes', () => {
       expect(createRegistry(starterTypes()).get('deep-dive-region').family).toBe('comprehend');
     });
 
-    it('uses sonnet as default tier, escalates to opus', () => {
+    it('uses mid as default tier, escalates to high', () => {
       const def = createRegistry(starterTypes()).get('deep-dive-region');
-      expect(def.tier.default).toBe('sonnet');
-      expect(def.tier.ladder).toEqual(['sonnet', 'opus']);
+      expect(def.tier.default).toBe('mid');
+      expect(def.tier.ladder).toEqual(['mid', 'high']);
     });
 
     it('has null judgeType', () => {
@@ -379,10 +379,10 @@ describe('starterTypes', () => {
       expect(createRegistry(starterTypes()).get('write-prd').family).toBe('author');
     });
 
-    it('uses sonnet as default tier, escalates to opus', () => {
+    it('uses mid as default tier, escalates to high', () => {
       const def = createRegistry(starterTypes()).get('write-prd');
-      expect(def.tier.default).toBe('sonnet');
-      expect(def.tier.ladder).toContain('opus');
+      expect(def.tier.default).toBe('mid');
+      expect(def.tier.ladder).toContain('high');
     });
 
     it('delegates to critique-doc', () => {
@@ -418,8 +418,8 @@ describe('starterTypes', () => {
       expect(createRegistry(starterTypes()).get('design-arch').family).toBe('author');
     });
 
-    it('uses opus as default tier (bad arch poisons every sibling)', () => {
-      expect(createRegistry(starterTypes()).get('design-arch').tier.default).toBe('opus');
+    it('uses high as default tier (bad arch poisons every sibling)', () => {
+      expect(createRegistry(starterTypes()).get('design-arch').tier.default).toBe('high');
     });
 
     it('delegates to critique-doc', () => {
@@ -458,10 +458,10 @@ describe('starterTypes', () => {
       expect(createRegistry(starterTypes()).get('research-external').family).toBe('research');
     });
 
-    it('uses sonnet as default tier, escalates to opus', () => {
+    it('uses mid as default tier, escalates to high', () => {
       const def = createRegistry(starterTypes()).get('research-external');
-      expect(def.tier.default).toBe('sonnet');
-      expect(def.tier.ladder).toContain('opus');
+      expect(def.tier.default).toBe('mid');
+      expect(def.tier.ladder).toContain('high');
     });
 
     it('has null judgeType', () => {
@@ -497,10 +497,10 @@ describe('starterTypes', () => {
       expect(createRegistry(starterTypes()).get('investigate').family).toBe('diagnose');
     });
 
-    it('uses sonnet as default tier, escalates to opus', () => {
+    it('uses mid as default tier, escalates to high', () => {
       const def = createRegistry(starterTypes()).get('investigate');
-      expect(def.tier.default).toBe('sonnet');
-      expect(def.tier.ladder).toContain('opus');
+      expect(def.tier.default).toBe('mid');
+      expect(def.tier.ladder).toContain('high');
     });
 
     it('delegates to critique-doc (confidence-threshold judge)', () => {

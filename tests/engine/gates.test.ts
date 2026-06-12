@@ -78,7 +78,7 @@ describe('constructor — constitution check', () => {
         name: 'bad-judge',
         kind: 'judge',
         leafOnly: false,            // violates: judge types must be leaf-only
-        tier: { default: 'haiku', ladder: ['haiku'] },
+        tier: { default: 'low', ladder: ['low'] },
       }),
     ]);
     expect(() => new Engine({

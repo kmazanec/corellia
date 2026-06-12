@@ -112,9 +112,9 @@ cp .env.example .env                     # then fill in OPENROUTER_API_KEY
 #  `export OPENROUTER_API_KEY=sk-or-...` works too)
 
 # Optional, in .env or exported: pin specific model versions
-# CORELLIA_MODEL_HAIKU=anthropic/claude-haiku-latest
-# CORELLIA_MODEL_SONNET=anthropic/claude-sonnet-latest
-# CORELLIA_MODEL_OPUS=anthropic/claude-opus-4-5
+# CORELLIA_MODEL_LOW=deepseek/deepseek-v4-flash
+# CORELLIA_MODEL_MID=deepseek/deepseek-v4-pro
+# CORELLIA_MODEL_HIGH=qwen/qwen3-235b-a22b
 ```
 
 **Run**

@@ -11,7 +11,7 @@ const fakeDef = (name: string): GoalTypeDef => ({
   kind: 'make',
   family: 'build',
   leafOnly: true,
-  tier: { default: 'sonnet', ladder: ['sonnet', 'opus'] },
+  tier: { default: 'mid', ladder: ['mid', 'high'] },
   deterministic: [],
   judgeType: null,
   grants: [],

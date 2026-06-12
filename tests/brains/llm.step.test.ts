@@ -81,7 +81,7 @@ function errorResponse(status: number, message: string) {
 }
 
 /** Minimal brain setup. */
-const modelByTier = { haiku: 'haiku-m', sonnet: 'sonnet-m', opus: 'opus-m' };
+const modelByTier = { low: 'low-m', mid: 'mid-m', high: 'high-m' };
 const BASE = 'https://api.test.com/v1';
 const KEY = 'test-key';
 
@@ -97,7 +97,7 @@ const baseGoal: Goal = {
   memories: [],
 };
 
-const ctx: BrainContext = { tier: 'sonnet', memories: [] };
+const ctx: BrainContext = { tier: 'mid', memories: [] };
 
 const tools: ToolDef[] = [
   {
@@ -131,9 +131,9 @@ describe('step request shaping', () => {
   it('uses the model matching the context tier', async () => {
     const { fetch, calls } = stubFetch({ status: 200, body: contentResponse('done') });
     const brain = new LlmBrain({ baseUrl: BASE, apiKey: KEY, modelByTier, fetchImpl: fetch });
-    await brain.step(baseGoal, [{ role: 'context', content: 'sys' }], tools, { tier: 'opus', memories: [] });
+    await brain.step(baseGoal, [{ role: 'context', content: 'sys' }], tools, { tier: 'high', memories: [] });
     const body = JSON.parse(calls[0]!.options.body as string);
-    expect(body.model).toBe('opus-m');
+    expect(body.model).toBe('high-m');
   });
 
   it('maps the first context message to role:system', async () => {
@@ -880,7 +880,7 @@ describe('step response_format: json_schema when ctx.outputSchema present', () =
       properties: { result: { type: 'string' } },
       required: ['result'],
     };
-    const ctxWithSchema: BrainContext = { tier: 'sonnet', memories: [], outputSchema: schema };
+    const ctxWithSchema: BrainContext = { tier: 'mid', memories: [], outputSchema: schema };
     await brain.step(baseGoal, [{ role: 'context', content: 'sys' }], tools, ctxWithSchema);
 
     const body = JSON.parse(calls[0]!.options.body as string);
@@ -895,7 +895,7 @@ describe('step response_format: json_schema when ctx.outputSchema present', () =
     const { fetch, calls } = stubFetch({ status: 200, body: contentResponse('{}') });
     const brain = new LlmBrain({ baseUrl: BASE, apiKey: KEY, modelByTier, fetchImpl: fetch });
     const schema: Record<string, unknown> = { type: 'object', properties: {}, required: [] };
-    const ctxWithSchema: BrainContext = { tier: 'sonnet', memories: [], outputSchema: schema };
+    const ctxWithSchema: BrainContext = { tier: 'mid', memories: [], outputSchema: schema };
     await brain.step(baseGoal, [{ role: 'context', content: 'sys' }], tools, ctxWithSchema);
 
     const body = JSON.parse(calls[0]!.options.body as string);
@@ -945,7 +945,7 @@ describe('step malformation re-prompt preserves response_format when ctx.outputS
       { status: 200, body: contentResponse('{"result":"recovered"}') },
     );
     const brain = new LlmBrain({ baseUrl: BASE, apiKey: KEY, modelByTier, fetchImpl: fetch });
-    const ctxWithSchema: BrainContext = { tier: 'sonnet', memories: [], outputSchema: schema };
+    const ctxWithSchema: BrainContext = { tier: 'mid', memories: [], outputSchema: schema };
 
     await brain.step(baseGoal, [{ role: 'context', content: 'sys' }], tools, ctxWithSchema);
 

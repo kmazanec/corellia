@@ -93,7 +93,7 @@ function implType(checks: DeterministicCheck[]): GoalTypeDef {
     kind: 'make',
     family: 'build',
     leafOnly: true,
-    tier: { default: 'sonnet', ladder: ['sonnet', 'opus'] },
+    tier: { default: 'mid', ladder: ['mid', 'high'] },
     deterministic: checks,
     judgeType: null,
     grants: ['fs.read', 'fs.write', 'test.run_impacted'],

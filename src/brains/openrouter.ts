@@ -11,9 +11,9 @@
  *
  * Environment variable overrides:
  *   OPENROUTER_API_KEY      — required, Bearer token for every request
- *   CORELLIA_MODEL_HAIKU    — override haiku-tier model ID
- *   CORELLIA_MODEL_SONNET   — override sonnet-tier model ID
- *   CORELLIA_MODEL_OPUS     — override opus-tier model ID
+ *   CORELLIA_MODEL_LOW      — override low-tier model ID
+ *   CORELLIA_MODEL_MID      — override mid-tier model ID
+ *   CORELLIA_MODEL_HIGH     — override high-tier model ID
  */
 
 import type { LlmBrainConfig } from './llm.js';
@@ -21,21 +21,20 @@ import type { LlmBrainConfig } from './llm.js';
 /**
  * Default model IDs sourced from GET https://openrouter.ai/api/v1/models on
  * 2026-06-11, cross-checked against current agentic/coding rankings. The tier
- * names (haiku/sonnet/opus) are the contract's historical labels for
- * low/medium/high — the bindings are cost-optimized, cross-vendor picks:
- * each ranks at or above the Anthropic model it replaces on current agentic
- * boards at roughly an order of magnitude lower cost, and all three support
- * tools + structured outputs. Override per tier via CORELLIA_MODEL_*.
+ * Tier names are low/mid/high — cost-optimized, cross-vendor picks: each ranks
+ * at or above the Anthropic model it replaces on current agentic boards at
+ * roughly an order of magnitude lower cost, and all three support tools +
+ * structured outputs. Override per tier via CORELLIA_MODEL_LOW/MID/HIGH.
  */
 const DEFAULT_MODELS = {
-  // ~$0.10/$0.20 per M (was $1/$5) — 1M ctx; the V4 family is noted for
-  // tool-call reliability and well-formed JSON payloads.
-  haiku: 'deepseek/deepseek-v4-flash',
-  // ~$0.44/$0.87 per M (was $3/$15) — 1M ctx; frontier-class agentic/coding.
-  sonnet: 'deepseek/deepseek-v4-pro',
-  // ~$0.67/$3.39 per M (was $5/$25) — judge-grade quality, different vendor
-  // from the lower tiers for provider diversity.
-  opus: 'moonshotai/kimi-k2.6',
+  // ~$0.14/$0.28 per M — 1M ctx; V4 family noted for tool-call reliability
+  // and well-formed JSON payloads.
+  low: 'deepseek/deepseek-v4-flash',
+  // ~$0.44/$0.87 per M — 1M ctx; frontier-class agentic/coding.
+  mid: 'deepseek/deepseek-v4-pro',
+  // ~$0.455/$1.82 per M — judge-grade quality, different vendor from mid/low
+  // for provider diversity; BFCL top-10 tool-call reliability.
+  high: 'qwen/qwen3-235b-a22b',
 } as const;
 
 /**
@@ -57,9 +56,9 @@ export function openRouterConfig(env: NodeJS.ProcessEnv = process.env): LlmBrain
     baseUrl: 'https://openrouter.ai/api/v1',
     apiKey,
     modelByTier: {
-      haiku: env['CORELLIA_MODEL_HAIKU'] ?? DEFAULT_MODELS.haiku,
-      sonnet: env['CORELLIA_MODEL_SONNET'] ?? DEFAULT_MODELS.sonnet,
-      opus: env['CORELLIA_MODEL_OPUS'] ?? DEFAULT_MODELS.opus,
+      low: env['CORELLIA_MODEL_LOW'] ?? DEFAULT_MODELS.low,
+      mid: env['CORELLIA_MODEL_MID'] ?? DEFAULT_MODELS.mid,
+      high: env['CORELLIA_MODEL_HIGH'] ?? DEFAULT_MODELS.high,
     },
     // OpenRouter requires the HTTP-Referer header to attribute traffic; the
     // site-url is optional but recommended for rate-limit visibility.

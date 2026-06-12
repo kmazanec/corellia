@@ -13,7 +13,7 @@ export function improveTypes(): GoalTypeDef[] {
      * Grants: event-log.read + pattern-store.write-provisional only. No product
      * repo access. No memory-store writes.
      *
-     * Tier: opus (weighing alternatives — which shape to abstract, how general
+     * Tier: high (weighing alternatives — which shape to abstract, how general
      * to make the memo). Escalates to human when the cluster is ambiguous or
      * when the proposed shape would subsume an existing trusted memo.
      *
@@ -26,7 +26,7 @@ export function improveTypes(): GoalTypeDef[] {
       kind: 'evolve',
       family: 'improve',
       leafOnly: true,
-      tier: { default: 'opus', ladder: ['opus'] },
+      tier: { default: 'high', ladder: ['high'] },
       deterministic: [],
       judgeType: null,
       grants: ['event-log.read', 'pattern-store.write-provisional'],
@@ -42,7 +42,7 @@ export function improveTypes(): GoalTypeDef[] {
      * Grants: factory-repo branch + PR (factory-repo.branch, factory-repo.pr).
      * May spawn. No product-repo write capability. No merge or approval grant.
      *
-     * Tier: opus (bad harness output poisons every run beneath or after it).
+     * Tier: high (bad harness output poisons every run beneath or after it).
      * Terminates at a factory-maintainer-reviewed PR — the human gate is the
      * proof of non-self-approval.
      *
@@ -55,7 +55,7 @@ export function improveTypes(): GoalTypeDef[] {
       kind: 'evolve',
       family: 'improve',
       leafOnly: false,
-      tier: { default: 'opus', ladder: ['opus'] },
+      tier: { default: 'high', ladder: ['high'] },
       deterministic: [],
       judgeType: null,
       grants: ['event-log.read', 'factory-repo.branch', 'factory-repo.pr'],

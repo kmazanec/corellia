@@ -197,7 +197,7 @@ describe('traceStats', () => {
         goalId: 'g1',
         judgeType: 'code-review',
         verdict: verdict(false),
-        tier: 'sonnet',
+        tier: 'mid',
       },
     ];
     const stats = traceStats(events);
@@ -217,7 +217,7 @@ describe('traceStats', () => {
   it('counts escalations', async () => {
     const events: FactoryEvent[] = [
       baseGoal({ goalId: 'g1', goalType: 'feature' }),
-      { type: 'tier-escalated', at: 2000, goalId: 'g1', from: 'haiku', to: 'sonnet' },
+      { type: 'tier-escalated', at: 2000, goalId: 'g1', from: 'low', to: 'mid' },
     ];
     const stats = traceStats(events);
     expect(stats['feature']?.escalations).toBe(1);
@@ -229,7 +229,7 @@ describe('traceStats', () => {
       baseGoal({ goalId: 'g2', goalType: 'feature' }),
       { type: 'repair-applied', at: 2000, goalId: 'g1', prescriptions: [] },
       { type: 'repair-applied', at: 2100, goalId: 'g2', prescriptions: [] },
-      { type: 'tier-escalated', at: 2200, goalId: 'g2', from: 'haiku', to: 'sonnet' },
+      { type: 'tier-escalated', at: 2200, goalId: 'g2', from: 'low', to: 'mid' },
     ];
     const stats = traceStats(events);
     expect(stats['feature']?.attempts).toBe(2);
@@ -451,7 +451,7 @@ describe('costSummary', () => {
         goalId: 'g1',
         judgeType: 'code-review',
         verdict: verdict(true),
-        tier: 'sonnet',
+        tier: 'mid',
         usage: usageOf(200, 80),
       },
     ];
@@ -533,7 +533,7 @@ describe('costSummary', () => {
         goalId: 'g1',
         judgeType: 'review',
         verdict: verdict(false),
-        tier: 'haiku',
+        tier: 'low',
         usage: usageOf(60, 20),
       },
       {
@@ -929,7 +929,7 @@ describe('goldenCandidates projection', () => {
     artifactDigest,
     rubricDigest,
     verdictPass,
-    tier: 'sonnet',
+    tier: 'mid',
     ...(model !== undefined ? { model } : {}),
   });
 
@@ -970,7 +970,7 @@ describe('goldenCandidates projection', () => {
     const result = goldenCandidates(events);
     const candidate = result['judge-impl']![0]!;
     expect(candidate.verdictPass).toBe(false);
-    expect(candidate.tier).toBe('sonnet');
+    expect(candidate.tier).toBe('mid');
     expect(candidate.model).toBe('claude-sonnet-4-5');
   });
 

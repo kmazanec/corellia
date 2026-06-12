@@ -19,7 +19,7 @@ const baseLeaf: GoalTypeDef = {
   kind: 'make',
   family: 'test',
   leafOnly: true,
-  tier: { default: 'sonnet', ladder: ['sonnet', 'opus'] },
+  tier: { default: 'mid', ladder: ['mid', 'high'] },
   deterministic: [],
   judgeType: null,
   grants: [],
@@ -71,7 +71,7 @@ describe('lintLibrary violations', () => {
       {
         ...baseLeaf,
         name: 'no-ladder',
-        tier: { default: 'sonnet', ladder: [] },
+        tier: { default: 'mid', ladder: [] },
       },
     ];
     const violations = lintLibrary(defs);
@@ -83,7 +83,7 @@ describe('lintLibrary violations', () => {
       {
         ...baseLeaf,
         name: 'wrong-start',
-        tier: { default: 'sonnet', ladder: ['haiku', 'sonnet', 'opus'] },
+        tier: { default: 'mid', ladder: ['low', 'mid', 'high'] },
       },
     ];
     const violations = lintLibrary(defs);

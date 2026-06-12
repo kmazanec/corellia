@@ -13,7 +13,7 @@ export function researchTypes(): GoalTypeDef[] {
      * per-claim fan-out). Facts are marked provisional and never written to
      * memory directly — the spawner promotes them.
      *
-     * Tier: sonnet → opus.
+     * Tier: mid → high.
      * Grants: web search/fetch; external docs read. No fs.write — findings
      * are provisional artifacts, not durable state.
      * Per ADR-023: outputSchema drives structured emission.
@@ -23,7 +23,7 @@ export function researchTypes(): GoalTypeDef[] {
       kind: 'learn',
       family: 'research',
       leafOnly: true,
-      tier: { default: 'sonnet', ladder: ['sonnet', 'opus'] },
+      tier: { default: 'mid', ladder: ['mid', 'high'] },
       deterministic: [artifactPresent, findingsSourceCheck],
       judgeType: null,
       grants: ['web.search', 'web.fetch', 'retrieval.api'],

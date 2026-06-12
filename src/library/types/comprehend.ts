@@ -17,7 +17,7 @@ export function comprehendTypes(): GoalTypeDef[] {
      * guard can consume. Four categories shipped in iteration 04:
      * architecture, stack, conventions, test-scaffold.
      *
-     * Tier: haiku (mechanical extraction) → sonnet (escalation).
+     * Tier: low (mechanical extraction) → mid (escalation).
      * Grants: read-only + sandboxed run rights for validation (`test.run_scoped`).
      * Per ADR-019: artifacts are emitted as `knowledge-written` events, never
      * written directly to the product repo.
@@ -39,10 +39,10 @@ export function comprehendTypes(): GoalTypeDef[] {
       family: 'comprehend',
       outputSchema: KNOWLEDGE_ARTIFACT_SCHEMA,
       leafOnly: true,
-      // Live traces (2026-06-11, four mapping runs on a real repo): haiku-tier
-      // first attempts burn the shared token budget exploring before the sonnet
-      // retry starts — sonnet default is the instrumented call, not a decree.
-      tier: { default: 'sonnet', ladder: ['sonnet', 'opus'] },
+      // Live traces (2026-06-11, four mapping runs on a real repo): low-tier
+      // first attempts burn the shared token budget exploring before the mid
+      // retry starts — mid default is the instrumented call, not a decree.
+      tier: { default: 'mid', ladder: ['mid', 'high'] },
       deterministic: [
         artifactPresent,
         mapRepoCheck(async () => []),
@@ -58,7 +58,7 @@ export function comprehendTypes(): GoalTypeDef[] {
      * Facts enter project memory as provisional and are never trusted
      * automatically.
      *
-     * Tier: sonnet (semantic analysis) → opus (escalation for hard regions).
+     * Tier: mid (semantic analysis) → high (escalation for hard regions).
      * Grants: read-only + retrieval API (no sandboxed run rights needed).
      * Per ADR-019: facts are emitted as `knowledge-facts-written` events.
      *
@@ -78,7 +78,7 @@ export function comprehendTypes(): GoalTypeDef[] {
       family: 'comprehend',
       outputSchema: REGION_FACTS_SCHEMA,
       leafOnly: true,
-      tier: { default: 'sonnet', ladder: ['sonnet', 'opus'] },
+      tier: { default: 'mid', ladder: ['mid', 'high'] },
       deterministic: [artifactPresent, diveAnchorCheck()],
       judgeType: null,
       grants: ['fs.read', 'retrieval.api'],

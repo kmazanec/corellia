@@ -23,7 +23,7 @@ const baseGoal: Goal = {
 };
 
 const ctx: BrainContext = {
-  tier: 'sonnet',
+  tier: 'mid',
   memories: [],
 };
 

@@ -7,7 +7,7 @@ export function deliverTypes(): GoalTypeDef[] {
       kind: 'make',
       family: 'deliver',
       leafOnly: false,
-      tier: { default: 'opus', ladder: ['opus'] },
+      tier: { default: 'high', ladder: ['high'] },
       deterministic: [],
       judgeType: 'judge-integration',
       // The root type that commissions intent accepts only spawn + retrieval

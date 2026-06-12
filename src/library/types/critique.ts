@@ -7,7 +7,7 @@ export function critiqueTypes(): GoalTypeDef[] {
       kind: 'judge',
       family: 'critique',
       leafOnly: true,
-      tier: { default: 'sonnet', ladder: ['sonnet', 'opus'] },
+      tier: { default: 'mid', ladder: ['mid', 'high'] },
       deterministic: [],
       judgeType: null,
       grants: [],
@@ -18,7 +18,7 @@ export function critiqueTypes(): GoalTypeDef[] {
       kind: 'judge',
       family: 'critique',
       leafOnly: true,
-      tier: { default: 'sonnet', ladder: ['sonnet', 'opus'] },
+      tier: { default: 'mid', ladder: ['mid', 'high'] },
       deterministic: [],
       judgeType: null,
       // Read docs and retrieval API; no write tools (judge-kind ceiling).
@@ -33,7 +33,7 @@ export function critiqueTypes(): GoalTypeDef[] {
       kind: 'judge',
       family: 'critique',
       leafOnly: true,
-      tier: { default: 'sonnet', ladder: ['sonnet', 'opus'] },
+      tier: { default: 'mid', ladder: ['mid', 'high'] },
       deterministic: [],
       judgeType: null,
       // Read screenshot/token files and retrieval API; no browser grant in v1.

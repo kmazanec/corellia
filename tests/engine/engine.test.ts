@@ -57,7 +57,7 @@ describe('deterministic fail → judge never called', () => {
       leafTypeDef({
         deterministic: [alwaysFailCheck('lint')],
         judgeType: 'judge',  // judge should never be called
-        tier: { default: 'haiku', ladder: ['haiku', 'sonnet'] },
+        tier: { default: 'low', ladder: ['low', 'mid'] },
       }),
       leafTypeDef({ name: 'judge', kind: 'judge', judgeType: null }),
     ]);
@@ -86,8 +86,8 @@ describe('repair rung', () => {
 
     // Deterministic failures have no prescription → engine escalates, not repairs
     const brain = new ScriptedBrain()
-      .queueProduce(textArtifact('broken'))        // haiku attempt
-      .queueProduce(textArtifact('fixed'));         // sonnet attempt passes
+      .queueProduce(textArtifact('broken'))        // low attempt
+      .queueProduce(textArtifact('fixed'));         // mid attempt passes
 
     const failOnceCheck = failThenPassCheck('lint');
 
@@ -95,7 +95,7 @@ describe('repair rung', () => {
       leafTypeDef({
         deterministic: [failOnceCheck],
         judgeType: null,
-        tier: { default: 'haiku', ladder: ['haiku', 'sonnet'] },
+        tier: { default: 'low', ladder: ['low', 'mid'] },
       }),
     ]);
 
@@ -103,7 +103,7 @@ describe('repair rung', () => {
     const goal = makeGoal({ budget: { attempts: 5, tokens: 1000, toolCalls: 50, wallClockMs: 60000 } });
     const report = await engine.run(goal);
 
-    // Escalated to sonnet, second attempt passes
+    // Escalated to mid, second attempt passes
     expect(report.blockers).toHaveLength(0);
     expect(report.artifact).toEqual(textArtifact('fixed'));
 
@@ -148,16 +148,16 @@ describe('escalation ladder', () => {
 
     // No prescription → escalate then pass on higher tier
     const brain = new ScriptedBrain()
-      .queueProduce(textArtifact('attempt-haiku'))
+      .queueProduce(textArtifact('attempt-low'))
       .queueJudge(failVerdict('quality', undefined))  // no prescription → escalate
-      .queueProduce(textArtifact('attempt-sonnet'))
+      .queueProduce(textArtifact('attempt-mid'))
       .queueJudge(passVerdict());
 
     const registry = buildRegistry([
       leafTypeDef({
         deterministic: [],
         judgeType: 'judge-leaf',
-        tier: { default: 'haiku', ladder: ['haiku', 'sonnet', 'opus'] },
+        tier: { default: 'low', ladder: ['low', 'mid', 'high'] },
       }),
       leafTypeDef({ name: 'judge-leaf', kind: 'judge', judgeType: null }),
     ]);
@@ -171,9 +171,9 @@ describe('escalation ladder', () => {
     const escalateEvents = await store.list({ type: 'tier-escalated' });
     expect(escalateEvents).toHaveLength(1);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((escalateEvents[0] as any).from).toBe('haiku');
+    expect((escalateEvents[0] as any).from).toBe('low');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((escalateEvents[0] as any).to).toBe('sonnet');
+    expect((escalateEvents[0] as any).to).toBe('mid');
   });
 
   it('blocks early on isomorphic failure (same failureSignature repeated)', async () => {
@@ -190,7 +190,7 @@ describe('escalation ladder', () => {
       leafTypeDef({
         deterministic: [],
         judgeType: 'judge-leaf',
-        tier: { default: 'haiku', ladder: ['haiku', 'sonnet', 'opus'] },
+        tier: { default: 'low', ladder: ['low', 'mid', 'high'] },
       }),
       leafTypeDef({ name: 'judge-leaf', kind: 'judge', judgeType: null }),
     ]);
@@ -328,7 +328,7 @@ describe('split with dependency chain', () => {
       leafTypeDef({
         name: 'leaf',
         deterministic: [alwaysFailCheck()],
-        tier: { default: 'haiku', ladder: ['haiku'] },  // single-rung ladder → exhausts after one attempt
+        tier: { default: 'low', ladder: ['low'] },  // single-rung ladder → exhausts after one attempt
       }),
     ]);
 
@@ -378,7 +378,7 @@ describe('budget accounting', () => {
       leafTypeDef({
         deterministic: [],
         judgeType: 'judge-leaf',
-        tier: { default: 'haiku', ladder: ['haiku'] },  // single-rung ladder → no escalation possible
+        tier: { default: 'low', ladder: ['low'] },  // single-rung ladder → no escalation possible
       }),
       leafTypeDef({ name: 'judge-leaf', kind: 'judge', judgeType: null }),
     ]);
@@ -1202,7 +1202,7 @@ describe('no-cost fallback — tokens-only conservative bound', () => {
     expect(ev.spentUsd).toBeCloseTo(25);
   });
 
-  it('WORST_CASE_PRICE_PER_TOKEN is the documented fallback constant (opus-class output worst-case)', () => {
+  it('WORST_CASE_PRICE_PER_TOKEN is the documented fallback constant (high-tier output worst-case)', () => {
     expect(WORST_CASE_PRICE_PER_TOKEN).toBe(0.000025);
   });
 

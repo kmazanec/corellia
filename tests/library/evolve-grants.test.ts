@@ -276,11 +276,11 @@ describe('evolve-family type registrations', () => {
     expect(def.leafOnly).toBe(true);
   });
 
-  it('propose-pattern uses opus as default tier', () => {
-    expect(registry.get('propose-pattern').tier.default).toBe('opus');
+  it('propose-pattern uses high as default tier', () => {
+    expect(registry.get('propose-pattern').tier.default).toBe('high');
   });
 
-  it('improve-factory uses opus as default tier', () => {
-    expect(registry.get('improve-factory').tier.default).toBe('opus');
+  it('improve-factory uses high as default tier', () => {
+    expect(registry.get('improve-factory').tier.default).toBe('high');
   });
 });

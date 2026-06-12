@@ -7,7 +7,7 @@ export function curateTypes(): GoalTypeDef[] {
       kind: 'evolve',
       family: 'curate',
       leafOnly: true,
-      tier: { default: 'sonnet', ladder: ['sonnet'] },
+      tier: { default: 'mid', ladder: ['mid'] },
       deterministic: [],
       judgeType: null,
       // The curate family holds the only memory-write grants in the library.
@@ -24,7 +24,7 @@ export function curateTypes(): GoalTypeDef[] {
      * Grants: memory.write (curate family) + event-log.read only. No product
      * repo access, no pattern-store access.
      *
-     * Tier: sonnet (distillation is specified well enough). Escalates to opus
+     * Tier: mid (distillation is specified well enough). Escalates to high
      * when the namespace has contradictory or unusually dense episodes.
      *
      * Deep harness content (distillation heuristics, eviction thresholds,
@@ -36,7 +36,7 @@ export function curateTypes(): GoalTypeDef[] {
       kind: 'evolve',
       family: 'curate',
       leafOnly: true,
-      tier: { default: 'sonnet', ladder: ['sonnet', 'opus'] },
+      tier: { default: 'mid', ladder: ['mid', 'high'] },
       deterministic: [],
       judgeType: null,
       grants: ['memory.write', 'event-log.read'],

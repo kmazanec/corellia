@@ -48,10 +48,10 @@ const baseGoal: Goal = {
   memories: [],
 };
 
-const ctxSonnet: BrainContext = { tier: 'sonnet', memories: [] };
+const ctxSonnet: BrainContext = { tier: 'mid', memories: [] };
 
 const ctxWithMemories: BrainContext = {
-  tier: 'sonnet',
+  tier: 'mid',
   memories: [
     {
       id: 'm1',
@@ -69,7 +69,7 @@ const ctxWithMemories: BrainContext = {
 };
 
 const ctxWithPriorAttempt: BrainContext = {
-  tier: 'opus',
+  tier: 'high',
   memories: [],
   priorAttempt: {
     artifact: null,
@@ -89,9 +89,9 @@ const ctxWithPriorAttempt: BrainContext = {
 };
 
 const modelByTier = {
-  haiku: 'haiku-model',
-  sonnet: 'sonnet-model',
-  opus: 'opus-model',
+  low: 'low-model',
+  mid: 'mid-model',
+  high: 'high-model',
 };
 
 // ---------------------------------------------------------------------------
@@ -109,9 +109,9 @@ describe('LlmBrain.decide', () => {
   it('uses the model matching the context tier', async () => {
     const { fetch, calls } = stubFetch(chatResponse(JSON.stringify({ kind: 'satisfy' })));
     const brain = new LlmBrain({ baseUrl: 'https://api.example.com/v1', apiKey: 'key', modelByTier, fetchImpl: fetch });
-    await brain.decide(baseGoal, { tier: 'opus', memories: [] });
+    await brain.decide(baseGoal, { tier: 'high', memories: [] });
     const body = JSON.parse(calls[0]?.options.body as string);
-    expect(body.model).toBe('opus-model');
+    expect(body.model).toBe('high-model');
   });
 
   it('sends Authorization header with Bearer token', async () => {

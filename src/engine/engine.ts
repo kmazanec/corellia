@@ -54,7 +54,7 @@ const DEFAULT_SPEND_CEILING_USD = 15;
 /**
  * Worst-case price constant for the conservative token-only ceiling fallback
  * (ADR-017). Used when an endpoint reports tokens but not cost.
- * Covers output-token worst-case for opus-class models (~$0.000025/token).
+ * Covers output-token worst-case for high-tier models (~$0.000025/token).
  * The fallback fires only on cost-silent endpoints; over-conservatism just
  * halts earlier, which is preferable to under-bounding real spend.
  */

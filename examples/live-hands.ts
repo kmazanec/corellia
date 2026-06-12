@@ -12,7 +12,7 @@
  *   export OPENROUTER_API_KEY=sk-or-...
  *
  * Optional model overrides (same as `npm run live`):
- *   export CORELLIA_MODEL_SONNET=anthropic/claude-sonnet-latest
+ *   export CORELLIA_MODEL_MID=deepseek/deepseek-v4-pro
  *
  * Run:
  *   npm run live:hands

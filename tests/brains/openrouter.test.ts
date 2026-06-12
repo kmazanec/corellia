@@ -45,7 +45,7 @@ const baseGoal: Goal = {
   memories: [],
 };
 
-const ctxSonnet: BrainContext = { tier: 'sonnet', memories: [] };
+const ctxSonnet: BrainContext = { tier: 'mid', memories: [] };
 
 // ---------------------------------------------------------------------------
 // openRouterConfig — config parsing
@@ -68,56 +68,56 @@ describe('openRouterConfig', () => {
     expect(cfg.baseUrl).toBe('https://openrouter.ai/api/v1');
   });
 
-  it('uses default haiku model when override is absent', () => {
+  it('uses default low model when override is absent', () => {
     const cfg = openRouterConfig({ OPENROUTER_API_KEY: 'k' });
-    expect(cfg.modelByTier['haiku']).toBe('deepseek/deepseek-v4-flash');
+    expect(cfg.modelByTier['low']).toBe('deepseek/deepseek-v4-flash');
   });
 
-  it('uses default sonnet model when override is absent', () => {
+  it('uses default mid model when override is absent', () => {
     const cfg = openRouterConfig({ OPENROUTER_API_KEY: 'k' });
-    expect(cfg.modelByTier['sonnet']).toBe('deepseek/deepseek-v4-pro');
+    expect(cfg.modelByTier['mid']).toBe('deepseek/deepseek-v4-pro');
   });
 
-  it('uses default opus model when override is absent', () => {
+  it('uses default high model when override is absent', () => {
     const cfg = openRouterConfig({ OPENROUTER_API_KEY: 'k' });
-    expect(cfg.modelByTier['opus']).toBe('moonshotai/kimi-k2.6');
+    expect(cfg.modelByTier['high']).toBe('qwen/qwen3-235b-a22b');
   });
 
-  it('env override wins for haiku tier', () => {
+  it('env override wins for low tier', () => {
     const cfg = openRouterConfig({
       OPENROUTER_API_KEY: 'k',
-      CORELLIA_MODEL_HAIKU: 'anthropic/claude-haiku-custom',
+      CORELLIA_MODEL_LOW: 'anthropic/claude-haiku-custom',
     });
-    expect(cfg.modelByTier['haiku']).toBe('anthropic/claude-haiku-custom');
+    expect(cfg.modelByTier['low']).toBe('anthropic/claude-haiku-custom');
   });
 
-  it('env override wins for sonnet tier', () => {
+  it('env override wins for mid tier', () => {
     const cfg = openRouterConfig({
       OPENROUTER_API_KEY: 'k',
-      CORELLIA_MODEL_SONNET: 'anthropic/claude-sonnet-custom',
+      CORELLIA_MODEL_MID: 'anthropic/claude-sonnet-custom',
     });
-    expect(cfg.modelByTier['sonnet']).toBe('anthropic/claude-sonnet-custom');
+    expect(cfg.modelByTier['mid']).toBe('anthropic/claude-sonnet-custom');
   });
 
-  it('env override wins for opus tier', () => {
+  it('env override wins for high tier', () => {
     const cfg = openRouterConfig({
       OPENROUTER_API_KEY: 'k',
-      CORELLIA_MODEL_OPUS: 'anthropic/claude-opus-custom',
+      CORELLIA_MODEL_HIGH: 'anthropic/claude-opus-custom',
     });
-    expect(cfg.modelByTier['opus']).toBe('anthropic/claude-opus-custom');
+    expect(cfg.modelByTier['high']).toBe('anthropic/claude-opus-custom');
   });
 
   it('all three tier overrides can coexist', () => {
     const cfg = openRouterConfig({
       OPENROUTER_API_KEY: 'k',
-      CORELLIA_MODEL_HAIKU: 'h-override',
-      CORELLIA_MODEL_SONNET: 's-override',
-      CORELLIA_MODEL_OPUS: 'o-override',
+      CORELLIA_MODEL_LOW: 'low-override',
+      CORELLIA_MODEL_MID: 'mid-override',
+      CORELLIA_MODEL_HIGH: 'high-override',
     });
     expect(cfg.modelByTier).toEqual({
-      haiku: 'h-override',
-      sonnet: 's-override',
-      opus: 'o-override',
+      low: 'low-override',
+      mid: 'mid-override',
+      high: 'high-override',
     });
   });
 });

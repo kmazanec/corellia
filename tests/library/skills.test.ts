@@ -16,7 +16,7 @@ const baseLeaf: GoalTypeDef = {
   kind: 'make',
   family: 'test',
   leafOnly: true,
-  tier: { default: 'sonnet', ladder: ['sonnet', 'opus'] },
+  tier: { default: 'mid', ladder: ['mid', 'high'] },
   deterministic: [],
   judgeType: null,
   grants: [],

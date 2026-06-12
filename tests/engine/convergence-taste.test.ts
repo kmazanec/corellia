@@ -264,7 +264,7 @@ const SCAN_ROOT_TYPE: GoalTypeDef = {
   kind: 'make',
   family: 'deliver',
   leafOnly: false,
-  tier: { default: 'opus', ladder: ['opus'] },
+  tier: { default: 'high', ladder: ['high'] },
   deterministic: [],
   judgeType: 'judge-integration',
   grants: ['retrieval.api', 'spawn'],
