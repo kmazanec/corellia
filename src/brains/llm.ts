@@ -38,6 +38,17 @@ export interface LlmBrainConfig {
   apiKey: string;
   /** Which model to call for each tier. */
   modelByTier: Record<Tier, string>;
+  /**
+   * Optional per-tier provider routing config (ADR-005 / F-64).
+   * When present for a tier, the `provider` field is included on every step
+   * request for that tier, pinning provider order and cache-affinity fallback
+   * behaviour. Absent tier entry → field omitted (wire-compatible).
+   *
+   * Example (OpenRouter, pin DeepSeek for mid-tier, disable fallbacks for
+   * cache affinity):
+   *   providerByTier: { mid: { order: ['DeepSeek'], allow_fallbacks: false } }
+   */
+  providerByTier?: Partial<Record<Tier, { order: string[]; allow_fallbacks: boolean }>>;
   /** Extra HTTP headers to include on every request (e.g. for proxies). */
   headers?: Record<string, string>;
   /**
@@ -244,12 +255,18 @@ class TransportError extends Error {
  * - 'assistant' with toolCalls → assistant with tool_calls[]
  * - 'assistant' with no toolCalls → plain assistant content message
  * - 'tool' → role:'tool' with tool_call_id
+ *
+ * Provider routing (F-64 / ADR-005): when `providerConfig` is supplied, it is
+ * included as the `provider` field on the wire body, pinning the provider order
+ * and cache-affinity setting for this tier's requests. Absent → field omitted
+ * (wire-compatible: providers that do not understand the field ignore it).
  */
 function buildStepRequest(
   transcript: StepTranscript,
   tools: ToolDef[],
   model: string,
   outputSchema?: Record<string, unknown>,
+  providerConfig?: { order: string[]; allow_fallbacks: boolean },
 ): StepRequest {
   let contextCount = 0;
   const messages: WireMessage[] = [];
@@ -307,6 +324,9 @@ function buildStepRequest(
     messages,
     tools: wireTools,
     ...(responseFormat !== undefined ? { response_format: responseFormat } : {}),
+    // Provider routing: include only when per-tier config is present (F-64 / ADR-005).
+    // Absent config → field absent → wire-compatible with providers that ignore it.
+    ...(providerConfig !== undefined ? { provider: providerConfig } : {}),
   };
 }
 
@@ -729,6 +749,10 @@ export class LlmBrain implements Brain {
     const sleepFn = this.config.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     const MAX_RETRIES = 3;
     const transportIncidents: TransportIncident[] = [];
+    // Per-tier provider routing config (F-64 / ADR-005): sourced from
+    // LlmBrainConfig.providerByTier[ctx.tier]; absent entry → undefined →
+    // buildStepRequest omits the provider field entirely (wire-compatible).
+    const providerConfig = this.config.providerByTier?.[ctx.tier];
 
     /**
      * Perform one fetch of the step endpoint with bounded transport retries.
@@ -737,7 +761,7 @@ export class LlmBrain implements Brain {
      * Retried calls contribute no usage; each retry is recorded as an incident.
      */
     const fetchWithRetry = async (): Promise<StepResponse> => {
-      const requestBody = buildStepRequest(transcript, tools, model, ctx.outputSchema);
+      const requestBody = buildStepRequest(transcript, tools, model, ctx.outputSchema, providerConfig);
       let attempt = 0;
       while (true) {
         let response: Response;
@@ -825,7 +849,7 @@ export class LlmBrain implements Brain {
         },
       ];
 
-      const repromptBody = buildStepRequest(correctedTranscript, tools, model, ctx.outputSchema);
+      const repromptBody = buildStepRequest(correctedTranscript, tools, model, ctx.outputSchema, providerConfig);
       const repromptResponse = await fetchFn(`${this.config.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {

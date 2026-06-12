@@ -118,3 +118,26 @@ None.
 
 ## Implementation notes
 
+**Chunk 1 — per-tier provider config source:**
+`LlmBrainConfig.providerByTier` (a `Partial<Record<Tier, {order: string[]; allow_fallbacks: boolean}>>`)
+is the source of truth. In `LlmBrain.step()`, `this.config.providerByTier?.[ctx.tier]` is resolved
+at the start of the method and passed to `buildStepRequest` as the optional 5th argument. When the
+entry is absent, `buildStepRequest` receives `undefined` and omits the field entirely from the wire
+body. The same resolved value is threaded to the malformation re-prompt call so both calls carry the
+same provider pinning. `openrouter.ts` does not yet populate `providerByTier`; an operator adds it
+to the returned config to activate pinning on a per-tier basis.
+
+**Chunk 2 — canonicalization rule for args:**
+`stableJsonStringify(args)` — recursive alphabetical key sort before JSON serialization, array
+order preserved. The duplicate guard key is `"${name}\0${stableJsonStringify(args)}"` (NUL separator
+is unambiguous between name and args). Two calls that are semantically identical but whose LLM-emitted
+key order differs will produce the same key and be correctly deduplicated.
+
+**Chunk 3 — write-invalidation mechanism:**
+After a successful `write_file` execution, `invalidateReadGuardForPath(seenCalls, writtenPath)` removes
+all guard set entries for every read-only tool using the written path as the `path`, `filePath`, or
+`query` arg. This is O(readOnlyTools × candidateArgKeys) = O(constant) per write and handles the
+typical `read_file({path}) → write_file({path}) → read_file({path})` edit cycle. Only the specific
+path is invalidated; unrelated paths remain guarded. The invalidation fires only on `result.ok` writes
+so a refused write (scope violation, grant missing) does not spuriously clear the guard.
+
