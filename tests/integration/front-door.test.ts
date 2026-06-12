@@ -125,7 +125,7 @@ function makeInput(id: string, scope = `src/${id}/`): CommissionInput {
     title: `Intent ${id}`,
     spec: { what: id },
     scope: [scope],
-    budget: { attempts: 2, toolCalls: 10, tokens: 5_000 },
+    budget: { attempts: 2, toolCalls: 10, tokens: 5_000, wallClockMs: 60_000 },
     intent: 'production',
   };
 }

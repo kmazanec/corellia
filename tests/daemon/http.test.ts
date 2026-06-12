@@ -158,7 +158,7 @@ function makeInput(id: string): CommissionInput {
     title: `Intent ${id}`,
     spec: { what: id },
     scope: [`src/${id}/`],
-    budget: { attempts: 2, toolCalls: 10, tokens: 5_000 },
+    budget: { attempts: 2, toolCalls: 10, tokens: 5_000, wallClockMs: 60_000 },
     intent: 'production',
   };
 }
@@ -295,6 +295,78 @@ describe('FrontDoorServer POST /intents', () => {
       body: { id: 'oops' }, // missing title/spec/scope/budget
     });
     expect(status).toBe(422);
+  });
+
+  it('returns 422 when scope is not a string array', async () => {
+    const { status, body } = await doRequest({
+      port,
+      method: 'POST',
+      path: '/intents',
+      token: TOKEN,
+      body: {
+        id: 'bad-scope',
+        title: 'Bad scope',
+        spec: {},
+        scope: 'src/foo/', // string, not string[]
+        budget: { attempts: 2, tokens: 5_000, toolCalls: 10, wallClockMs: 60_000 },
+      },
+    });
+    expect(status).toBe(422);
+    expect((body as { error: string }).error).toContain('scope');
+  });
+
+  it('returns 422 when budget is malformed (missing wallClockMs)', async () => {
+    const { status, body } = await doRequest({
+      port,
+      method: 'POST',
+      path: '/intents',
+      token: TOKEN,
+      body: {
+        id: 'bad-budget',
+        title: 'Bad budget',
+        spec: {},
+        scope: ['src/'],
+        budget: { attempts: 2, tokens: 5_000, toolCalls: 10 }, // missing wallClockMs
+      },
+    });
+    expect(status).toBe(422);
+    expect((body as { error: string }).error).toContain('budget');
+  });
+
+  it('returns 422 when budget has non-finite field (NaN attempts)', async () => {
+    const { status, body } = await doRequest({
+      port,
+      method: 'POST',
+      path: '/intents',
+      token: TOKEN,
+      body: {
+        id: 'nan-budget',
+        title: 'NaN budget',
+        spec: {},
+        scope: ['src/'],
+        budget: { attempts: NaN, tokens: 5_000, toolCalls: 10, wallClockMs: 60_000 },
+      },
+    });
+    expect(status).toBe(422);
+    expect((body as { error: string }).error).toContain('budget');
+  });
+
+  it('returns 422 when budget is an object of wrong shape (e.g. {})', async () => {
+    const { status, body } = await doRequest({
+      port,
+      method: 'POST',
+      path: '/intents',
+      token: TOKEN,
+      body: {
+        id: 'empty-budget',
+        title: 'Empty budget',
+        spec: {},
+        scope: ['src/'],
+        budget: {}, // empty object
+      },
+    });
+    expect(status).toBe(422);
+    expect((body as { error: string }).error).toContain('budget');
   });
 
   it('shows a commissioned intent in running when the engine stalls', async () => {

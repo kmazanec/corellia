@@ -16,6 +16,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import type { Listener } from '../listener/listener.js';
 import type { CommissionInput, FrontDoorStatus } from '../contract/brief.js';
+import type { Budget } from '../contract/goal.js';
 
 // ── JSON body reader ────────────────────────────────────────────────────────
 
@@ -65,6 +66,44 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 
 function sendError(res: ServerResponse, status: number, message: string): void {
   sendJson(res, status, { error: message });
+}
+
+// ── CommissionInput validation ────────────────────────────────────────────────
+
+/**
+ * Validate that `v` is a well-formed Budget: an object with finite numeric
+ * `attempts`, `tokens`, `toolCalls`, and `wallClockMs` fields.
+ */
+function isValidBudget(v: unknown): v is Budget {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return false;
+  const b = v as Record<string, unknown>;
+  return (
+    typeof b['attempts'] === 'number' && isFinite(b['attempts']) &&
+    typeof b['tokens'] === 'number' && isFinite(b['tokens']) &&
+    typeof b['toolCalls'] === 'number' && isFinite(b['toolCalls']) &&
+    typeof b['wallClockMs'] === 'number' && isFinite(b['wallClockMs'])
+  );
+}
+
+/**
+ * Validate that `v` is a string[].
+ */
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((item) => typeof item === 'string');
+}
+
+/**
+ * Validate a raw body object as a CommissionInput. Returns an error message
+ * string if invalid, or null if valid.
+ */
+function validateCommissionInput(body: Record<string, unknown>): string | null {
+  if (!isStringArray(body['scope'])) {
+    return 'Invalid CommissionInput: "scope" must be a string[]';
+  }
+  if (!isValidBudget(body['budget'])) {
+    return 'Invalid CommissionInput: "budget" must be an object with finite numeric fields: attempts, tokens, toolCalls, wallClockMs';
+  }
+  return null;
 }
 
 // ── Auth helper ──────────────────────────────────────────────────────────────
@@ -207,7 +246,8 @@ export class FrontDoorServer {
         return;
       }
 
-      // Basic shape guard — we need at least id + title + spec + scope + budget.
+      // Shape guard — we need at least id + title + spec + scope + budget,
+      // with scope as a string[] and budget as a valid finite-numeric Budget.
       if (
         body === null ||
         typeof body !== 'object' ||
@@ -218,6 +258,13 @@ export class FrontDoorServer {
         !('budget' in body)
       ) {
         sendError(res, 422, 'Missing required CommissionInput fields');
+        return;
+      }
+
+      const bodyObj = body as Record<string, unknown>;
+      const validationError = validateCommissionInput(bodyObj);
+      if (validationError !== null) {
+        sendError(res, 422, validationError);
         return;
       }
 
