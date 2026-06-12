@@ -8,6 +8,21 @@ Calibration is the quality signal. The arbiter's verdicts must be replayable on
 golden sets; a judge that drifts from its calibration set is not improving — it
 is becoming inconsistent.
 
+## The intent dial
+
+Both arbiter types read `goal.intent` to calibrate strictness. Structural
+invariants — acyclicity, over-declared dependencies, vertical-slice discipline
+for `judge-split`; gap analysis and scope conformance for `judge-integration` —
+are never waived by intent. What changes is how strictly the judges apply
+*quality and completeness* when the goal under review was itself a spike or
+characterization.
+
+| intent | strictness applied by arbiters |
+| --- | --- |
+| `production` | Full rigor. Every gap in coverage, every weak dependency ordering, every uncertain scope is a finding. |
+| `spike` | Structural invariants still apply. Quality completeness is relaxed: ask whether the decomposition or result answers the question, not whether it is team-mergeable. |
+| `characterization` | Structural invariants still apply. Scope findings are relaxed: the goal was to capture what exists, not to improve it; do not flag absence of improvements as gaps. |
+
 ## judge-split
 
 Evaluate the proposed decomposition on three axes before approving it.

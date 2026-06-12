@@ -14,6 +14,22 @@ architectural authority, a spec ambiguity where two valid interpretations yield
 incompatible implementations. Set it only when no amount of iteration can
 resolve the finding without human input.
 
+## The intent dial
+
+Every critique type reads `goal.intent` to calibrate its bar. The bar
+modulates **only the judge verdict** — the deterministic gate is always
+applied in full, regardless of intent.
+
+| intent | bar |
+| --- | --- |
+| `production` | **Mimicry bar**: could a team member who did not write this piece have written it? Style, naming, structure, and conventions all count. Deviations that a reviewer would flag are gating findings. |
+| `spike` | **Answers-the-question bar**: does the artifact answer the stated question and show its reasoning? Polish, style, and convention are waived entirely unless they obscure the answer. |
+| `characterization` | **Fidelity-of-capture bar**: does the artifact faithfully record what exists — behavior, structure, or design — without adding opinion or injecting improvements? Captures that introduce change are gating findings. |
+
+Apply the bar that matches `goal.intent`. Do not apply the production bar to a
+spike; do not waive robustness findings for a characterization that is supposed
+to be a faithful record.
+
 ## critique-code
 
 Apply the six-dimension rubric in a single read of the diff.
@@ -49,3 +65,83 @@ toolchain assumption.
 For every gating finding, supply a concrete, localized fix: the specific line or
 block to change and what to change it to. A prescription like "handle the error"
 is not localized; "wrap line 42 in a try-catch that returns the zero value" is.
+
+## critique-doc
+
+The defensibility probe: for every decision in the document, ask "why this way
+and not the obvious alternative?" An empty tradeoffs section means the decision
+was not actually made — the author chose a direction without weighing the
+alternatives. That is a gating finding.
+
+Apply in a single read of the document.
+
+**Defensibility.** For each significant decision or recommendation, verify that
+the document names the alternative(s) considered and explains why they were
+rejected. A decision without a rejected alternative is a conclusion without
+reasoning — it cannot survive a challenge.
+
+**Empty-tradeoffs means undecided.** If a section that should carry tradeoffs
+(options analysis, ADR options table, design alternatives) is empty, thin, or
+says only "see above," the decision was not made — it was deferred while
+appearing decided. Flag as gating.
+
+**Upstream-contract conformance.** Does the document conform to the contracts
+it inherits from upstream? A PRD that adds requirements the commissioned intent
+did not authorize, an ADR that contradicts a superseding decision, or a design
+that violates a frozen interface shape — these are gating deviations, not style
+issues.
+
+**Testability (for PRDs).** Are the acceptance criteria stated in terms that
+are verifiable without a human judgment call? "The user can log in" is a
+behavior; "the system feels fast" is an opinion. Untestable criteria are
+low-severity unless the feature's acceptance depends entirely on them.
+
+**No solutioning (for PRDs).** A PRD that prescribes implementation details —
+specific data structures, algorithms, or technology choices — has overstepped
+its contract. Flag as a low-severity finding unless the prescription constrains
+architecture.
+
+For every gating finding, supply a concrete prescription: the specific section,
+the claim that is undefended, and what the author must add to resolve it.
+
+## critique-ui
+
+v1 judges UI artifacts and screenshot/design-system pointers. **No browser
+grant exists in v1** — this critique reads screenshot files and design-token
+files by pointer; it does not drive a live browser. When live-drive capability
+is needed, that is a deferred speciation of this type.
+
+Apply in a single read of the provided screenshots and spec.
+
+**Spec fidelity.** Does the rendered UI match the spec — layout, content, and
+interaction model? Every visible requirement from the spec that is absent or
+wrong is a gating finding.
+
+**Design-system conformance.** Do the rendered components, colors, spacing, and
+typography match the tokens declared in the design-system pointers? A surface
+that invents its own values instead of consuming the design system is a gating
+finding.
+
+**Accessibility (structural).** Are heading levels logical, are interactive
+elements keyboard-reachable (inferrable from structure), and are meaningful
+images represented by text? Structural accessibility issues visible from a
+screenshot are gating. Issues that require DOM or browser inspection are noted
+as deferred (no browser grant in v1).
+
+**Responsive integrity.** If both mobile and desktop screenshots are provided,
+does the layout reflow correctly? Elements that overflow, overlap, or disappear
+between breakpoints are findings.
+
+**Contrarian.** What is the strongest visual or UX argument that this approach
+is wrong? Consider what a design reviewer would push back on. If the counter-
+argument is clearly weaker, note why. If it is plausibly better, that is a
+finding.
+
+**Convention.** Does the surface match the project's established visual
+patterns? Novel UI that works but diverges from adjacent surfaces without a
+stated reason is a low-severity finding.
+
+For every gating finding, supply a concrete prescription: the specific element,
+the deviation, and what must change. "The button color is wrong" is not
+localized; "the primary CTA uses #FF0000 but the design-system token is
+--color-brand-500 (#3B82F6)" is.

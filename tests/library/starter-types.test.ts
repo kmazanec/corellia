@@ -8,9 +8,9 @@ import { createRegistry } from '../../src/library/registry.js';
 import { lintLibrary } from '../../src/library/constitution.js';
 
 describe('starterTypes', () => {
-  it('returns an array with the fourteen defined types', () => {
+  it('returns an array with the sixteen defined types', () => {
     const types = starterTypes();
-    expect(types.length).toBe(14);
+    expect(types.length).toBe(16);
   });
 
   it('all types are loadable into a registry without error', () => {
@@ -27,6 +27,8 @@ describe('starterTypes', () => {
       'judge-split',
       'judge-integration',
       'critique-code',
+      'critique-doc',
+      'critique-ui',
       'promote-memory',
       'map-repo',
       'deep-dive-region',
@@ -143,7 +145,7 @@ describe('starterTypes', () => {
   });
 
   describe('judge types', () => {
-    const judgeNames = ['judge-split', 'judge-integration', 'critique-code'];
+    const judgeNames = ['judge-split', 'judge-integration', 'critique-code', 'critique-doc', 'critique-ui'];
 
     it.each(judgeNames)('%s has kind judge', (name) => {
       expect(createRegistry(starterTypes()).get(name).kind).toBe('judge');
@@ -161,8 +163,17 @@ describe('starterTypes', () => {
       expect(createRegistry(starterTypes()).get(name).judgeType).toBeNull();
     });
 
-    it.each(judgeNames)('%s has empty grants', (name) => {
+    // critique-doc and critique-ui carry read grants (fs.read, retrieval.api);
+    // the arbiter types and critique-code have no grants.
+    const judgeNamesNoGrants = ['judge-split', 'judge-integration', 'critique-code'];
+    it.each(judgeNamesNoGrants)('%s has empty grants', (name) => {
       expect(createRegistry(starterTypes()).get(name).grants).toHaveLength(0);
+    });
+
+    // All critique doc/ui judges have no write grants (judge-kind ceiling).
+    it.each(['critique-doc', 'critique-ui'])('%s has no write grants', (name) => {
+      const grants = createRegistry(starterTypes()).get(name).grants;
+      expect(grants.some((g) => g.includes('write'))).toBe(false);
     });
 
     it.each(judgeNames)('%s uses sonnet default tier', (name) => {
@@ -183,6 +194,71 @@ describe('starterTypes', () => {
 
     it('critique-code belongs to the critique family', () => {
       expect(createRegistry(starterTypes()).get('critique-code').family).toBe('critique');
+    });
+
+    it('critique-doc belongs to the critique family', () => {
+      expect(createRegistry(starterTypes()).get('critique-doc').family).toBe('critique');
+    });
+
+    it('critique-ui belongs to the critique family', () => {
+      expect(createRegistry(starterTypes()).get('critique-ui').family).toBe('critique');
+    });
+  });
+
+  describe('critique-doc', () => {
+    it('has kind judge and is leafOnly', () => {
+      const def = createRegistry(starterTypes()).get('critique-doc');
+      expect(def.kind).toBe('judge');
+      expect(def.leafOnly).toBe(true);
+    });
+
+    it('has fs.read and retrieval.api grants (no write)', () => {
+      const grants = createRegistry(starterTypes()).get('critique-doc').grants;
+      expect(grants).toContain('fs.read');
+      expect(grants).toContain('retrieval.api');
+      expect(grants.some((g) => g.includes('write'))).toBe(false);
+    });
+
+    it('has no deterministic checks (judge kind)', () => {
+      expect(createRegistry(starterTypes()).get('critique-doc').deterministic).toHaveLength(0);
+    });
+
+    it('has null judgeType', () => {
+      expect(createRegistry(starterTypes()).get('critique-doc').judgeType).toBeNull();
+    });
+
+    it('passes constitution lint as part of the full set', () => {
+      expect(lintLibrary(starterTypes())).toHaveLength(0);
+    });
+  });
+
+  describe('critique-ui', () => {
+    it('has kind judge and is leafOnly', () => {
+      const def = createRegistry(starterTypes()).get('critique-ui');
+      expect(def.kind).toBe('judge');
+      expect(def.leafOnly).toBe(true);
+    });
+
+    it('has fs.read and retrieval.api grants (no write, no browser in v1)', () => {
+      const grants = createRegistry(starterTypes()).get('critique-ui').grants;
+      expect(grants).toContain('fs.read');
+      expect(grants).toContain('retrieval.api');
+      expect(grants.some((g) => g.includes('write'))).toBe(false);
+      // No browser grant in v1 — deferred
+      expect(grants).not.toContain('browser.drive');
+      expect(grants).not.toContain('browser');
+    });
+
+    it('has no deterministic checks (judge kind)', () => {
+      expect(createRegistry(starterTypes()).get('critique-ui').deterministic).toHaveLength(0);
+    });
+
+    it('has null judgeType', () => {
+      expect(createRegistry(starterTypes()).get('critique-ui').judgeType).toBeNull();
+    });
+
+    it('passes constitution lint as part of the full set', () => {
+      expect(lintLibrary(starterTypes())).toHaveLength(0);
     });
   });
 
@@ -446,8 +522,65 @@ describe('starterTypes', () => {
     });
   });
 
-  describe('constitution compliance — all fourteen types', () => {
-    it('lintLibrary passes with all fourteen types registered', () => {
+  describe('critique-doc', () => {
+    it('has kind judge and is leafOnly', () => {
+      const def = createRegistry(starterTypes()).get('critique-doc');
+      expect(def.kind).toBe('judge');
+      expect(def.leafOnly).toBe(true);
+    });
+
+    it('has fs.read and retrieval.api grants (no write)', () => {
+      const grants = createRegistry(starterTypes()).get('critique-doc').grants;
+      expect(grants).toContain('fs.read');
+      expect(grants).toContain('retrieval.api');
+      expect(grants.some((g) => g.includes('write'))).toBe(false);
+    });
+
+    it('has no deterministic checks (judge kind)', () => {
+      expect(createRegistry(starterTypes()).get('critique-doc').deterministic).toHaveLength(0);
+    });
+
+    it('has null judgeType', () => {
+      expect(createRegistry(starterTypes()).get('critique-doc').judgeType).toBeNull();
+    });
+
+    it('passes constitution lint as part of the full set', () => {
+      expect(lintLibrary(starterTypes())).toHaveLength(0);
+    });
+  });
+
+  describe('critique-ui', () => {
+    it('has kind judge and is leafOnly', () => {
+      const def = createRegistry(starterTypes()).get('critique-ui');
+      expect(def.kind).toBe('judge');
+      expect(def.leafOnly).toBe(true);
+    });
+
+    it('has fs.read and retrieval.api grants (no write, no browser in v1)', () => {
+      const grants = createRegistry(starterTypes()).get('critique-ui').grants;
+      expect(grants).toContain('fs.read');
+      expect(grants).toContain('retrieval.api');
+      expect(grants.some((g) => g.includes('write'))).toBe(false);
+      // No browser grant in v1 — deferred
+      expect(grants).not.toContain('browser.drive');
+      expect(grants).not.toContain('browser');
+    });
+
+    it('has no deterministic checks (judge kind)', () => {
+      expect(createRegistry(starterTypes()).get('critique-ui').deterministic).toHaveLength(0);
+    });
+
+    it('has null judgeType', () => {
+      expect(createRegistry(starterTypes()).get('critique-ui').judgeType).toBeNull();
+    });
+
+    it('passes constitution lint as part of the full set', () => {
+      expect(lintLibrary(starterTypes())).toHaveLength(0);
+    });
+  });
+
+  describe('constitution compliance — all sixteen types', () => {
+    it('lintLibrary passes with all sixteen types registered', () => {
       expect(lintLibrary(starterTypes())).toHaveLength(0);
     });
   });
