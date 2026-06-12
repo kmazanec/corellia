@@ -1,7 +1,8 @@
 /**
  * A small library of deterministic checks (DeterministicCheck implementations).
- * These run before any judge and are intent-blind: their outcome is a function
- * of the goal and artifact alone.
+ * These run before any judge; their outcome is a function of the goal and
+ * artifact alone. No check in this file reads the judge-bar field on a goal
+ * (constitution rule 5: deterministic gates are always applied in full).
  */
 
 import { normalize, isAbsolute } from 'node:path';
