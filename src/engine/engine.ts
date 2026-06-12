@@ -634,8 +634,11 @@ export class Engine {
             kind: 'text',
             text: JSON.stringify(decision.children),
           };
-          const rubric =
-            'Evaluate the split: is it sound and complete? Are dependencies correct and acyclic? Are budgetShares sensible?';
+          const rubric = this.enrichRubric(
+            'Evaluate the split: is it sound and complete? Are dependencies correct and acyclic? Are budgetShares sensible?',
+            'judge-split',
+            goal.intent,
+          );
           const judgeCtx: BrainContext = {
             tier: currentTier,
             memories: goal.memories,
@@ -839,8 +842,11 @@ export class Engine {
     };
 
     const candidates: Candidate[] = [];
-    const rubric =
-      'Evaluate the split: is it sound and complete? Are dependencies correct and acyclic? Are budgetShares sensible?';
+    const rubric = this.enrichRubric(
+      'Evaluate the split: is it sound and complete? Are dependencies correct and acyclic? Are budgetShares sensible?',
+      'judge-split',
+      goal.intent,
+    );
 
     for (let i = 0; i < k; i++) {
       const lens = lenses[i % lenses.length] ?? lenses[0]!;
@@ -1294,7 +1300,11 @@ export class Engine {
 
       // ── LLM JUDGE (only if deterministic passed) ─────────────────────────
       if (typeDef.judgeType !== null) {
-        const rubric = `Judge this artifact as a ${typeDef.judgeType} for goal type ${typeDef.name}`;
+        const rubric = this.enrichRubric(
+          `Judge this artifact as a ${typeDef.judgeType} for goal type ${typeDef.name}`,
+          typeDef.judgeType,
+          goal.intent,
+        );
         const judgeCtx: BrainContext = { tier, memories: goal.memories };
         const judgeResult = await this.brain.judge(goal, artifact, rubric, judgeCtx);
         const verdict = judgeResult.value;
@@ -1413,6 +1423,43 @@ export class Engine {
    * routes tool calls through the broker, and logs every step and result. Returns
    * either the final artifact (with updated budget) or a failure descriptor.
    */
+
+  /**
+   * Enrich a judge rubric with:
+   *   (a) the judge type's family skill section + preamble (same injection
+   *       pattern as the step-loop harness, via loadFamilySkill)
+   *   (b) an intent line: "The goal's intent is <intent>. Apply the bar that
+   *       intent demands per the skill."
+   *
+   * The intent line is included for every judge call — the intent dial is in the
+   * rubric; the scripted brain in tests can key off it to demonstrate the dial.
+   *
+   * HARD INVARIANT: deterministic checks never see intent. This method is ONLY
+   * called at brain.judge call sites, never at deterministic check sites.
+   */
+  private enrichRubric(baseRubric: string, judgeType: string, intent: import('../contract/goal.js').Intent): string {
+    const intentLine = `The goal's intent is ${intent}. Apply the bar that intent demands per the skill.`;
+
+    // Look up the judge type's family skill
+    let skillBlock = '';
+    if (this.registry.has(judgeType)) {
+      const judgeTypeDef = this.registry.get(judgeType);
+      const familySkill = loadFamilySkill(judgeTypeDef.family);
+      if (familySkill) {
+        const section = familySkill.sectionFor(judgeType);
+        const preamble = familySkill.full.split(/\n## /)[0]!.trim();
+        const parts: string[] = [];
+        if (preamble) parts.push(preamble);
+        if (section) parts.push(section.trim());
+        if (parts.length > 0) {
+          skillBlock = `\n\n--- JUDGE SKILL ---\n${parts.join('\n\n')}\n--- END JUDGE SKILL ---`;
+        }
+      }
+    }
+
+    return `${baseRubric}\n\n${intentLine}${skillBlock}`;
+  }
+
   /**
    * Build a "prior attempt evidence" block from the tool results of a previous
    * step-loop transcript. This is the compact digest injected into the next
@@ -1782,7 +1829,11 @@ export class Engine {
 
     // Re-run judge
     if (typeDef.judgeType !== null) {
-      const rubric = `Judge this artifact as a ${typeDef.judgeType} for goal type ${typeDef.name}`;
+      const rubric = this.enrichRubric(
+        `Judge this artifact as a ${typeDef.judgeType} for goal type ${typeDef.name}`,
+        typeDef.judgeType,
+        goal.intent,
+      );
       const judgeCtx: BrainContext = { tier, memories: goal.memories };
       const judgeResult = await this.brain.judge(goal, artifact, rubric, judgeCtx);
       const verdict = judgeResult.value;
@@ -2329,7 +2380,11 @@ export class Engine {
     const integrationFindings: string[] = [];
     const integrationBlockers: string[] = [];
     if (this.registry.has('judge-integration') && mergedArtifact) {
-      const rubric = `Does the integrated artifact satisfy the original goal: "${goal.title}"?`;
+      const rubric = this.enrichRubric(
+        `Does the integrated artifact satisfy the original goal: "${goal.title}"?`,
+        'judge-integration',
+        goal.intent,
+      );
       const integTypeDef = this.registry.get(goal.type);
       const judgeCtx: BrainContext = {
         tier: integTypeDef.tier.default,
