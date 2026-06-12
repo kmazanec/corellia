@@ -331,6 +331,9 @@ describe('budget gate and remaining-count injection', () => {
       store,
       memory: new NoopMemoryView(),
       broker,
+      // This test asserts the toolCalls-budget ENFORCEMENT path (block on
+      // exhaustion). Warn-only is the default since 2026-06-12, so opt in.
+      enforceToolCallBudget: true,
     });
 
     const goal = makeGoal({
@@ -680,6 +683,9 @@ describe('per-call budget gate', () => {
       store,
       memory: new NoopMemoryView(),
       broker,
+      // Asserts the toolCalls enforcement path (block on exhaustion); warn-only
+      // is the default, so opt in.
+      enforceToolCallBudget: true,
     });
 
     const goal = makeGoal({
@@ -733,6 +739,9 @@ describe('zero toolCalls budget at loop entry', () => {
       store,
       memory: new NoopMemoryView(),
       broker,
+      // Asserts the toolCalls enforcement path (exhaustion before any step);
+      // warn-only is the default, so opt in.
+      enforceToolCallBudget: true,
     });
 
     const goal = makeGoal({

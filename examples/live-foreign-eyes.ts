@@ -148,11 +148,17 @@ const engine = buildLiveEngine({
 
 // ── Commission: one map-repo goal per category ─────────────────────────────────
 
+// Budget shape for real-repo comprehension. The toolCalls ceiling is generous:
+// the 2026-06-12 eyes-on-cats checkpoint failed 0/5 because toolCalls: 20
+// exhausted exploration before the model could emit. The engine now treats the
+// toolCalls budget as warn-only by default (the tokens budget and dollar ceiling
+// are the real backstops), so this number is a soft nudge, not a hard wall —
+// raised here so the "remaining" signal stays meaningful rather than punitive.
 const DEFAULT_BUDGET = {
   attempts: 3,
-  tokens: 500_000,
-  toolCalls: 20,
-  wallClockMs: 600_000,
+  tokens: 2_000_000,
+  toolCalls: 200,
+  wallClockMs: 900_000,
 };
 
 function mapGoal(category: KnowledgeCategory): Goal {

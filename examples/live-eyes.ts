@@ -177,11 +177,14 @@ function pickDiveRegion(repo: string): string {
 }
 const diveRegion = pickDiveRegion(targetRepo);
 
+// Generous real-repo comprehension budget; the toolCalls ceiling is warn-only at
+// the engine by default (2026-06-12), so it is a soft nudge, not a hard wall.
+// See live-foreign-eyes.ts for the eyes-on-cats checkpoint rationale.
 const DEFAULT_BUDGET = {
   attempts: 3,
-  tokens: 500_000,
-  toolCalls: 20,
-  wallClockMs: 600_000,
+  tokens: 2_000_000,
+  toolCalls: 200,
+  wallClockMs: 900_000,
 };
 
 function mapGoal(category: KnowledgeCategory): Goal {

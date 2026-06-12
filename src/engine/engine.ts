@@ -189,6 +189,21 @@ export interface EngineOptions {
    */
   goldenCapture?: boolean;
   /**
+   * Whether the per-attempt `toolCalls` budget is ENFORCED (block on exhaustion)
+   * or WARN-ONLY (keep going, but emit the `budget-exhausted` signal). Defaults
+   * to `false` — warn-only.
+   *
+   * Rationale (2026-06-12): the eyes-on-cats checkpoint failed 0/5 because a
+   * `toolCalls: 20` ceiling exhausts real-repo comprehension before the model
+   * can emit, on both mid and high tier — and we have no runaway-job signal yet
+   * that would justify a hard limit. So the counter, the rolling "N tool calls
+   * remaining" context message, and the `budget-exhausted` event all stay in
+   * place (the signal we need to eventually set a real limit), but exhaustion no
+   * longer blocks the run unless an operator opts in by setting this true.
+   * Re-arm once a genuine runaway appears in the trace.
+   */
+  enforceToolCallBudget?: boolean;
+  /**
    * Called when a goal blocks. The resolution drives the blocked event.
    * Returning 'answered' means the brief was handled (goal can continue or not
    * depending on caller semantics); other values map to onTimeout defaults.
@@ -310,6 +325,7 @@ export class Engine {
   private readonly memory: MemoryView;
   private readonly now: () => number;
   private readonly goldenCapture: boolean;
+  private readonly enforceToolCallBudget: boolean;
   private readonly onBrief:
     | ((
         brief: import('../contract/decision.js').DecisionBrief,
@@ -409,6 +425,7 @@ export class Engine {
     this.memory = opts.memory;
     this.now = opts.now ?? (() => Date.now());
     this.goldenCapture = opts.goldenCapture ?? false;
+    this.enforceToolCallBudget = opts.enforceToolCallBudget ?? false;
     this.onBrief = opts.onBrief;
     this.sensitivity = opts.sensitivity ?? [];
     this.onGate = opts.onGate;
@@ -1867,6 +1884,16 @@ export class Engine {
     const tools = deriveToolDefs(grants, this.effectiveBroker as { defs?: () => ToolDef[] });
     const transcript: StepTranscript = [];
     let remainingToolCalls = budget.toolCalls;
+    // Warn-only runaway backstop: even when the toolCalls budget is not enforced
+    // (the default), a model that never emits must still terminate. The tokens
+    // budget and dollar ceiling are the real backstops in live runs, but they
+    // rely on provider-reported usage — a brain that reports none (or a tight
+    // pathological loop) would otherwise spin forever. So warn-only mode still
+    // hard-stops at a generous multiple of the soft budget. This is a safety
+    // limit, not an economy lever; raise the multiple, don't lower it.
+    const WARN_ONLY_BACKSTOP_MULTIPLE = 50;
+    const hardToolCallCap = Math.max(budget.toolCalls, 1) * WARN_ONLY_BACKSTOP_MULTIPLE;
+    let toolCallsMade = 0;
     let stepIndex = 0;
     // Accumulate total token usage across all steps for tokens-budget debit.
     let totalTokensUsed = 0;
@@ -1930,19 +1957,44 @@ export class Engine {
       content: `${remainingToolCalls} tool calls remaining`,
     });
 
+    // Whether the budget-exhausted signal has already been emitted this attempt
+    // (warn-only mode emits it once, then keeps going — see enforceToolCallBudget).
+    let toolBudgetWarned = false;
+
     while (true) {
-      // Gate: must have budget for at least one more step before calling the brain
+      // Gate: the toolCalls budget. When enforced, exhaustion blocks the run.
+      // When WARN-ONLY (the default — see EngineOptions.enforceToolCallBudget),
+      // emit the budget-exhausted signal exactly once and keep going: the tokens
+      // budget (debited per step by the caller) and the dollar ceiling (checked
+      // after every step below) remain the hard backstops, so a non-emitting
+      // model still terminates — it is the toolCalls *block* that is relaxed,
+      // not the safety net.
       if (remainingToolCalls <= 0) {
-        return { kind: 'exhausted', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
+        if (this.enforceToolCallBudget) {
+          return { kind: 'exhausted', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
+        }
+        if (!toolBudgetWarned) {
+          await this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'toolCalls' });
+          toolBudgetWarned = true;
+        }
+        // Warn-only runaway backstop: a model that never converges still stops.
+        if (toolCallsMade >= hardToolCallCap) {
+          return { kind: 'exhausted', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
+        }
       }
 
-      // Update the context message with the current remaining count (replace last context)
+      // Update the context message (replace last context). Once over the soft
+      // budget in warn-only mode, the model is told it is over budget rather than
+      // shown a negative count — a nudge to converge without a hard stop.
+      const remainingMsg =
+        remainingToolCalls > 0
+          ? `${remainingToolCalls} tool calls remaining`
+          : `tool-call budget exceeded (over by ${-remainingToolCalls}); converge and emit the artifact now`;
       const lastMsg = transcript[transcript.length - 1];
       if (lastMsg && lastMsg.role === 'context') {
-        (transcript[transcript.length - 1] as { role: 'context'; content: string }).content =
-          `${remainingToolCalls} tool calls remaining`;
+        (transcript[transcript.length - 1] as { role: 'context'; content: string }).content = remainingMsg;
       } else {
-        transcript.push({ role: 'context', content: `${remainingToolCalls} tool calls remaining` });
+        transcript.push({ role: 'context', content: remainingMsg });
       }
 
       let stepOutput: import('../contract/brain.js').StepOutput;
@@ -2001,15 +2053,27 @@ export class Engine {
             content: 'Emit the final artifact now: respond with ONLY the JSON object matching the required schema.',
           });
 
-          // Budget gate for the emit call.
-          if (remainingToolCalls <= 0) {
+          // Budget gate for the emit call. When enforced, a depleted budget
+          // blocks the emit. When WARN-ONLY (default), never block the emit on
+          // toolCalls: the model has signalled exploration-complete and reaching
+          // the artifact is exactly what we want — blocking here is the precise
+          // failure the eyes-on-cats checkpoint hit (explore past budget, then
+          // get denied at emit). The tokens budget and dollar ceiling still bound
+          // this one extra call.
+          if (this.enforceToolCallBudget && remainingToolCalls <= 0) {
             return { kind: 'exhausted', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
           }
 
           // Update the rolling budget context message.
           const lastMsgBeforeEmit = transcript[transcript.length - 1];
           // The emit instruction we just pushed is the last — add the rolling count after it.
-          transcript.push({ role: 'context', content: `${remainingToolCalls} tool calls remaining` });
+          transcript.push({
+            role: 'context',
+            content:
+              remainingToolCalls > 0
+                ? `${remainingToolCalls} tool calls remaining`
+                : `tool-call budget exceeded; emit the final artifact now`,
+          });
 
           // Make the emit call with outputSchema set.
           const emitCtx: BrainContext = { ...ctx, outputSchema: typeDef.outputSchema };
@@ -2092,7 +2156,12 @@ export class Engine {
       });
 
       for (const call of stepOutput.calls) {
-        if (remainingToolCalls <= 0) {
+        // When enforced, stop routing once the budget is spent (a multi-call step
+        // cannot drive the counter past 0). When WARN-ONLY (default), keep
+        // routing — the pre-step gate already emitted the budget-exhausted signal
+        // once; the dollar ceiling (checked each step) and tokens budget remain
+        // the hard stops.
+        if (this.enforceToolCallBudget && remainingToolCalls <= 0) {
           return { kind: 'exhausted', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
         }
 
@@ -2137,6 +2206,7 @@ export class Engine {
 
         const result = await this.effectiveBroker!.execute(goal, call);
         remainingToolCalls--;
+        toolCallsMade++;
 
         // Log the tool-call event
         await this.store.append({
