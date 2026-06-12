@@ -8,9 +8,9 @@ import { createRegistry } from '../../src/library/registry.js';
 import { lintLibrary } from '../../src/library/constitution.js';
 
 describe('starterTypes', () => {
-  it('returns an array with the sixteen defined types', () => {
+  it('returns the complete nineteen-type GOAL-TYPES library', () => {
     const types = starterTypes();
-    expect(types.length).toBe(16);
+    expect(types.length).toBe(19);
   });
 
   it('all types are loadable into a registry without error', () => {
@@ -36,6 +36,9 @@ describe('starterTypes', () => {
       'design-arch',
       'research-external',
       'investigate',
+      'consolidate-memory',
+      'propose-pattern',
+      'improve-factory',
     ];
     for (const name of expectedNames) {
       expect(() => reg.get(name)).not.toThrow();
@@ -579,8 +582,8 @@ describe('starterTypes', () => {
     });
   });
 
-  describe('constitution compliance — all sixteen types', () => {
-    it('lintLibrary passes with all sixteen types registered', () => {
+  describe('constitution compliance — the full library', () => {
+    it('lintLibrary passes with all nineteen types registered', () => {
       expect(lintLibrary(starterTypes())).toHaveLength(0);
     });
   });
