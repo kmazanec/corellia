@@ -166,11 +166,10 @@ describe('golden capture: goldenCapture flag controls emission', () => {
   });
 });
 
-describe('golden capture: integration-judge site is explicitly excluded', () => {
-  it('goldenCapture:true emits NO golden-candidate for the judge-integration call site', async () => {
-    // The integration-judge call in runSplit does NOT call maybeAppendGoldenCandidate.
-    // This test locks that documented exclusion: even with goldenCapture:true, no
-    // golden-candidate event is emitted for the judge-integration verdict.
+describe('golden capture: integration-judge site (A11)', () => {
+  it('goldenCapture:true emits judge-verdict + golden-candidate for judge-integration (F-65 A11)', async () => {
+    // A11 wires the integration-judge site to emit judge-verdict and golden-candidate
+    // on non-scripted (goldenCapture:true) runs so the flywheel captures them.
     const store = new MemoryEventStore();
 
     const childA: ChildPlan = {
@@ -204,9 +203,56 @@ describe('golden capture: integration-judge site is explicitly excluded', () => 
 
     await engine.run(makeGoal({ type: 'splitter' }));
 
-    // No golden-candidate events should have been emitted — the integration
-    // judge call site does not participate in golden capture.
     const goldenEvents = (await store.list()).filter((e) => e.type === 'golden-candidate');
+    const jvEvents = (await store.list()).filter(
+      (e) => e.type === 'judge-verdict' && (e as { judgeType?: string }).judgeType === 'judge-integration',
+    );
+    // A11: both emitted on non-scripted runs
+    expect(goldenEvents).toHaveLength(1);
+    expect(jvEvents).toHaveLength(1);
+  });
+
+  it('goldenCapture:false emits NO judge-verdict / golden-candidate for judge-integration (F-65 A11)', async () => {
+    // On scripted runs (goldenCapture:false), the integration-judge events are absent.
+    const store = new MemoryEventStore();
+
+    const childA: ChildPlan = {
+      localId: 'a',
+      type: 'leaf',
+      title: 'child A',
+      spec: {},
+      dependsOn: [],
+      scope: [],
+      budgetShare: 1.0,
+    };
+
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'splitter', judgeType: null }),
+      leafTypeDef({ name: 'leaf', judgeType: null }),
+      leafTypeDef({ name: 'judge-integration', leafOnly: true, judgeType: null }),
+    ]);
+
+    const brain = new ScriptedBrain()
+      .queueDecide({ kind: 'split', children: [childA] })
+      .queueProduce(textArtifact('child output'))
+      .queueJudge(passVerdict()); // judge-integration passes
+
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      goldenCapture: false, // scripted run
+    });
+
+    await engine.run(makeGoal({ type: 'splitter' }));
+
+    const goldenEvents = (await store.list()).filter((e) => e.type === 'golden-candidate');
+    const jvEvents = (await store.list()).filter(
+      (e) => e.type === 'judge-verdict' && (e as { judgeType?: string }).judgeType === 'judge-integration',
+    );
+    // Scripted run: both absent
     expect(goldenEvents).toHaveLength(0);
+    expect(jvEvents).toHaveLength(0);
   });
 });

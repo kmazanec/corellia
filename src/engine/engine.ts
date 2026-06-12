@@ -2741,7 +2741,10 @@ export class Engine {
       mergedArtifact = { kind: 'text', text: allTexts.join('\n') };
     }
 
-    // Integration eval: if registry has judge-integration, judge the assembly
+    // Integration eval: if registry has judge-integration, judge the assembly.
+    // On non-scripted runs (goldenCapture: true) emit judge-verdict + golden-candidate
+    // (ADR-024, A11). On scripted runs these events are absent — the non-scripted
+    // gate is the goldenCapture flag, ADR-024's single source of truth.
     const integrationFindings: string[] = [];
     const integrationBlockers: string[] = [];
     if (this.registry.has('judge-integration') && mergedArtifact) {
@@ -2751,16 +2754,30 @@ export class Engine {
         goal.intent,
       );
       const integTypeDef = this.registry.get(goal.type);
+      const integTier = integTypeDef.tier.default;
       const judgeCtx: BrainContext = {
-        tier: integTypeDef.tier.default,
+        tier: integTier,
         memories: goal.memories,
       };
-      const { value: intVerdict } = await this.brain.judge(
+      const { value: intVerdict, usage: intUsage } = await this.brain.judge(
         goal,
         mergedArtifact,
         rubric,
         judgeCtx,
       );
+      // Emit judge-verdict + golden-candidate on non-scripted runs (ADR-024).
+      if (this.goldenCapture) {
+        await this.store.append({
+          type: 'judge-verdict',
+          at: t(),
+          goalId: goal.id,
+          judgeType: 'judge-integration',
+          verdict: intVerdict,
+          tier: integTier,
+          usage: intUsage,
+        });
+        await this.maybeAppendGoldenCandidate(goal.id, 'judge-integration', mergedArtifact, rubric, intVerdict, integTier);
+      }
       if (!intVerdict.pass) {
         // Failing integration is a hard blocker — emit failure honestly
         const msg = `Integration eval failed: ${intVerdict.findings.map((f) => f.title).join(', ')}`;
