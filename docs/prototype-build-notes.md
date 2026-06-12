@@ -559,19 +559,56 @@ Run cost $5.91, 8.38M prompt tokens, cache-hit 50.6%, 0 artifacts written.
   region-bounded goal converges; a whole-repo goal does not. This is the design
   signal for iteration 7.
 
-**Revised diagnosis for iteration 7:** the lever is NOT "bigger budgets" (we
-proved that — 2M tokens still exhausts). It is **bound the exploration**: either
-(a) `map-repo` should decompose into scoped sub-goals (one per subtree/region)
-the way `deep-dive` already works, instead of trying to read a whole repo in one
-goal; and/or (b) a cheap breadth-first index pass should precede the expensive
-read so the model reads only what matters; and/or (c) the two-phase emit needs a
-hardening pass so a long transcript still produces a valid structured artifact
-(the `step-loop:failed` emit path). The `deep-dive` pass is the existence proof
-that the scoped approach works.
+**Root cause is STRUCTURAL, not a budget or strategy tweak — and it is a design
+defect, not an implementation bug.**
 
-**Decision:** AC-2 still NOT passed (1/5) → deliver spend (AC-3/AC-4) remains
-blocked. This is an iteration-7 brief (comprehension decomposition + emit
-hardening), no longer a budget tweak.
+`map-repo` is `leafOnly: true` (`src/library/types/comprehend.ts:41`), and so is
+`deep-dive-region` (`:80`). The engine enforces leaf-only structurally: leafOnly
+types skip the decide/split path entirely and go straight to the attempt loop
+(`engine.ts:631`), and a leafOnly type that returns a split decision is a hard
+error (`:701`). So a comprehension goal **cannot decompose** — it must swallow
+its entire job in one node's context.
+
+This directly contradicts the factory's central law: *any goal too big for one
+node splits.* Comprehension is the one family whose work scales with repo size,
+and it is the one family hard-coded never to recurse. "Comprehend the architecture
+of cats" is not a leaf-sized job on any non-trivial repo — yet it is forced into
+a single leaf. The result is exactly what we saw: the whole-repo `map-repo` goals
+exhaust (2M tokens, no convergence), and `deep-dive:src` passed only because
+cats's `src` happened to fit one node — on a larger subsystem it would exhaust
+identically. Scope didn't *help*; the bounded node simply stayed under the leaf
+ceiling that the unbounded ones blew through.
+
+DESIGN.md §"Discovery is just-in-time" already says comprehension is *pulled by
+the split gate* — "map enough to split THIS intent," "a region no goal touches is
+never mapped," "no comprehension is ever speculative." The whole-repo eyes
+checkpoint violates this on its own terms (it comprehends speculatively, with no
+intent to bound it). But the deeper fix is not just "scope the checkpoint" — even
+a scoped comprehension goal can exceed one leaf on a large subsystem. **The fix is
+to make comprehension obey the recursion law: a comprehension goal that finds its
+region too large to comprehend in one node must SPLIT** — fan out child
+comprehension goals over sub-regions and integrate their artifacts — the same
+satisfy/split/block decision every other node makes. `leafOnly: true` on the
+comprehend family is the bug.
+
+**Iteration-7 brief (structural):**
+1. Remove `leafOnly` from the comprehend family; let `map-repo`/`deep-dive` take
+   the decide path and split when their region is too large for one node
+   (integrate children's artifacts at the parent edge, like any non-leaf type).
+2. Comprehension must be *scoped by a region argument* and *pulled by the split
+   gate* per DESIGN's JIT rule — not commissioned speculatively over a whole repo.
+3. Rewrite `live:foreign-eyes` to test the design as written: commission a real
+   scoped intent against cats, let the split gate pull JIT comprehension of only
+   the relevant regions (which may themselves recurse), and assert success.
+4. (Lower priority) harden the two-phase emit so a long transcript still yields a
+   valid structured artifact — but this is a symptom; fixing the recursion makes
+   transcripts short enough that it may not bite.
+
+The lever is NOT "bigger budgets" — 2M tokens still exhausted. It is restoring
+recursion to the one family that was wrongly denied it.
+
+**Decision:** AC-2 NOT passed (1/5) → deliver spend (AC-3/AC-4) blocked. This is
+an iteration-7 structural fix (comprehension must recurse), not a budget tweak.
 
 ### AC-3: live:self (corellia delivers to itself)
 
