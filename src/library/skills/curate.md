@@ -35,8 +35,6 @@ nothing is written.
 
 ## consolidate-memory
 
-<!-- section ships ahead of its type registration — consolidate-memory is not yet in curateTypes() -->
-
 Distill a namespace's episode history into a smaller set of semantic memories
 that preserve the generalized lessons and evict redundant or superseded detail.
 Read the full event log for the namespace before writing anything.
