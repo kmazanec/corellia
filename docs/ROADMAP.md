@@ -91,6 +91,30 @@ early checkpoint. Specs in [iterations/06-loop/](./iterations/06-loop/)
 
 *Done when:* the PRD's Desired Outcome — both halves.
 
+### Iteration 7 — Layered conventions: the factory honours how each repo wants its code
+
+Decision locked in ADR-028 (layered conventions). The factory writes code into
+repos — its own and foreign — but cannot yet honour the conventions that govern
+how that code should read. Conventions resolve in three layers: global factory
+taste in the skills plus a new shared preamble every code-writing family
+inherits; repo-specific, harness-agnostic conventions read from the target
+repo's `AGENTS.md`/`CLAUDE.md` (the factory acting as any coding harness would);
+and on conflict, the host repo wins. Two features: the shared skill preamble
+(global layer; "comments are timeless" moves into it, read by the factory at
+runtime rather than only by an outer harness), and the host-conventions reader
+(locate/parse/slice the host file, inject the relevant slice as data-to-weigh
+with host-overrides-global precedence). Specs in
+[iterations/07-conventions/](./iterations/07-conventions/) (F-68, F-69).
+
+A sibling structural thread — **comprehension must recurse** (`map-repo`/
+`deep-dive-region` are wrongly `leafOnly`, recorded in the build notes from the
+AC-2 eyes-on-cats result) — is a candidate to ride this iteration or stand as its
+own; that scope call is open.
+
+*Done when:* a code-writing goal's context carries the factory's global
+conventions and the relevant slice of the host repo's convention file, with host
+overriding global on conflict.
+
 ## Features index — iteration 3
 
 | ID | Feature | Spec | Before → After (one line) | Depends on (hard) |
