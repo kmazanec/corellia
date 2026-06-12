@@ -149,7 +149,7 @@ describe('convergence — scripted full-stack composed path', () => {
         calls: [{ id: 's3', name: 'write_file', args: { path: 'lib/escape.txt', content: 'nope' } }],
         usage: USAGE,
       },
-      // 4. the FIX + 5. run the test (GREEN).
+      // 4. the fix + 5. run the test (GREEN).
       {
         kind: 'tool-calls',
         calls: [

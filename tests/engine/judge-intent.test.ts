@@ -1,5 +1,5 @@
 /**
- * Tests for the judge skill + intent dial wiring (F-56 chunk 2).
+ * Tests for the judge skill + intent dial wiring .
  *
  * At every brain.judge call site the rubric is enriched with:
  *   (a) the judge type's family skill section + preamble

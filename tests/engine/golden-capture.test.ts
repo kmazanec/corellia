@@ -1,5 +1,5 @@
 /**
- * Tests for golden capture (F-56 chunk 3, ADR-024).
+ * Tests for golden capture .
  *
  * When goldenCapture: true is set on EngineOptions, a `golden-candidate` event
  * is appended to the store at every judge-verdict emission. The event carries:

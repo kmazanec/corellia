@@ -31,7 +31,7 @@ import { improveTypes } from './types/improve.js';
  * The starter goal-types. Each corresponds directly to a row in the
  * GOAL-TYPES.md kind tables. The evolve family's improve types
  * (propose-pattern, improve-factory) and the curate type consolidate-memory
- * were added in iteration 05 (F-55).
+ * complete the evolve family.
  *
  * Tier ladders read left-to-right: the first element is the default; subsequent
  * elements are the escalation rungs the control loop climbs on eval failure.

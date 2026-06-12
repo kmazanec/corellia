@@ -1,5 +1,5 @@
 /**
- * Tests for cached-token surfacing in readUsage (F-56 chunk 4).
+ * Tests for cached-token surfacing in readUsage .
  *
  * readUsage reads provider cached-token fields into Usage.cachedPromptTokens:
  *   - OpenRouter/OpenAI shape: usage.prompt_tokens_details.cached_tokens

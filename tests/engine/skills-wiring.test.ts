@@ -1,5 +1,5 @@
 /**
- * F-57 chunk 1 — skills-through-engine pin (parameterized sweep).
+ * skills-through-engine pin (parameterized sweep).
  *
  * The factory injects each goal-type's FAMILY SKILL through the REAL engine at
  * exactly two seams:

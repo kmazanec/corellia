@@ -1,5 +1,5 @@
 /**
- * F-55 invariant tests — dangerous-grant proofs for the evolve family.
+ * dangerous-grant proofs for the evolve family.
  *
  * Four contracts are enforced here:
  *
@@ -249,9 +249,9 @@ describe('consolidate-memory — grant shape', () => {
   });
 });
 
-// ── 5. Evolve-family F-55 type registrations ─────────────────────────────────
+// ── 5. Evolve-family evolve-family type registrations ─────────────────────────────────
 
-describe('F-55 type registrations', () => {
+describe('evolve-family type registrations', () => {
   it('consolidate-memory, propose-pattern, improve-factory are all registered', () => {
     const reg = createRegistry(starterTypes());
     for (const name of ['consolidate-memory', 'propose-pattern', 'improve-factory']) {

@@ -1,5 +1,5 @@
 /**
- * F-57 chunk 2 — the scripted taste convergence (zero network).
+ * the scripted taste convergence (zero network).
  *
  * A commissioned mini-intent flows through scripted brains end-to-end against a
  * real tmp git fixture repo. The tree:
@@ -42,13 +42,13 @@
  *     1. The scan is exercised at a NON-LEAF root decision node (a synthetic
  *        `scan-root` added alongside the real 19 types — the same convention the
  *        flywheel/judge-intent tests use). That produces exactly the assertions
- *        F-57 enumerates: judge-split ranks k=3 candidates, the winner is deepened,
+ * the spec enumerates: judge-split ranks k=3 candidates, the winner is deepened,
  *        the losers become "alternatives considered" findings, the scan is visible
  *        via decided + judge-verdict events.
  *     2. design-arch runs as an ordinary deepened leaf in the winning split.
  *   The critique-doc-ranked artifact-level scan for design-arch is an engine seam
  *   that does not yet exist; building it would be a contract/engine change out of
- *   F-57's scope (F-53 wired only the scan field on the card, "no engine").
+ *   this iteration's scope (only the scan field on the card was wired; the engine seam is future work).
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
