@@ -1474,3 +1474,95 @@ describe('two-phase emit: type without outputSchema regression', () => {
     expect(stepCallCount).toBe(1);
   }, 10_000);
 });
+
+// ── Carried exploration ─────────────────────────────────────────────────────
+// When a step-loop attempt fails and the control loop retries, the next
+// attempt's harness context must contain a compact digest of the prior loop's
+// tool RESULTS so the brain does not re-read identical files.
+
+describe('carried exploration: prior tool results digested into next attempt', () => {
+  it('attempt 2 first context message contains a known string from attempt 1 tool results', async () => {
+    const store = new MemoryEventStore();
+
+    // A distinctive string that can only appear in attempt 2's harness if it was
+    // carried from attempt 1's tool result.
+    const DISTINCTIVE_TOOL_RESULT = 'UNIQUE_FILE_CONTENT_xyz_42';
+
+    // Step plan:
+    //   Attempt 1: one tool call (returning the distinctive result), then artifact.
+    //              The artifact fails the deterministic check → escalates.
+    //   Attempt 2: immediately produce an artifact (succeeds).
+    let stepIdx = 0;
+    const allSteps: StepOutput[] = [
+      // Attempt 1, step 1: read a file (distinctive result)
+      { kind: 'tool-calls', calls: [toolCall('r1', 'read_file')], usage: ZERO_USAGE },
+      // Attempt 1, step 2: produce artifact (will fail deterministic check)
+      { kind: 'artifact', artifact: textArtifact('bad artifact'), usage: ZERO_USAGE },
+      // Attempt 2, step 1: produce artifact (passes check)
+      { kind: 'artifact', artifact: textArtifact('good artifact'), usage: ZERO_USAGE },
+    ];
+
+    // Track the first context message on each step call
+    const capturedFirstContext: string[] = [];
+
+    const captureBrain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair() { throw new Error('not used'); },
+      async step(_goal, transcript) {
+        const first = transcript[0];
+        capturedFirstContext.push(first && 'content' in first ? (first.content as string) : '');
+        const out = allSteps[stepIdx++];
+        if (!out) throw new Error(`no more steps (idx=${stepIdx - 1})`);
+        return out;
+      },
+    };
+
+    // Deterministic check: fail on the first call, pass on the second
+    let detCheckCount = 0;
+    const flakyCheck: import('../../src/contract/goal-type.js').DeterministicCheck = {
+      name: 'carried-det',
+      async run() {
+        detCheckCount++;
+        return detCheckCount <= 1
+          ? { ok: false, detail: 'first attempt bad' }
+          : { ok: true, detail: '' };
+      },
+    };
+
+    // The broker returns the distinctive result for r1
+    const broker = new FakeBroker([
+      { callId: 'r1', ok: true, output: DISTINCTIVE_TOOL_RESULT },
+    ]);
+
+    const registry = buildRegistry([toolGrantedType({ deterministic: [flakyCheck] })]);
+    const engine = new Engine({
+      registry,
+      brain: captureBrain,
+      store,
+      memory: new NoopMemoryView(),
+      broker,
+    });
+
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'carried exploration test',
+      budget: { attempts: 3, tokens: 100_000, toolCalls: 20, wallClockMs: 60_000 },
+    });
+
+    const report = await engine.run(goal);
+    expect(report.blockers).toHaveLength(0);
+
+    // step was called at least 3 times:
+    //   step 0: attempt 1, tool call (no priorLoopTranscript yet)
+    //   step 1: attempt 1, artifact (no priorLoopTranscript yet — still same loop)
+    //   step 2: attempt 2, artifact (priorLoopTranscript from attempt 1's full transcript)
+    expect(capturedFirstContext.length).toBeGreaterThanOrEqual(3);
+
+    // Attempt 2's first step context (index 2) must contain the prior evidence.
+    const attempt2FirstContext = capturedFirstContext[2]!;
+    expect(attempt2FirstContext).toContain(DISTINCTIVE_TOOL_RESULT);
+    expect(attempt2FirstContext).toContain('PRIOR ATTEMPT EVIDENCE');
+  }, 10_000);
+});
