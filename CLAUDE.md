@@ -33,3 +33,12 @@ mechanisms. They carry no operative instructions of their own.
 Everything that must persist about this repo lives **in this repo** — in the docs
 above, in code, in commit messages, in the event log. Never in an outer harness's
 config or memory. Record durable findings where the factory itself can read them.
+
+## Code conventions
+
+- **Comments are timeless.** A comment describes what the code *is* and why, as if
+  it had always been that way. Never write a comment that references the editing
+  process, a recent change, a prior state, or a mistake — no "renamed from X",
+  "previously Y", "the old path", "now does Z", "fixed the bug where". If a fact
+  about history matters, it lives in the commit message, not the source. The
+  reader of a comment should never be able to tell it was ever different.
