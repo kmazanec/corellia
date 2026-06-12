@@ -282,17 +282,10 @@ async function runLearnGoal(goal: Goal, label: string): Promise<void> {
     report = null;
   }
 
-  // Teardown: find this tree's worktree-created event and remove it + its branch.
-  const events = await store.list();
-  for (const e of events) {
-    if (e.type === 'worktree-created' && e.goalId === goal.id) {
-      teardown(e.branch, e.path);
-    }
-    // A preserved worktree (blocked run) must also be cleaned up completely.
-    if (e.type === 'worktree-preserved' && e.goalId === goal.id) {
-      teardown(e.branch, e.path);
-    }
-  }
+  // No manual teardown needed: learn-kind ROOT goals run without a worktree
+  // (F-65 A12). The engine uses openLearnAssembly which skips worktree creation,
+  // so no worktree-created / worktree-preserved events are emitted and there is
+  // nothing to tear down here. The target repo is left byte-identical by design.
 
   if (report) {
     outcomes.push({

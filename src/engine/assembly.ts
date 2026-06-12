@@ -265,7 +265,72 @@ export async function openSandboxAssembly(
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// KNOWLEDGE / EYES WIRING 
+// LEARN-KIND READ-ONLY ASSEMBLY (F-65 A12)
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Build a read-only SandboxAssembly for a learn-kind ROOT goal that requires NO
+ * git worktree. The broker is bound directly to `config.repoRoot` and carries
+ * only read-only tools — `write_file` and `run_script` are absent, so the repo
+ * is left byte-identical after the run.
+ *
+ * The returned `worktree` is a sentinel stub: its fields are never used because
+ * the engine's `finally` block skips collect/preserve when the assembly was
+ * opened via this function (guarded by the `report === undefined` check plus the
+ * caller's no-worktree awareness). Do not call `collectTree` or `preserveTree`
+ * on this assembly's worktree.
+ *
+ * When `config.knowledge` is true, the five retrieval ToolImpls (find_symbol,
+ * find_exemplar, conventions_for, stack_versions, impact) are registered,
+ * backed by the live import scanner over `config.repoRoot`. This matches the
+ * sandboxed assembly's behaviour for learn types that hold `retrieval.api`.
+ */
+export function openLearnAssembly(
+  config: SandboxConfig,
+  rootGoalId: string,
+  registry: Registry,
+  store: EventStore,
+): SandboxAssembly {
+  const root = config.repoRoot;
+
+  const fileTools = createFileTools(root);
+
+  const knowledgeTools: ToolImpl[] = config.knowledge
+    ? Object.values(retrievalTools(buildRetrievalDeps(root, config.repoRoot, store)))
+    : [];
+
+  // Read-only broker: writeFile and runScriptImpl are intentionally absent.
+  const broker = new Broker({
+    root,
+    registry,
+    store,
+    tools: [
+      fileTools.readFile,
+      fileTools.listDir,
+      fileTools.search,
+      ...knowledgeTools,
+    ],
+  });
+
+  // Stub worktree: never used (no collect/preserve for learn-kind root runs).
+  const worktree: TreeWorktree = {
+    treeId: '',
+    branch: '',
+    root,
+    repoRoot: root,
+    goalId: rootGoalId,
+  };
+
+  const checkContextFor = (_goalId: string): CheckContext => ({
+    sandboxRoot: root,
+    // runScript intentionally absent: learn roots have no sandbox worktree.
+  });
+
+  return { broker, worktree, checkContextFor };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// KNOWLEDGE / EYES WIRING
 // ───────────────────────────────────────────────────────────────────────────
 
 /**

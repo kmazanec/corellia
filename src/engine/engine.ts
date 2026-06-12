@@ -34,6 +34,7 @@ import { specShape } from '../flywheel/shape.js';
 import type { CheckContext } from '../contract/goal-type.js';
 import {
   openSandboxAssembly,
+  openLearnAssembly,
   type SandboxConfig,
   type SandboxAssembly,
 } from './assembly.js';
@@ -425,6 +426,41 @@ export class Engine {
     // assembly, no new events.
     if (this.sandbox === undefined) {
       return this._run(goal, treeState);
+    }
+
+    // Learn-kind ROOT path (F-65 A12): a root learn goal whose grants carry no
+    // script-execution capability (no test.run_scoped / test.run_impacted) opens
+    // NO worktree. The broker carries read-only tools only (write_file absent);
+    // the finally skips collect/preserve entirely since there is no worktree to
+    // tear down. The `report === undefined` guard ensures a partially-opened
+    // assembly is not left dangling on an error mid-run.
+    //
+    // Script-granting learn goals still use the full sandbox path: running a
+    // declared test script requires an isolated worktree so repo state is not
+    // disturbed by concurrent runs or mid-run failures.
+    const SCRIPT_GRANTS = new Set(['test.run_scoped', 'test.run_impacted']);
+    const isLearnRootWithoutScripts =
+      goal.parentId === null &&
+      this.registry.has(goal.type) &&
+      this.registry.get(goal.type).kind === 'learn' &&
+      !this.registry.get(goal.type).grants.some((g) => SCRIPT_GRANTS.has(g));
+    if (isLearnRootWithoutScripts) {
+      const learnAssembly = openLearnAssembly(
+        this.sandbox,
+        goal.id,
+        this.registry,
+        this.store,
+      );
+      this._activeAssembly = learnAssembly;
+      let report: Report | undefined;
+      try {
+        report = await this._run(goal, treeState);
+        return report;
+      } finally {
+        // No worktree → skip collect/preserve. The report === undefined guard
+        // ensures the caller sees the thrown error rather than a stale assembly.
+        this._activeAssembly = undefined;
+      }
     }
 
     // Sandboxed tree (ADR-016): only the ROOT opens the worktree and constructs
