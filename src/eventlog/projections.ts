@@ -193,7 +193,15 @@ export function traceStats(events: FactoryEvent[]): Record<string, GoalTypeStats
 export interface UsageTotals {
   promptTokens: number;
   completionTokens: number;
+  cachedPromptTokens: number;
   costUsd: number | undefined;
+  /**
+   * Fraction of prompt tokens that were served from the provider cache.
+   * Defined as cachedPromptTokens / promptTokens when promptTokens > 0
+   * AND at least one usage in the set reported cached tokens.
+   * Undefined when no usage in the set reported cached tokens.
+   */
+  cacheHitShare: number | undefined;
 }
 
 /** Per-goal and tree-wide aggregated usage totals from the event log. */
@@ -202,16 +210,43 @@ export interface CostSummary {
   tree: UsageTotals;
 }
 
-function addUsage(totals: UsageTotals, usage: Usage): void {
-  totals.promptTokens += usage.promptTokens;
-  totals.completionTokens += usage.completionTokens;
+/** Mutable accumulator — hasCached tracks whether any usage reported cachedPromptTokens. */
+interface Accumulator {
+  promptTokens: number;
+  completionTokens: number;
+  cachedPromptTokens: number;
+  hasCached: boolean;
+  costUsd: number | undefined;
+}
+
+function addUsage(acc: Accumulator, usage: Usage): void {
+  acc.promptTokens += usage.promptTokens;
+  acc.completionTokens += usage.completionTokens;
+  if (usage.cachedPromptTokens !== undefined) {
+    acc.cachedPromptTokens += usage.cachedPromptTokens;
+    acc.hasCached = true;
+  }
   if (usage.costUsd !== undefined) {
-    totals.costUsd = (totals.costUsd ?? 0) + usage.costUsd;
+    acc.costUsd = (acc.costUsd ?? 0) + usage.costUsd;
   }
 }
 
-function emptyTotals(): UsageTotals {
-  return { promptTokens: 0, completionTokens: 0, costUsd: undefined };
+function emptyAcc(): Accumulator {
+  return { promptTokens: 0, completionTokens: 0, cachedPromptTokens: 0, hasCached: false, costUsd: undefined };
+}
+
+function finalise(acc: Accumulator): UsageTotals {
+  const cacheHitShare =
+    acc.hasCached && acc.promptTokens > 0
+      ? acc.cachedPromptTokens / acc.promptTokens
+      : undefined;
+  return {
+    promptTokens: acc.promptTokens,
+    completionTokens: acc.completionTokens,
+    cachedPromptTokens: acc.cachedPromptTokens,
+    costUsd: acc.costUsd,
+    cacheHitShare,
+  };
 }
 
 /**
@@ -223,13 +258,13 @@ function emptyTotals(): UsageTotals {
  * Satisfies the exhaustive-switch discipline from ADR-003.
  */
 export function costSummary(events: FactoryEvent[]): CostSummary {
-  const byGoal: Record<string, UsageTotals> = {};
-  const tree: UsageTotals = emptyTotals();
+  const byGoal: Record<string, Accumulator> = {};
+  const tree: Accumulator = emptyAcc();
 
-  const ensure = (goalId: string): UsageTotals => {
+  const ensure = (goalId: string): Accumulator => {
     let t = byGoal[goalId];
     if (!t) {
-      t = emptyTotals();
+      t = emptyAcc();
       byGoal[goalId] = t;
     }
     return t;
@@ -312,7 +347,11 @@ export function costSummary(events: FactoryEvent[]): CostSummary {
     }
   }
 
-  return { byGoal, tree };
+  const finalisedByGoal: Record<string, UsageTotals> = {};
+  for (const [id, t] of Object.entries(byGoal)) {
+    finalisedByGoal[id] = finalise(t);
+  }
+  return { byGoal: finalisedByGoal, tree: finalise(tree) };
 }
 
 // ──────────────────────────────────────────────

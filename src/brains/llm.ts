@@ -78,6 +78,15 @@ interface ChatUsage {
   completion_tokens?: number;
   /** OpenRouter reports cost here when usage accounting is enabled. */
   cost?: number;
+  /**
+   * OpenRouter/OpenAI prompt-cache breakdown.
+   * Shape: { cached_tokens?: number, ... }
+   */
+  prompt_tokens_details?: { cached_tokens?: number };
+  /**
+   * DeepSeek-style prompt cache hit tokens (flat field on the usage object).
+   */
+  prompt_cache_hit_tokens?: number;
 }
 
 interface ChatResponse {
@@ -96,7 +105,17 @@ export function readUsage(data: { usage?: ChatUsage }): Usage {
   if (!u) return ZERO_USAGE;
   const promptTokens = u.prompt_tokens ?? 0;
   const completionTokens = u.completion_tokens ?? 0;
-  const base: Usage = { promptTokens, completionTokens };
+  // OpenRouter/OpenAI shape: usage.prompt_tokens_details.cached_tokens
+  // DeepSeek shape:          usage.prompt_cache_hit_tokens
+  const cachedPromptTokens: number | undefined =
+    u.prompt_tokens_details?.cached_tokens ??
+    u.prompt_cache_hit_tokens ??
+    undefined;
+  const base: Usage = {
+    promptTokens,
+    completionTokens,
+    ...(cachedPromptTokens !== undefined ? { cachedPromptTokens } : {}),
+  };
   return u.cost !== undefined ? { ...base, costUsd: u.cost } : base;
 }
 
