@@ -528,6 +528,51 @@ possibly a breadth-first index pass before the expensive read pass). This is a
 real design question, not a one-line bump — see the options recorded in the
 session and the next roadmap iteration.
 
+#### Re-run after warn-only fix (2026-06-12, nonce 82d4c557): 1/5, failure mode shifted
+
+After making the toolCalls budget warn-only (commit ef4bdd9) and raising the
+comprehension budgets (toolCalls 20→200, tokens 500k→2M), the retest went 0/5 →
+**1/5** and — more importantly — **the failure signature changed**, which is the
+real signal:
+
+| Category | Before | After |
+|---|---|---|
+| architecture | step-loop:exhausted | **tokens budget exhausted** (hit the 2M backstop) |
+| stack | tokens exhausted | **tokens budget exhausted** |
+| conventions | step-loop:exhausted | **step-loop:failed** (emit threw / returned tool-calls) |
+| test-scaffold | step-loop:exhausted | **step-loop:failed** |
+| dive:src | step-loop:exhausted | **PASS** ✓ |
+
+Run cost $5.91, 8.38M prompt tokens, cache-hit 50.6%, 0 artifacts written.
+
+**What this proves:**
+- The warn-only fix worked: **no category hit the toolCalls wall.** The tool-call
+  ceiling is no longer the blocker.
+- The real problem is now exposed and it is **comprehension strategy, not budget
+  shape**: the broad whole-repo `map-repo` goals (architecture, stack) explore so
+  much they exhaust even a 2M-token budget without ever converging to an emit;
+  the narrower ones reach emit but the structured-output emit call fails
+  (`step-loop:failed` = the two-phase emit returned tool-calls or threw, at
+  `engine.ts:2119` / `:2085`) — likely the model cannot emit a clean structured
+  artifact after an 8M-token exploration transcript.
+- **The scoped `deep-dive:src` goal PASSED.** Scope is the differentiator: a
+  region-bounded goal converges; a whole-repo goal does not. This is the design
+  signal for iteration 7.
+
+**Revised diagnosis for iteration 7:** the lever is NOT "bigger budgets" (we
+proved that — 2M tokens still exhausts). It is **bound the exploration**: either
+(a) `map-repo` should decompose into scoped sub-goals (one per subtree/region)
+the way `deep-dive` already works, instead of trying to read a whole repo in one
+goal; and/or (b) a cheap breadth-first index pass should precede the expensive
+read so the model reads only what matters; and/or (c) the two-phase emit needs a
+hardening pass so a long transcript still produces a valid structured artifact
+(the `step-loop:failed` emit path). The `deep-dive` pass is the existence proof
+that the scoped approach works.
+
+**Decision:** AC-2 still NOT passed (1/5) → deliver spend (AC-3/AC-4) remains
+blocked. This is an iteration-7 brief (comprehension decomposition + emit
+hardening), no longer a budget tweak.
+
 ### AC-3: live:self (corellia delivers to itself)
 
 > Run `npm run live:self` with OPENROUTER_API_KEY, GITHUB_TOKEN, CORELLIA_FEATURE,
