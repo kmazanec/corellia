@@ -34,7 +34,7 @@
  * operator-run demo, never a CI gate.
  */
 
-import { readFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { homedir } from 'node:os';
@@ -147,12 +147,28 @@ function teardown(branch: string, worktreePath: string): void {
 
 const CATEGORIES: KnowledgeCategory[] = ['architecture', 'stack', 'conventions', 'test-scaffold'];
 
-// Pick a small region to dive: prefer a shallow source dir, else the repo root.
+// Pick the dive region with the most direct children (files + subdirs) among
+// 'src', 'app', 'lib', 'pkg'.  Falls back to '.' when none of the candidates
+// exist.  Counting direct children is a cheap proxy for "largest directory" that
+// avoids a recursive walk and produces a stable, repo-sensitive default.
 function pickDiveRegion(repo: string): string {
-  for (const candidate of ['src', 'lib', 'app']) {
-    if (existsSync(join(repo, candidate))) return candidate;
+  let best: string | null = null;
+  let bestCount = -1;
+  for (const candidate of ['src', 'app', 'lib', 'pkg']) {
+    const full = join(repo, candidate);
+    if (!existsSync(full)) continue;
+    let count: number;
+    try {
+      count = readdirSync(full).length;
+    } catch {
+      count = 0;
+    }
+    if (count > bestCount) {
+      bestCount = count;
+      best = candidate;
+    }
   }
-  return '.';
+  return best ?? '.';
 }
 const diveRegion = pickDiveRegion(targetRepo);
 
