@@ -4,7 +4,7 @@ title: critique-doc, critique-ui, intent dial, verdict detail
 iteration: 05-taste
 type: implement
 intent: production
-status: not-started
+status: shipped
 dependsOn: []
 contracts: [ADR-022]
 ---
@@ -27,6 +27,10 @@ Files: critique family module + skills + knowledge-checks detail pass.
 No engine, no contract.
 
 ## Build plan (approved)
-- [ ] critique-doc + critique-ui cards/skills/checks + scripted tests.
-- [ ] Intent dial through judge harness content + invariant tests.
-- [ ] Field-level verdict detail (knowledge-checks + judge rubric outputs).
+- [x] critique-doc + critique-ui cards/skills/checks + scripted tests.
+- [x] Intent dial through judge harness content + invariant tests.
+- [x] Field-level verdict detail (knowledge-checks + judge rubric outputs).
+
+## Implementation notes
+
+Built clean; the integration judge caught the iteration's gating find: the '## The intent dial' sections were orphaned by the rubric enricher (judges told to apply bars they never saw — the arbiter's invariants-survive-spike protection lost). Fixed + pinned with real-skill assertions.

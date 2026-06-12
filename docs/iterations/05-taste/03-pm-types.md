@@ -4,7 +4,7 @@ title: write-prd, design-arch, research-external, investigate
 iteration: 05-taste
 type: implement
 intent: production
-status: not-started
+status: shipped
 dependsOn: []
 contracts: [ADR-022, ADR-023]
 ---
@@ -27,6 +27,10 @@ non-leaf). Tier/grants per GOAL-TYPES. Files: new family modules + skills/
 files only (no engine, no contract).
 
 ## Build plan (approved)
-- [ ] write-prd + design-arch (+ scan policy wiring on the type card) +
+- [x] write-prd + design-arch (+ scan policy wiring on the type card) +
   checks + scripted tests.
-- [ ] research-external + investigate (+ spawn grants) + checks + tests.
+- [x] research-external + investigate (+ spawn grants) + checks + tests.
+
+## Implementation notes
+
+Built per GOAL-TYPES rows; families author/research/diagnose. Strict pins + judgeType lint added at review. investigate's judgeType=critique-doc resolved at fold.

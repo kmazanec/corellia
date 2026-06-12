@@ -4,7 +4,7 @@ title: Two-phase structured emission
 iteration: 05-taste
 type: implement
 intent: production
-status: not-started
+status: shipped
 dependsOn: []
 contracts: [ADR-023]
 ---
@@ -36,11 +36,15 @@ ADR-023 · the step loop + artifact branch in `src/engine/engine.ts` ·
 5. Budget/ceiling gates apply to the emit call (it is a step like any other).
 
 ## Build plan (approved)
-- [ ] Barrier consumption + engine two-phase seam (runStepLoop) + scripted
+- [x] Barrier consumption + engine two-phase seam (runStepLoop) + scripted
   tests (tests/engine/step-loop.test.ts: emit-call count, ctx schema, gates).
-- [ ] Adapter response_format translation + wire tests
+- [x] Adapter response_format translation + wire tests
   (tests/brains/llm.step.test.ts both ways).
-- [ ] Learn-type schemas (KnowledgeArtifact/RegionFacts JSON-Schemas beside
+- [x] Learn-type schemas (KnowledgeArtifact/RegionFacts JSON-Schemas beside
   the contract types, declared on the two type cards) + knowledge-e2e pin.
 
 Trunk feature (engine.ts + llm.ts). Builders never run live scripts.
+
+## Implementation notes
+
+Built as planned + review repairs (strict-mode-faithful schemas incl. nullable-line pattern; schema survives the malformation re-prompt). Live: the dive and write-prd paths emit reliably through response_format.

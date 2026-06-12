@@ -4,7 +4,7 @@ title: Evolve family, thin
 iteration: 05-taste
 type: implement
 intent: production
-status: not-started
+status: shipped
 dependsOn: []
 contracts: [ADR-022]
 ---
@@ -24,6 +24,10 @@ merge-to-main grant, provisional-only pattern writes.
 Files: evolve family module + skills file. No engine, no contract.
 
 ## Build plan (approved)
-- [ ] Three registrations + skills + lints + grant tests (incl. negative:
+- [x] Three registrations + skills + lints + grant tests (incl. negative:
   improve-factory refused write_file on a product repo path; propose-pattern
   cannot promote to trusted).
+
+## Implementation notes
+
+Built per rows; opus→human represented honestly (human is an authority gate, not a tier). Dangerous-grant invariants proven by tests; promoting them into the constitution lint is named iteration-6 work.

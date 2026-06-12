@@ -4,7 +4,7 @@ title: "Assembly: taste wired + convergence"
 iteration: 05-taste
 type: implement
 intent: production
-status: not-started
+status: shipped
 dependsOn: [F-51, F-52, F-53, F-54, F-55, F-56]
 contracts: [ADR-022, ADR-023, ADR-024]
 ---
@@ -25,8 +25,12 @@ target 5/5), live:hands smoke, both printing cache-hit share.
 Honest hard deps on F-51..F-56; trunk; last.
 
 ## Build plan (approved)
-- [ ] Registry/assembly wiring for all families + skills-through-engine pin.
-- [ ] Scripted convergence (tests/engine/convergence-taste.test.ts):
+- [x] Registry/assembly wiring for all families + skills-through-engine pin.
+- [x] Scripted convergence (tests/engine/convergence-taste.test.ts):
   prd→arch→contract→implement flow + intent-dial variant + golden events.
-- [ ] live:eyes/live:hands refresh for structured emission + cache share;
+- [x] live:eyes/live:hands refresh for structured emission + cache share;
   update the done-when reporting.
+
+## Implementation notes
+
+Convergence proves prd→arch→contract→implement scripted with real two-phase emit, real tool loop + green script, terraced scan with losers-as-alternatives, skills in every harness, intent dial at scale. Honest escalation: design-arch's own artifact-level tournament is an unbuilt engine seam (leafOnly scan fields are inert) — carried. Live retest: see build notes (4/5 best; four real bugs found and fixed by the runs).

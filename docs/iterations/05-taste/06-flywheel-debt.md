@@ -4,7 +4,7 @@ title: Carried exploration, golden capture, caching surfacing
 iteration: 05-taste
 type: implement
 intent: production
-status: not-started
+status: shipped
 dependsOn: []
 contracts: [ADR-024]
 ---
@@ -26,8 +26,12 @@ derives from the repo (largest of src/app/lib/pkg) instead of hardcoded
 Trunk feature (engine.ts for 1; projections + llm usage for 2-3).
 
 ## Build plan (approved)
-- [ ] Carried-exploration digest + tests (tests/engine/step-loop).
-- [ ] golden-candidate event member consumption + projection + capture
+- [x] Carried-exploration digest + tests (tests/engine/step-loop).
+- [x] golden-candidate event member consumption + projection + capture
   wiring at judge-verdict emission + tests.
-- [ ] Usage.cachedPromptTokens? parsing + costSummary share + tests.
-- [ ] live-eyes region inference.
+- [x] Usage.cachedPromptTokens? parsing + costSummary share + tests.
+- [x] live-eyes region inference.
+
+## Implementation notes
+
+Built as planned + repairs (intent-dial section in rubrics; evidence inoculation; integration-golden exclusion pinned as intentional). Carried-exploration digest: 8 results x 300 chars.

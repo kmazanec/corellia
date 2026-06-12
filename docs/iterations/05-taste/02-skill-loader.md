@@ -4,7 +4,7 @@ title: Skill loader + family files for the existing library
 iteration: 05-taste
 type: implement
 intent: production
-status: not-started
+status: shipped
 dependsOn: []
 contracts: [ADR-022]
 ---
@@ -35,9 +35,13 @@ discovery loop economy/pointers-not-bodies/message protocol).
    in examples/live-eyes.ts spec text; live-eyes slims to rely on them.
 
 ## Build plan (approved)
-- [ ] Loader + family field wiring + lint (tests/library/registry).
-- [ ] Refactor starter-types into family modules (no behavior change).
-- [ ] Port + upgrade skill content for all 10 existing types; engine
+- [x] Loader + family field wiring + lint (tests/library/registry).
+- [x] Refactor starter-types into family modules (no behavior change).
+- [x] Port + upgrade skill content for all 10 existing types; engine
   injection pin; live-eyes spec-text slimming.
 
 Worktree feature; folds back before the type-family features start.
+
+## Implementation notes
+
+Built as planned + repairs (binding lint via the npm test chain; EOF-section pin). Engine injects family skill into step-loop harness AND (via the wave's trunk feature) judge rubrics. Judge/produce injection for non-tool evolve types deferred by design (documented).
