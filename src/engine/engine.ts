@@ -13,6 +13,7 @@
  * human-signoff step the engine never performs.
  */
 
+import { createHash } from 'node:crypto';
 import type { Goal, Tier, MemoryPointer, Budget, Usage } from '../contract/goal.js';
 import type { Decision, ChildPlan } from '../contract/decision.js';
 import type { Artifact, Report } from '../contract/report.js';
@@ -87,6 +88,13 @@ export interface EngineOptions {
   store: EventStore;
   memory: MemoryView;
   now?: () => number;
+  /**
+   * When true, every judge-verdict on this engine appends a `golden-candidate`
+   * event (ADR-024). Discriminates live runs from scripted tests: false by
+   * default (scripted brains never accumulate golden candidates). The live
+   * examples set it to true via their EngineOptions.
+   */
+  goldenCapture?: boolean;
   /**
    * Called when a goal blocks. The resolution drives the blocked event.
    * Returning 'answered' means the brief was handled (goal can continue or not
@@ -208,6 +216,7 @@ export class Engine {
   private readonly store: EventStore;
   private readonly memory: MemoryView;
   private readonly now: () => number;
+  private readonly goldenCapture: boolean;
   private readonly onBrief:
     | ((
         brief: import('../contract/decision.js').DecisionBrief,
@@ -306,6 +315,7 @@ export class Engine {
     this.store = opts.store;
     this.memory = opts.memory;
     this.now = opts.now ?? (() => Date.now());
+    this.goldenCapture = opts.goldenCapture ?? false;
     this.onBrief = opts.onBrief;
     this.sensitivity = opts.sensitivity ?? [];
     this.onGate = opts.onGate;
@@ -660,6 +670,7 @@ export class Engine {
             tier: currentTier,
             usage: splitJudgeResult.usage,
           });
+          await this.maybeAppendGoldenCandidate(goal.id, 'judge-split', splitPlanArtifact, rubric, splitVerdict, currentTier);
           if (await this.checkCeiling(goal, treeState)) {
             return this.ceilingReport(goal, treeState);
           }
@@ -886,6 +897,7 @@ export class Engine {
         tier: currentTier,
         usage: judgeResult.usage,
       });
+      await this.maybeAppendGoldenCandidate(goal.id, 'judge-split', splitArtifact, rubric, verdict, currentTier);
 
       candidates.push({ decision: candidate, verdict, lens, decideUsage: decideResult.usage, judgeUsage: judgeResult.usage });
     }
@@ -1319,6 +1331,7 @@ export class Engine {
           tier,
           usage: judgeResult.usage,
         });
+        await this.maybeAppendGoldenCandidate(goal.id, typeDef.judgeType, artifact, rubric, verdict, tier);
         if (await this.checkCeiling(goal, treeState)) {
           return this.ceilingReport(goal, treeState);
         }
@@ -1458,6 +1471,52 @@ export class Engine {
     }
 
     return `${baseRubric}\n\n${intentLine}${skillBlock}`;
+  }
+
+  /**
+   * Append a `golden-candidate` event when goldenCapture is enabled (ADR-024).
+   * The artifact and rubric are referenced by sha1 digest so the log does not
+   * duplicate large payloads. The model is read from the brain config if the
+   * brain exposes a `config.modelByTier` shape (LlmBrain); otherwise omitted.
+   *
+   * Called at every judge-verdict emission site, ONLY when this.goldenCapture
+   * is true (discriminates live runs from scripted tests).
+   */
+  private async maybeAppendGoldenCandidate(
+    goalId: string,
+    judgeType: string,
+    artifact: Artifact,
+    rubric: string,
+    verdict: Verdict,
+    tier: Tier,
+  ): Promise<void> {
+    if (!this.goldenCapture) return;
+
+    const artifactText =
+      artifact.kind === 'text'
+        ? (artifact.text ?? '')
+        : JSON.stringify(artifact.files ?? []);
+    const artifactDigest = createHash('sha1').update(artifactText).digest('hex');
+    const rubricDigest = createHash('sha1').update(rubric).digest('hex');
+
+    // Extract model from brain config if available (LlmBrain exposes config.modelByTier)
+    let model: string | undefined;
+    const brainAsAny = this.brain as { config?: { modelByTier?: Record<string, string> } };
+    if (brainAsAny.config?.modelByTier) {
+      model = brainAsAny.config.modelByTier[tier];
+    }
+
+    await this.store.append({
+      type: 'golden-candidate',
+      at: this.now(),
+      goalId,
+      judgeType,
+      artifactDigest,
+      rubricDigest,
+      verdictPass: verdict.pass,
+      tier,
+      ...(model !== undefined ? { model } : {}),
+    });
   }
 
   /**
@@ -1848,6 +1907,7 @@ export class Engine {
         tier,
         usage: judgeResult.usage,
       });
+      await this.maybeAppendGoldenCandidate(goal.id, typeDef.judgeType, artifact, rubric, verdict, tier);
       // ceiling check after recheckAfterRepair judge debit.
       if (await this.checkCeiling(goal, treeState)) {
         return { passed: false, budget, verdict: null, tier, ceiling: true };

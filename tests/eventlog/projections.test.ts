@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { projectMemory, traceStats, renderTree, costSummary, projectKnowledge } from '../../src/eventlog/projections.js';
+import { projectMemory, traceStats, renderTree, costSummary, projectKnowledge, goldenCandidates } from '../../src/eventlog/projections.js';
 import { writeKnowledge, writeRegionFacts, recordKnowledgeCheck } from '../../src/library/knowledge.js';
 import { InMemoryEventStore } from '../../src/eventlog/memory-store.js';
 import type { FactoryEvent } from '../../src/contract/events.js';
@@ -909,3 +909,95 @@ describe('recordKnowledgeCheck', () => {
     expect(events).toHaveLength(3);
   });
 });
+
+// ──────────────────────────────────────────────
+// goldenCandidates
+// ──────────────────────────────────────────────
+
+describe('goldenCandidates projection', () => {
+  const goldenEvent = (
+    judgeType: string,
+    verdictPass: boolean,
+    artifactDigest = 'abc123',
+    rubricDigest = 'def456',
+    model?: string,
+  ): FactoryEvent => ({
+    type: 'golden-candidate',
+    at: 1000,
+    goalId: 'g1',
+    judgeType,
+    artifactDigest,
+    rubricDigest,
+    verdictPass,
+    tier: 'sonnet',
+    ...(model !== undefined ? { model } : {}),
+  });
+
+  it('returns empty object when no golden-candidate events', () => {
+    const result = goldenCandidates([]);
+    expect(result).toEqual({});
+  });
+
+  it('groups candidates by judgeType', () => {
+    const events: FactoryEvent[] = [
+      goldenEvent('judge-implement', true, 'a1', 'r1'),
+      goldenEvent('judge-implement', false, 'a2', 'r2'),
+      goldenEvent('judge-split', true, 'a3', 'r3'),
+    ];
+    const result = goldenCandidates(events);
+    expect(result['judge-implement']).toHaveLength(2);
+    expect(result['judge-split']).toHaveLength(1);
+    expect(Object.keys(result)).toHaveLength(2);
+  });
+
+  it('preserves order within a judgeType group', () => {
+    const events: FactoryEvent[] = [
+      goldenEvent('judge-widget', true, 'first', 'r1'),
+      goldenEvent('judge-widget', false, 'second', 'r2'),
+      goldenEvent('judge-widget', true, 'third', 'r3'),
+    ];
+    const result = goldenCandidates(events);
+    const group = result['judge-widget']!;
+    expect(group[0]!.artifactDigest).toBe('first');
+    expect(group[1]!.artifactDigest).toBe('second');
+    expect(group[2]!.artifactDigest).toBe('third');
+  });
+
+  it('includes verdictPass, tier, and model when present', () => {
+    const events: FactoryEvent[] = [
+      goldenEvent('judge-impl', false, 'dig', 'rub', 'claude-sonnet-4-5'),
+    ];
+    const result = goldenCandidates(events);
+    const candidate = result['judge-impl']![0]!;
+    expect(candidate.verdictPass).toBe(false);
+    expect(candidate.tier).toBe('sonnet');
+    expect(candidate.model).toBe('claude-sonnet-4-5');
+  });
+
+  it('omits model field when absent from the event', () => {
+    const events: FactoryEvent[] = [
+      goldenEvent('judge-impl', true, 'dig', 'rub'),
+    ];
+    const result = goldenCandidates(events);
+    const candidate = result['judge-impl']![0]!;
+    expect(candidate.model).toBeUndefined();
+  });
+
+  it('non-golden events do not contribute', () => {
+    const events: FactoryEvent[] = [
+      baseGoal(),
+      goldenEvent('judge-x', true, 'a1', 'r1'),
+      {
+        type: 'emitted',
+        at: 2000,
+        goalId: 'g1',
+        report: { artifact: null, proof: [], lessons: [], memoriesUsed: [], blockers: [], findings: [], learned: '' },
+      },
+    ];
+    const result = goldenCandidates(events);
+    expect(result['judge-x']).toHaveLength(1);
+    expect(Object.keys(result)).toHaveLength(1);
+  });
+});
+
+// Engine-level golden-capture integration tests live in tests/engine/golden-capture.test.ts

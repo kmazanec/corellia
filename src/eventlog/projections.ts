@@ -518,3 +518,56 @@ export function renderTree(events: FactoryEvent[]): string {
 
   return lines.join('\n');
 }
+
+// ──────────────────────────────────────────────
+// goldenCandidates
+// ──────────────────────────────────────────────
+
+/**
+ * One captured golden-set candidate: a reference to a judge run (by digest)
+ * plus provenance fields (verdict, tier, model when available).
+ */
+export interface GoldenCandidate {
+  goalId: string;
+  judgeType: string;
+  artifactDigest: string;
+  rubricDigest: string;
+  verdictPass: boolean;
+  tier: import('../contract/goal.js').Tier;
+  model?: string;
+  at: number;
+}
+
+/**
+ * Fold `golden-candidate` events into a per-judgeType index.
+ *
+ * Latest-appended order within each judgeType group is preserved. All other
+ * event members are visited but do not contribute. Exhaustive switch ensures
+ * the union is covered as new members are added (ADR-003).
+ */
+export function goldenCandidates(events: FactoryEvent[]): Record<string, GoldenCandidate[]> {
+  const result: Record<string, GoldenCandidate[]> = {};
+
+  for (const e of events) {
+    if (e.type === 'golden-candidate') {
+      const bucket = result[e.judgeType];
+      const candidate: GoldenCandidate = {
+        goalId: e.goalId,
+        judgeType: e.judgeType,
+        artifactDigest: e.artifactDigest,
+        rubricDigest: e.rubricDigest,
+        verdictPass: e.verdictPass,
+        tier: e.tier,
+        at: e.at,
+        ...(e.model !== undefined ? { model: e.model } : {}),
+      };
+      if (bucket) {
+        bucket.push(candidate);
+      } else {
+        result[e.judgeType] = [candidate];
+      }
+    }
+  }
+
+  return result;
+}
