@@ -25,6 +25,7 @@ import {
   type ScriptRunner,
   type DeclaredScripts,
 } from '../library/script-runner.js';
+import { pushBranchTool, openPrTool, type FetchTransport } from './pr-tools.js';
 import { execFileSync } from 'node:child_process';
 import { openTreeWorktree, type TreeWorktree } from './worktree.js';
 import { retrievalTools, type RetrievalDeps } from '../library/retrieval.js';
@@ -72,6 +73,21 @@ export interface SandboxConfig {
    * governs the retrieval tools the broker exposes.
    */
   knowledge?: boolean;
+  /**
+   * Optional PR-boundary wiring (ADR-025). When present, registers `push_branch`
+   * and `open_pr` ToolImpls in the broker for trees whose goal type holds
+   * `repo.branch` / `repo.pr` grants (e.g. `improve-factory`). The `repoSlug`
+   * is `owner/repo` derived from the origin remote — used by `open_pr` to
+   * construct the GitHub REST URL. The optional `fetchTransport` is the
+   * injectable network transport; absent → `realFetchTransport` (global fetch).
+   * Absent → broker carries only the iteration-03 and retrieval tools.
+   */
+  prBoundary?: {
+    /** GitHub `owner/repo` slug for the bound repo (e.g. `acme/factory`). */
+    repoSlug: string;
+    /** Injectable fetch transport for tests; omit for live runs (global fetch). */
+    fetchTransport?: FetchTransport;
+  };
 }
 
 /**
@@ -197,6 +213,31 @@ export async function openSandboxAssembly(
     ? Object.values(retrievalTools(buildRetrievalDeps(root, config.repoRoot, store)))
     : [];
 
+  // ── PR-boundary tools (ADR-025) ────────────────────────────────────
+  // When prBoundary is configured, register push_branch and open_pr for
+  // goal types that hold repo.branch / repo.pr grants (e.g. improve-factory).
+  // The worktree root doubles as the repo root for git push; the repoSlug is
+  // pre-derived from the origin URL at config time (operator-supplied).
+  const prTools: ToolImpl[] = config.prBoundary
+    ? [
+        pushBranchTool({
+          worktreeRoot: root,
+          branch,
+          treeId,
+          store,
+        }),
+        openPrTool({
+          branch,
+          treeId,
+          repoSlug: config.prBoundary.repoSlug,
+          store,
+          ...(config.prBoundary.fetchTransport !== undefined
+            ? { fetchTransport: config.prBoundary.fetchTransport }
+            : {}),
+        }),
+      ]
+    : [];
+
   const broker = new Broker({
     root,
     registry,
@@ -208,6 +249,7 @@ export async function openSandboxAssembly(
       fileTools.search,
       runScriptImpl,
       ...knowledgeTools,
+      ...prTools,
     ],
   });
 
