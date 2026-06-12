@@ -160,6 +160,21 @@ describe('open worktree', () => {
 // diff vs scope
 // ---------------------------------------------------------------------------
 
+describe('ignored files and the diff scope check', () => {
+  it('gitignored paths (including the dependency link) never trip diffWithinScope', async () => {
+    const repo = makeTempRepo();
+    writeFileSync(join(repo, '.gitignore'), 'node_modules/\n');
+    execFileSync('git', ['-C', repo, 'add', '.gitignore'], { stdio: 'pipe' });
+    execFileSync('git', ['-C', repo, 'commit', '-m', 'ignore deps'], { stdio: 'pipe' });
+    mkdirSync(join(repo, 'node_modules', 'fixture-pkg'), { recursive: true });
+    writeFileSync(join(repo, 'node_modules', 'fixture-pkg', 'index.js'), 'module.exports = 1;\n');
+    const store = new InMemoryEventStore();
+    const wt = await openTreeWorktree(repo, 'ignored-goal', store);
+    const res = diffWithinScope(wt.root, ['src/']);
+    expect(res.ok).toBe(true);
+  });
+});
+
 describe('dependency link', () => {
   it('links the repo root node_modules into a fresh worktree when present', async () => {
     const repo = makeTempRepo();

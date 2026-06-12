@@ -103,6 +103,10 @@ function detectTestScript(repo: string): { name: string; entry: string } | null 
 
 const declaredTest = detectTestScript(targetRepo);
 
+// Per-run goal-id nonce: tree ids derive from goal ids, so re-runs must never
+// collide with a worktree preserved by an earlier failed run.
+const runNonce = Date.now().toString(36);
+
 // ---------------------------------------------------------------------------
 // Shared store + registry + knowledge wiring
 // ---------------------------------------------------------------------------
@@ -176,13 +180,13 @@ const diveRegion = pickDiveRegion(targetRepo);
 const DEFAULT_BUDGET = {
   attempts: 3,
   tokens: 500_000,
-  toolCalls: 16,
+  toolCalls: 20,
   wallClockMs: 600_000,
 };
 
 function mapGoal(category: KnowledgeCategory): Goal {
   return {
-    id: `live-eyes-map-${category}`,
+    id: `live-eyes-${runNonce}-map-${category}`,
     type: 'map-repo',
     parentId: null,
     title: `Map ${category} knowledge`,
@@ -203,7 +207,7 @@ function mapGoal(category: KnowledgeCategory): Goal {
 
 function diveGoal(region: string): Goal {
   return {
-    id: `live-eyes-dive-${region.replace(/[^a-zA-Z0-9]+/g, '-')}`,
+    id: `live-eyes-${runNonce}-dive-${region.replace(/[^a-zA-Z0-9]+/g, '-')}`,
     type: 'deep-dive-region',
     parentId: null,
     title: `Deep-dive region ${region}`,

@@ -197,11 +197,14 @@ export function diffWithinScope(
     { stdio: 'pipe', encoding: 'utf-8' },
   ).trim();
 
-  // Collect all changed paths (de-duplicate).
+  // Collect all changed paths (de-duplicate). The dependency link the
+  // lifecycle itself creates is infrastructure, not work — a symlink named
+  // node_modules evades a \`node_modules/\` gitignore rule (a link is not a
+  // directory), so it is dropped here explicitly.
   const all = new Set<string>();
   for (const line of [...diffOutput.split('\n'), ...untrackedOutput.split('\n')]) {
     const p = line.trim();
-    if (p.length > 0) all.add(p);
+    if (p.length > 0 && p !== 'node_modules' && !p.startsWith('node_modules/')) all.add(p);
   }
 
   if (all.size === 0) {
