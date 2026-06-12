@@ -2,7 +2,7 @@
  * Tree worktree lifecycle: open, diff-vs-scope, collect/preserve, and teardown.
  *
  * Each tree gets one git worktree on a fresh branch under the target repo's
- * .claude/worktrees/<tree-id>/ (gitignored). The broker binds to that root;
+ * .corellia/worktrees/<tree-id>/ (gitignored). The broker binds to that root;
  * on collection the branch's commits are retained and the worktree is removed.
  * On failure/block, the worktree is preserved for inspection and the
  * preservation recorded as an event. (ADR-016)
@@ -54,11 +54,14 @@ export interface TreeWorktree {
 }
 
 // ---------------------------------------------------------------------------
-// Ensure .claude/worktrees is gitignored via .git/info/exclude.
+// Ensure .corellia/worktrees is gitignored via .git/info/exclude.
 // Never touches a tracked .gitignore.
+//
+// Per-tree worktrees live under the target repo's own `.corellia/` namespace,
+// which the factory owns end to end.
 // ---------------------------------------------------------------------------
 
-const WORKTREES_PATTERN = '.claude/worktrees/';
+const WORKTREES_PATTERN = '.corellia/worktrees/';
 
 /**
  * Resolve the real .git directory for a repo root, following the `gitdir:`
@@ -118,8 +121,8 @@ function ensureGitignored(repoRoot: string): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Create a git worktree on a fresh branch under <repoRoot>/.claude/worktrees/<treeId>/,
- * ensure .claude/worktrees is gitignored via .git/info/exclude (never touches a
+ * Create a git worktree on a fresh branch under <repoRoot>/.corellia/worktrees/<treeId>/,
+ * ensure .corellia/worktrees is gitignored via .git/info/exclude (never touches a
  * tracked .gitignore), and append a worktree-created event.
  *
  * Returns { treeId, branch, root } where root is the absolute worktree path a
@@ -132,9 +135,9 @@ export async function openTreeWorktree(
 ): Promise<{ treeId: string; branch: string; root: string }> {
   const treeId = sanitizeTreeId(rootGoalId);
   const branch = `tree/${treeId}`;
-  const root = join(repoRoot, '.claude', 'worktrees', treeId);
+  const root = join(repoRoot, '.corellia', 'worktrees', treeId);
 
-  // Ensure .claude/worktrees is gitignored before creating the directory.
+  // Ensure .corellia/worktrees is gitignored before creating the directory.
   ensureGitignored(repoRoot);
 
   // Create the worktree on a new branch.

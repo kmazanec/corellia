@@ -17,11 +17,11 @@
  *
  *   - The factory's PRIMARY CHECKOUT is on `main` (or build/06-loop).
  *     It MUST remain undisturbed throughout the run.
- *   - The factory opens a WORKTREE under .claude/worktrees/<treeId>/ for the
+ *   - The factory opens a WORKTREE under .corellia/worktrees/<treeId>/ for the
  *     sandboxed deliver run. The worktree is on a tree/<treeId> branch.
  *   - The worktree's broker's write_file calls are scoped to the feature's
  *     declared scope — they cannot touch the primary checkout's working tree.
- *   - .claude/worktrees/ is gitignored (.git/info/exclude), so the worktree
+ *   - .corellia/worktrees/ is gitignored (.git/info/exclude), so the worktree
  *     itself does not appear in the diff.
  *
  * Isolation verification after the run:
@@ -150,7 +150,7 @@ if (primaryClean !== '') {
   console.log('Verify the primary is still clean after the run.');
 }
 
-// Check .claude/worktrees/ is excluded from git (it must be gitignored).
+// Check .corellia/worktrees/ is excluded from git (it must be gitignored).
 const gitDir = execFileSync('git', ['-C', corelliaRoot, 'rev-parse', '--git-dir'], {
   stdio: 'pipe', encoding: 'utf-8',
 }).trim();
@@ -159,7 +159,7 @@ const excludePath = join(gitDirAbsolute, 'info', 'exclude');
 const excludeContent = existsSync(excludePath)
   ? execFileSync('cat', [excludePath], { stdio: 'pipe', encoding: 'utf-8' })
   : '';
-const worktreesExcluded = excludeContent.includes('.claude/worktrees');
+const worktreesExcluded = excludeContent.includes('.corellia/worktrees');
 console.log(`  Worktrees excluded from git:  ${worktreesExcluded ? 'YES' : 'NO (check .gitignore)'}`);
 console.log('');
 

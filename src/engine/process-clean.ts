@@ -69,6 +69,10 @@ export const ALWAYS_DANGEROUS_PATTERNS: readonly string[] = [
   'tree/',
 
   // --- run-specific plan & worktree refs ---
+  // Sandbox worktree paths — runtime internals that must never appear in a diff.
+  // Both namespaces are matched: the factory's own `.corellia/`, and `.claude/`
+  // for repos managed by that harness.
+  '.corellia/worktrees',
   '.claude/worktrees',
   'build/06-',
   'feat(tree):',        // collectTree's auto-commit message prefix

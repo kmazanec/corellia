@@ -86,7 +86,7 @@ export interface LiveEngineOptions {
  * needs real LLM processing. The result is a fully wired Engine that:
  *
  *   1. Uses LlmBrain via OpenRouter (OPENROUTER_API_KEY must be set).
- *   2. Opens git worktrees under targetRepo/.claude/worktrees/ for sandboxed runs.
+ *   2. Opens git worktrees under targetRepo/.corellia/worktrees/ for sandboxed runs.
  *   3. Registers push_branch + open_pr when prBoundary is configured.
  *   4. Optionally enables the knowledge coverage gate.
  *   5. Captures golden candidates for judge improvement (ADR-024).

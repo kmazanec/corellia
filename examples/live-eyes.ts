@@ -20,10 +20,10 @@
  * engine's checkContextFor is only populated when a sandbox worktree is active).
  * A no-worktree read-only mode would require an engine change, which is out of
  * scope here. So each learn goal runs in its own isolated worktree under the
- * target repo's .claude/worktrees/, and this script TEARS DOWN that worktree AND
+ * target repo's .corellia/worktrees/, and this script TEARS DOWN that worktree AND
  * its branch completely afterward — `git worktree remove --force`, `git branch -D`,
  * `git worktree prune` — so the foreign repo is left byte-identical (modulo the
- * benign `.claude/worktrees` line the assembly adds to .git/info/exclude, which
+ * benign `.corellia/worktrees` line the assembly adds to .git/info/exclude, which
  * this script also reverts when it added it). The worktree gives isolation: even
  * mid-run the target's working tree is never touched.
  *
@@ -125,7 +125,7 @@ const sandboxBase: Omit<SandboxConfig, 'repoRoot'> = { declaredScripts, knowledg
 
 // ---------------------------------------------------------------------------
 // Foreign-repo cleanup bookkeeping: capture .git/info/exclude before the first
-// run so we can revert the assembly's `.claude/worktrees` addition afterward.
+// run so we can revert the assembly's `.corellia/worktrees` addition afterward.
 // ---------------------------------------------------------------------------
 
 const excludePath = join(resolveGitDir(targetRepo), 'info', 'exclude');
@@ -309,13 +309,13 @@ await runLearnGoal(diveGoal(diveRegion), `deep-dive-region: ${diveRegion}`);
 // ---------------------------------------------------------------------------
 
 if (excludeBefore !== null) {
-  // Revert to the captured contents (drops any `.claude/worktrees` line added).
+  // Revert to the captured contents (drops any `.corellia/worktrees` line added).
   writeFileSync(excludePath, excludeBefore);
 } else if (existsSync(excludePath)) {
   // There was no exclude file before; if the assembly created one solely for us,
   // leaving it is harmless, but blank it to minimize footprint.
   const after = readFileSync(excludePath, 'utf8');
-  if (after.trim() === '.claude/worktrees') rmSync(excludePath);
+  if (after.trim() === '.corellia/worktrees') rmSync(excludePath);
 }
 
 // ---------------------------------------------------------------------------

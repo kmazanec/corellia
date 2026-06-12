@@ -278,7 +278,7 @@ console.log(`  golden candidates: ${goldenCount}`);
 console.log('');
 if (report.blockers.length > 0) {
   console.log('BLOCKERS:', report.blockers);
-  console.log(`(The worktree was preserved under ${repoRoot}/.claude/worktrees/ for inspection.)`);
+  console.log(`(The worktree was preserved under ${repoRoot}/.corellia/worktrees/ for inspection.)`);
 } else {
   console.log('Run complete. Report: PASS (no blockers). The declared test went green.');
   // Clean up the throwaway fixture only on success; preserve on failure for debugging.

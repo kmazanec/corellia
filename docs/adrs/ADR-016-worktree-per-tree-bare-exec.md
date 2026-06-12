@@ -25,7 +25,7 @@ execution is containerized. Operator decision at the iteration-3 gate brief.
 ## Decision
 
 Each tree gets one git worktree on its own branch under the target repo's
-`.claude/worktrees/<tree-id>/` (gitignored), created at tree start and torn
+`.corellia/worktrees/<tree-id>/` (gitignored), created at tree start and torn
 down after its work is collected into the PR branch. Within the tree, leaves
 share the worktree: the split's scope-disjointness keeps writers off each
 other's files, and the broker enforces every write path against the

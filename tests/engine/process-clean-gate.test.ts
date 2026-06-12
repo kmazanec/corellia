@@ -142,6 +142,14 @@ describe('scanDiffForProcessLanguage — dirty diffs', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('refuses a diff containing ".corellia/worktrees"', () => {
+    const diff = makeDiff('package.json', [
+      '"workspacePath": ".corellia/worktrees/my-tree"',
+    ]);
+    const result = scanDiffForProcessLanguage(diff);
+    expect(result.ok).toBe(false);
+  });
+
   it('refuses a diff containing ".claude/worktrees"', () => {
     const diff = makeDiff('package.json', [
       '"workspacePath": ".claude/worktrees/my-tree"',

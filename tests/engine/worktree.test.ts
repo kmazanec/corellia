@@ -92,21 +92,21 @@ describe('open worktree', () => {
     const result = await openTreeWorktree(repo, 'root-goal-1', store);
 
     expect(result.root.startsWith('/')).toBe(true);
-    expect(result.root).toContain('.claude/worktrees/');
+    expect(result.root).toContain('.corellia/worktrees/');
   });
 
-  it('.git/info/exclude gains the .claude/worktrees/ entry when absent', async () => {
+  it('.git/info/exclude gains the .corellia/worktrees/ entry when absent', async () => {
     const repo = makeTempRepo();
     const store = new InMemoryEventStore();
 
     // Verify exclude does not have the entry before.
     const before = readExclude(repo);
-    expect(before).not.toContain('.claude/worktrees/');
+    expect(before).not.toContain('.corellia/worktrees/');
 
     await openTreeWorktree(repo, 'root-goal-1', store);
 
     const after = readExclude(repo);
-    expect(after).toContain('.claude/worktrees/');
+    expect(after).toContain('.corellia/worktrees/');
   });
 
   it('tracked .gitignore is left byte-for-byte unmodified when present', async () => {
@@ -544,7 +544,7 @@ describe('sanitizeTreeId', () => {
 // ---------------------------------------------------------------------------
 
 describe('exclude idempotency', () => {
-  it('opening a second tree in the same repo adds .claude/worktrees/ exactly once', async () => {
+  it('opening a second tree in the same repo adds .corellia/worktrees/ exactly once', async () => {
     const repo = makeTempRepo();
     const store = new InMemoryEventStore();
 
@@ -554,7 +554,7 @@ describe('exclude idempotency', () => {
 
     const exclude = readExclude(repo);
     // Count occurrences of the exact pattern.
-    const occurrences = exclude.split('\n').filter((line) => line.trim() === '.claude/worktrees/').length;
+    const occurrences = exclude.split('\n').filter((line) => line.trim() === '.corellia/worktrees/').length;
     expect(occurrences).toBe(1);
 
     // Cleanup.

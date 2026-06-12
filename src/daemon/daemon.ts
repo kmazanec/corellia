@@ -205,7 +205,8 @@ async function onSigterm(): Promise<void> {
   const preservations = status.running.map(async (intentId) => {
     const treeId = sanitizeTreeId(intentId);
     const branch = `tree/${treeId}`;
-    const root = join(repoRoot, '.claude', 'worktrees', treeId);
+    // Same path layout as openTreeWorktree (worktree.ts).
+    const root = join(repoRoot, '.corellia', 'worktrees', treeId);
 
     const worktree = { treeId, branch, root, repoRoot, goalId: intentId };
     try {

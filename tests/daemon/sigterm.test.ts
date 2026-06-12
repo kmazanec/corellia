@@ -170,7 +170,7 @@ describe('SIGTERM: clean shutdown with preserved worktrees', () => {
       const intentId = 'test-intent-for-preserve';
       const treeId = sanitizeTreeId(intentId);
       const branch = `tree/${treeId}`;
-      const root = join(tmpDir2, '.claude', 'worktrees', treeId);
+      const root = join(tmpDir2, '.corellia', 'worktrees', treeId);
       const repoRoot = tmpDir2;
 
       const worktree = { treeId, branch, root, repoRoot, goalId: intentId };

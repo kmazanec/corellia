@@ -16,6 +16,8 @@ out/
 .env
 .env.local
 *.log
+# the factory's per-tree sandbox namespace
+.corellia/worktrees/
 .claude/worktrees/
 
 .playwright-mcp/
