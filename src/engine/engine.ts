@@ -51,6 +51,98 @@ import {
  */
 const DEFAULT_SPEND_CEILING_USD = 15;
 
+// ---------------------------------------------------------------------------
+// Duplicate-call guard (F-64 / ADR-017)
+// ---------------------------------------------------------------------------
+
+/**
+ * The set of tool names whose effects are read-only (fs.read / retrieval grants
+ * only). A byte-identical re-invocation of any of these within the same attempt
+ * is refused: it cannot produce new information. Write-mutating tools (fs.write,
+ * test.run_*, repo.*) are never guarded — run_script repeats are required for
+ * red→green, write_file repeats are valid edits, and boundary tools are one-shot
+ * by their own contracts.
+ *
+ * Derived from GRANT_TOOL_MAP: every tool whose grants are a subset of
+ * {fs.read, retrieval.api} is read-only. Updated when GRANT_TOOL_MAP gains a
+ * new read-only tool.
+ */
+const READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'read_file',
+  'list_dir',
+  'search',
+  'find_symbol',
+  'find_exemplar',
+  'conventions_for',
+  'stack_versions',
+  'impact',
+]);
+
+/**
+ * Produce a stable, order-independent JSON serialization of an args object so
+ * that two calls with the same semantic args but different key order (which an
+ * LLM may emit) produce the same duplicate-guard key.
+ *
+ * Algorithm: recursively sort object keys alphabetically before serializing.
+ * Primitive values and arrays are handled structurally (array order is
+ * preserved — reordered array args are not semantically equivalent).
+ */
+function stableJsonStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return '[' + value.map(stableJsonStringify).join(',') + ']';
+  }
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  const pairs = keys.map((k) => JSON.stringify(k) + ':' + stableJsonStringify(obj[k]));
+  return '{' + pairs.join(',') + '}';
+}
+
+/**
+ * Build the deduplication key for one tool call.
+ * Format: `<name>\0<stable-json-args>` — the NUL separator is not a valid JSON
+ * character and cannot appear in a tool name, so the two parts are unambiguous.
+ */
+function dupKey(name: string, args: Record<string, unknown>): string {
+  return `${name}\0${stableJsonStringify(args)}`;
+}
+
+/**
+ * After a successful write_file call, invalidate any duplicate-guard entries
+ * for read_file/list_dir/search calls that targeted the same path, so a re-read
+ * after a write is allowed (write invalidates the prefix-cache guard for that
+ * path — the content has changed).
+ *
+ * Invalidation targets: read_file, list_dir, search — the three tools that
+ * take a `path` or `query` arg that may reference the written file. We match
+ * against the written path by removing all guard keys whose first arg matches
+ * the written path string.
+ */
+function invalidateReadGuardForPath(
+  seenCalls: Set<string>,
+  writtenPath: string,
+): void {
+  // Remove any read_file, list_dir, or search key whose stable args contain
+  // the written path. We do a targeted removal per tool rather than scanning
+  // all keys, so the operation is O(3) set deletions rather than O(n) iteration.
+  for (const readTool of ['read_file', 'list_dir', 'search', 'find_symbol', 'find_exemplar', 'conventions_for', 'stack_versions', 'impact'] as const) {
+    // Try the most common arg keys: path, query, filePath — all are strings.
+    // We use stableJsonStringify for the args object, so we reconstruct the
+    // likely key and delete it. Any key that embedded the path will be gone;
+    // keys with different paths are unaffected.
+    const candidateKeys = [
+      dupKey(readTool, { path: writtenPath }),
+      dupKey(readTool, { filePath: writtenPath }),
+      dupKey(readTool, { query: writtenPath }),
+    ];
+    for (const k of candidateKeys) {
+      seenCalls.delete(k);
+    }
+  }
+}
+
 /**
  * Worst-case price constant for the conservative token-only ceiling fallback
  * (ADR-017). Used when an endpoint reports tokens but not cost.
@@ -1590,6 +1682,11 @@ export class Engine {
     let stepIndex = 0;
     // Accumulate total token usage across all steps for tokens-budget debit.
     let totalTokensUsed = 0;
+    // Per-attempt duplicate-call guard (F-64 / ADR-017): tracks (name, stable-args)
+    // keys for read-only calls in this attempt. Byte-identical re-reads are refused
+    // without debiting the toolCalls counter. Reset per-attempt (not per-step) so
+    // the guard spans the full conversation window.
+    const seenCalls = new Set<string>();
 
     // The harness message: the goal itself — title, type, spec — plus any
     // injected memories quoted as data (evidence to weigh, never instructions
@@ -1811,6 +1908,45 @@ export class Engine {
           return { kind: 'exhausted', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
         }
 
+        // Duplicate-call guard (F-64 / ADR-017): refuse byte-identical re-reads of
+        // read-only tools within the same attempt. The guard does NOT debit toolCalls
+        // so the budget counter accurately reflects real work performed. The refused
+        // result is appended to the transcript so the brain can see why it was denied.
+        //
+        // run_script repeats are always allowed (red→green requires re-running tests).
+        // write_file is not read-only and passes through; after a write_file the guard
+        // is invalidated for the written path so a subsequent re-read is allowed.
+        if (READ_ONLY_TOOL_NAMES.has(call.name)) {
+          const key = dupKey(call.name, call.args);
+          if (seenCalls.has(key)) {
+            // Refused — byte-identical read-only call already seen this attempt.
+            const refusalReason =
+              `Duplicate read refused (F-64): an identical call to ${call.name} with the ` +
+              `same arguments was already executed this attempt. Use the earlier result ` +
+              `already in the transcript instead of re-reading.`;
+            // Emit tool-call event with outcome:'refused' — reuses existing variant,
+            // no schema change (ADR-017 barrier).
+            await this.store.append({
+              type: 'tool-call',
+              at: t(),
+              goalId: goal.id,
+              tool: call.name,
+              callId: call.id,
+              outcome: 'refused',
+              reason: refusalReason,
+            });
+            // NOT debiting remainingToolCalls — refused calls do not consume budget.
+            transcript.push({
+              role: 'tool',
+              callId: call.id,
+              content: refusalReason,
+            });
+            continue;
+          }
+          // First occurrence of this read-only call: record it.
+          seenCalls.add(key);
+        }
+
         const result = await this.effectiveBroker!.execute(goal, call);
         remainingToolCalls--;
 
@@ -1824,6 +1960,15 @@ export class Engine {
           outcome: result.ok ? 'ran' : 'refused',
           ...(result.ok ? {} : { reason: result.output }),
         });
+
+        // write_file success: invalidate the duplicate guard for the written path
+        // so a subsequent read_file of the same path is allowed (content changed).
+        if (call.name === 'write_file' && result.ok) {
+          const writtenPath = typeof call.args['path'] === 'string' ? call.args['path'] : undefined;
+          if (writtenPath !== undefined) {
+            invalidateReadGuardForPath(seenCalls, writtenPath);
+          }
+        }
 
         // Append result to transcript regardless of ok/refusal (refusal is data)
         transcript.push({
