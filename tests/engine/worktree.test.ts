@@ -160,6 +160,17 @@ describe('open worktree', () => {
 // diff vs scope
 // ---------------------------------------------------------------------------
 
+describe('dependency link', () => {
+  it('links the repo root node_modules into a fresh worktree when present', async () => {
+    const repo = makeTempRepo();
+    mkdirSync(join(repo, 'node_modules', 'fixture-pkg'), { recursive: true });
+    writeFileSync(join(repo, 'node_modules', 'fixture-pkg', 'index.js'), 'module.exports = 1;\n');
+    const store = new InMemoryEventStore();
+    const wt = await openTreeWorktree(repo, 'link-goal', store);
+    expect(existsSync(join(wt.root, 'node_modules', 'fixture-pkg', 'index.js'))).toBe(true);
+  });
+});
+
 describe('diff vs scope', () => {
   it('returns ok:true when no files are changed', async () => {
     const repo = makeTempRepo();

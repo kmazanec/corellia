@@ -9,7 +9,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, symlinkSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
 import { join, normalize, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { EventStore } from '../contract/events.js';
@@ -142,6 +142,16 @@ export async function openTreeWorktree(
   execFileSync('git', ['-C', repoRoot, 'worktree', 'add', '-b', branch, root], {
     stdio: 'pipe',
   });
+
+  // A fresh worktree has no installed dependencies, so a target repo's declared
+  // scripts (test runners, linters) would fail on toolchain resolution. Link the
+  // repo root's node_modules in when present — the worktree shares the install,
+  // exactly as a human running the suite from a worktree would arrange.
+  const rootModules = join(repoRoot, 'node_modules');
+  const treeModules = join(root, 'node_modules');
+  if (existsSync(rootModules) && !existsSync(treeModules)) {
+    symlinkSync(rootModules, treeModules, 'dir');
+  }
 
   await store.append({
     type: 'worktree-created',
