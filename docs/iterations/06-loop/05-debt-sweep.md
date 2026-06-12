@@ -131,3 +131,26 @@ None.
 
 ## Implementation notes
 
+**Winner-selection rule (A9 tournament):** passing candidates ranked by fewest
+findings; first-in-iteration-order tie-break (earliest candidate with minimum
+finding count wins). When no candidate passes, the candidate with fewest findings
+is used as the best loser and flows to the deterministic + judge gates normally
+(where it will likely fail and enter the standard repair/escalate path).
+
+**Where the scripted flag is read at the integration-judge site (A11):** the
+`this.goldenCapture` field on `Engine` (set at construction from
+`EngineOptions.goldenCapture`). The field is falsy-safe (defaults to `false`,
+never `undefined`) because the constructor initialises it as `opts.goldenCapture
+?? false`. The guard at the integration-judge site is a simple `if
+(this.goldenCapture)` block that wraps both the `judge-verdict` append and the
+`maybeAppendGoldenCandidate` call — ADR-024's non-scripted filter is not
+duplicated elsewhere.
+
+**Guard condition for the no-sandbox learn path (A12):** `goal.parentId === null`
+(root goal) AND `registry.get(goal.type).kind === 'learn'` AND the type's grants
+contain no script-execution capability (`test.run_scoped` / `test.run_impacted`).
+Script-granting learn goals (e.g. `map-repo`) still open a worktree for declared-
+script isolation. The `report === undefined` guard in the `finally` block is
+identical to the sandboxed path: the finally always clears `_activeAssembly` and
+since there is no worktree, collect/preserve are simply not called.
+
