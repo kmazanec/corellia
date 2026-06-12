@@ -8,9 +8,9 @@ import { createRegistry } from '../../src/library/registry.js';
 import { lintLibrary } from '../../src/library/constitution.js';
 
 describe('starterTypes', () => {
-  it('returns an array with the ten defined types', () => {
+  it('returns an array with the fourteen defined types', () => {
     const types = starterTypes();
-    expect(types.length).toBe(10);
+    expect(types.length).toBe(14);
   });
 
   it('all types are loadable into a registry without error', () => {
@@ -30,6 +30,10 @@ describe('starterTypes', () => {
       'promote-memory',
       'map-repo',
       'deep-dive-region',
+      'write-prd',
+      'design-arch',
+      'research-external',
+      'investigate',
     ];
     for (const name of expectedNames) {
       expect(() => reg.get(name)).not.toThrow();
@@ -285,8 +289,165 @@ describe('starterTypes', () => {
     });
   });
 
-  describe('learn-kind constitution compliance', () => {
-    it('lintLibrary passes with all ten types registered', () => {
+  describe('write-prd', () => {
+    it('has kind make and IS leafOnly', () => {
+      const def = createRegistry(starterTypes()).get('write-prd');
+      expect(def.kind).toBe('make');
+      expect(def.leafOnly).toBe(true);
+    });
+
+    it('belongs to the author family', () => {
+      expect(createRegistry(starterTypes()).get('write-prd').family).toBe('author');
+    });
+
+    it('uses sonnet as default tier, escalates to opus', () => {
+      const def = createRegistry(starterTypes()).get('write-prd');
+      expect(def.tier.default).toBe('sonnet');
+      expect(def.tier.ladder).toContain('opus');
+    });
+
+    it('delegates to critique-doc', () => {
+      expect(createRegistry(starterTypes()).get('write-prd').judgeType).toBe('critique-doc');
+    });
+
+    it('has deterministic checks including artifact-present and prd:shape', () => {
+      const names = createRegistry(starterTypes()).get('write-prd').deterministic.map((c) => c.name);
+      expect(names).toContain('artifact-present');
+      expect(names).toContain('prd:shape');
+    });
+
+    it('has doc read/write and retrieval grants', () => {
+      const grants = createRegistry(starterTypes()).get('write-prd').grants;
+      expect(grants).toContain('fs.read');
+      expect(grants).toContain('fs.write');
+      expect(grants).toContain('retrieval.api');
+    });
+
+    it('has an outputSchema set', () => {
+      expect(createRegistry(starterTypes()).get('write-prd').outputSchema).toBeDefined();
+    });
+  });
+
+  describe('design-arch', () => {
+    it('has kind make and IS leafOnly', () => {
+      const def = createRegistry(starterTypes()).get('design-arch');
+      expect(def.kind).toBe('make');
+      expect(def.leafOnly).toBe(true);
+    });
+
+    it('belongs to the author family', () => {
+      expect(createRegistry(starterTypes()).get('design-arch').family).toBe('author');
+    });
+
+    it('uses opus as default tier (bad arch poisons every sibling)', () => {
+      expect(createRegistry(starterTypes()).get('design-arch').tier.default).toBe('opus');
+    });
+
+    it('delegates to critique-doc', () => {
+      expect(createRegistry(starterTypes()).get('design-arch').judgeType).toBe('critique-doc');
+    });
+
+    it('has deterministic checks including artifact-present and arch:sections', () => {
+      const names = createRegistry(starterTypes()).get('design-arch').deterministic.map((c) => c.name);
+      expect(names).toContain('artifact-present');
+      expect(names).toContain('arch:sections');
+    });
+
+    it('has a scan policy with k=3 and three lenses', () => {
+      const scan = createRegistry(starterTypes()).get('design-arch').scan;
+      expect(scan).toBeDefined();
+      expect(scan!.k).toBe(3);
+      expect(scan!.lenses).toHaveLength(3);
+    });
+
+    it('scan lenses include architect, reuse, contrarian', () => {
+      const lenses = createRegistry(starterTypes()).get('design-arch').scan!.lenses;
+      expect(lenses).toContain('architect');
+      expect(lenses).toContain('reuse');
+      expect(lenses).toContain('contrarian');
+    });
+  });
+
+  describe('research-external', () => {
+    it('has kind learn and IS leafOnly', () => {
+      const def = createRegistry(starterTypes()).get('research-external');
+      expect(def.kind).toBe('learn');
+      expect(def.leafOnly).toBe(true);
+    });
+
+    it('belongs to the research family', () => {
+      expect(createRegistry(starterTypes()).get('research-external').family).toBe('research');
+    });
+
+    it('uses sonnet as default tier, escalates to opus', () => {
+      const def = createRegistry(starterTypes()).get('research-external');
+      expect(def.tier.default).toBe('sonnet');
+      expect(def.tier.ladder).toContain('opus');
+    });
+
+    it('has null judgeType', () => {
+      expect(createRegistry(starterTypes()).get('research-external').judgeType).toBeNull();
+    });
+
+    it('has deterministic checks including artifact-present and findings:sources-present', () => {
+      const names = createRegistry(starterTypes()).get('research-external').deterministic.map((c) => c.name);
+      expect(names).toContain('artifact-present');
+      expect(names).toContain('findings:sources-present');
+    });
+
+    it('has web search/fetch grants but no fs.write', () => {
+      const grants = createRegistry(starterTypes()).get('research-external').grants;
+      expect(grants).toContain('web.search');
+      expect(grants).toContain('web.fetch');
+      expect(grants.some((g) => g.includes('write'))).toBe(false);
+    });
+
+    it('has an outputSchema set', () => {
+      expect(createRegistry(starterTypes()).get('research-external').outputSchema).toBeDefined();
+    });
+  });
+
+  describe('investigate', () => {
+    it('has kind learn and is NOT leafOnly', () => {
+      const def = createRegistry(starterTypes()).get('investigate');
+      expect(def.kind).toBe('learn');
+      expect(def.leafOnly).toBe(false);
+    });
+
+    it('belongs to the diagnose family', () => {
+      expect(createRegistry(starterTypes()).get('investigate').family).toBe('diagnose');
+    });
+
+    it('uses sonnet as default tier, escalates to opus', () => {
+      const def = createRegistry(starterTypes()).get('investigate');
+      expect(def.tier.default).toBe('sonnet');
+      expect(def.tier.ladder).toContain('opus');
+    });
+
+    it('delegates to critique-doc (confidence-threshold judge)', () => {
+      expect(createRegistry(starterTypes()).get('investigate').judgeType).toBe('critique-doc');
+    });
+
+    it('has deterministic check artifact-present', () => {
+      const names = createRegistry(starterTypes()).get('investigate').deterministic.map((c) => c.name);
+      expect(names).toContain('artifact-present');
+    });
+
+    it('has spawn grant for child probes', () => {
+      const grants = createRegistry(starterTypes()).get('investigate').grants;
+      expect(grants).toContain('spawn');
+    });
+
+    it('has read and retrieval grants but no write grants', () => {
+      const grants = createRegistry(starterTypes()).get('investigate').grants;
+      expect(grants).toContain('fs.read');
+      expect(grants).toContain('retrieval.api');
+      expect(grants.some((g) => g.includes('write'))).toBe(false);
+    });
+  });
+
+  describe('constitution compliance — all fourteen types', () => {
+    it('lintLibrary passes with all fourteen types registered', () => {
       expect(lintLibrary(starterTypes())).toHaveLength(0);
     });
   });

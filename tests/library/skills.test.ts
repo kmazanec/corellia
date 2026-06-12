@@ -59,6 +59,18 @@ describe('loadFamilySkill — known families', () => {
   it('returns a FamilySkill for the deliver family', () => {
     expect(loadFamilySkill('deliver')).not.toBeNull();
   });
+
+  it('returns a FamilySkill for the author family', () => {
+    expect(loadFamilySkill('author')).not.toBeNull();
+  });
+
+  it('returns a FamilySkill for the research family', () => {
+    expect(loadFamilySkill('research')).not.toBeNull();
+  });
+
+  it('returns a FamilySkill for the diagnose family', () => {
+    expect(loadFamilySkill('diagnose')).not.toBeNull();
+  });
 });
 
 describe('loadFamilySkill — missing family', () => {
@@ -121,6 +133,22 @@ describe('sectionFor', () => {
     expect(skill.sectionFor('characterize')).not.toBeNull();
   });
 
+  it('author skill contains sections for write-prd and design-arch', () => {
+    const skill = loadFamilySkill('author')!;
+    expect(skill.sectionFor('write-prd')).not.toBeNull();
+    expect(skill.sectionFor('design-arch')).not.toBeNull();
+  });
+
+  it('research skill contains a section for research-external', () => {
+    const skill = loadFamilySkill('research')!;
+    expect(skill.sectionFor('research-external')).not.toBeNull();
+  });
+
+  it('diagnose skill contains a section for investigate', () => {
+    const skill = loadFamilySkill('diagnose')!;
+    expect(skill.sectionFor('investigate')).not.toBeNull();
+  });
+
   it('last section in a file extracts correctly when terminated by EOF (deep-dive-region)', () => {
     // deep-dive-region is the LAST section in comprehend.md — there is no
     // following ## heading, so the extractor must terminate at EOF.
@@ -138,7 +166,7 @@ describe('sectionFor', () => {
 // ── Constitution lint: missing file / missing section ────────────────────────
 
 describe('lintLibrary — skill file lint', () => {
-  it('passes for all ten starter types (files and sections present)', () => {
+  it('passes for all fourteen starter types (files and sections present)', () => {
     _clearSkillCache();
     const violations = lintLibrary(starterTypes());
     expect(violations).toHaveLength(0);

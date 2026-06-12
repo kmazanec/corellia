@@ -19,11 +19,14 @@ import { arbiterTypes } from './types/arbiter.js';
 import { critiqueTypes } from './types/critique.js';
 import { curateTypes } from './types/curate.js';
 import { comprehendTypes } from './types/comprehend.js';
+import { authorTypes } from './types/author.js';
+import { researchTypes } from './types/research.js';
+import { diagnoseTypes } from './types/diagnose.js';
 
 /**
- * The ten starter goal-types. Each corresponds directly to a row in the
- * GOAL-TYPES.md kind tables. The two `learn`-kind types (`map-repo` and
- * `deep-dive-region`) are appended after the original eight.
+ * The fourteen starter goal-types. Each corresponds directly to a row in the
+ * GOAL-TYPES.md kind tables. The six iteration-05 types (write-prd, design-arch,
+ * research-external, investigate) are appended after the original ten.
  */
 export function starterTypes(): GoalTypeDef[] {
   return [
@@ -33,5 +36,8 @@ export function starterTypes(): GoalTypeDef[] {
     ...critiqueTypes(),
     ...curateTypes(),
     ...comprehendTypes(),
+    ...authorTypes(),
+    ...researchTypes(),
+    ...diagnoseTypes(),
   ];
 }
