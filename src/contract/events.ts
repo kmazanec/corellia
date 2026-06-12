@@ -90,7 +90,13 @@ export type FactoryEvent =
    * arrive later from exogenous signals (the operator's merge/rejection); capture
    * here is provenance, not promotion.
    */
-  | { type: 'golden-candidate'; at: number; goalId: string; judgeType: string; artifactDigest: string; rubricDigest: string; verdictPass: boolean; tier: Tier; model?: string };
+  | { type: 'golden-candidate'; at: number; goalId: string; judgeType: string; artifactDigest: string; rubricDigest: string; verdictPass: boolean; tier: Tier; model?: string }
+  /** A granted leaf pushed its tree's branch to the bound repo's origin (ADR-025). */
+  | { type: 'branch-pushed'; at: number; goalId: string; treeId: string; branch: string; remote: string }
+  /** A granted leaf opened exactly one PR for its tree's branch; carries the URL (ADR-025). */
+  | { type: 'pr-opened'; at: number; goalId: string; treeId: string; branch: string; url: string }
+  /** A completed run's blocker was routed to an improve-factory commission (ADR-027). */
+  | { type: 'blocker-routed'; at: number; goalId: string; blocker: string; commissionId: string };
 
 /**
  * The append-only event store. The append is the serialization point — the

@@ -39,7 +39,9 @@ export function improveTypes(): GoalTypeDef[] {
      * specific to one project re-route to `promote-memory`; general harness
      * failures land here. May spawn children (investigate, draft, test).
      *
-     * Grants: factory-repo branch + PR (factory-repo.branch, factory-repo.pr).
+     * Grants: branch + PR on the bound repo (repo.branch, repo.pr) — the same
+     * brokered boundary tools product runs use; here the bound repo is the
+     * factory's own repo.
      * May spawn. No product-repo write capability. No merge or approval grant.
      *
      * Tier: high (bad harness output poisons every run beneath or after it).
@@ -58,7 +60,7 @@ export function improveTypes(): GoalTypeDef[] {
       tier: { default: 'high', ladder: ['high'] },
       deterministic: [],
       judgeType: null,
-      grants: ['event-log.read', 'factory-repo.branch', 'factory-repo.pr'],
+      grants: ['event-log.read', 'repo.branch', 'repo.pr'],
     },
   ];
 }

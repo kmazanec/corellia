@@ -173,6 +173,13 @@ interface StepRequest {
   messages: WireMessage[];
   tools: WireToolParam[];
   response_format?: { type: 'json_schema'; json_schema: WireJsonSchema };
+  /**
+   * Provider routing (ADR-005 / ADR-017 lineage): pin the provider order and
+   * whether fallbacks are allowed, so prefix-cache affinity survives across a
+   * run. Absent config → field absent (wire-compatible with providers that
+   * ignore it). Plumbed from per-tier binding config by F-64.
+   */
+  provider?: { order: string[]; allow_fallbacks: boolean };
 }
 
 interface StepChoiceMessage {

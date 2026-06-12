@@ -27,37 +27,17 @@
 
 import type { Engine } from '../engine/engine.js';
 import type { EventStore, FactoryEvent } from '../contract/events.js';
-import type { Budget, Intent, MemoryPointer } from '../contract/goal.js';
+import type { Intent, MemoryPointer } from '../contract/goal.js';
 import type { Report } from '../contract/report.js';
 import type { DecisionBrief } from '../contract/decision.js';
-import { verifyEntryPoints, type DeclaredScripts } from '../library/script-runner.js';
+import { verifyEntryPoints } from '../library/script-runner.js';
+import type { CommissionInput } from '../contract/brief.js';
 
 // ── Public input types ────────────────────────────────────────────────────────
 
-export interface CommissionInput {
-  /** Stable identifier for this intent, used to park, resume, and sweep it. */
-  id: string;
-  /** Human-readable one-liner. */
-  title: string;
-  /** The typed spec to hand to the root goal. */
-  spec: unknown;
-  /**
-   * Scope prefixes this intent owns. Admission checks prefix-overlap: a new
-   * intent that overlaps a running reservation queues until the conflict clears.
-   */
-  scope: string[];
-  budget: Budget;
-  /** Judge-strictness dial; defaults to 'production'. */
-  intent?: Intent;
-  /**
-   * Optional capability pre-check: when present, the listener verifies that
-   * every declared script entry point exists on disk before admitting the
-   * commission. Missing entries bounce at receive with zero subtree spend.
-   */
-  declaredScripts?: DeclaredScripts;
-  /** The repo root used for the declared-scripts capability check. */
-  repoRoot?: string;
-}
+// The commission shape is now a frozen contract (ADR-026). It is re-exported here
+// so existing consumers that import it from the listener keep working.
+export type { CommissionInput } from '../contract/brief.js';
 
 // ── Internal state ────────────────────────────────────────────────────────────
 

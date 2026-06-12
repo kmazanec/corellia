@@ -232,8 +232,8 @@ describe('consolidate-memory — grant shape', () => {
   it('does not have product-repo write capability', () => {
     const def = registry.get('consolidate-memory');
     expect(def.grants).not.toContain('fs.write');
-    expect(def.grants).not.toContain('factory-repo.branch');
-    expect(def.grants).not.toContain('factory-repo.pr');
+    expect(def.grants).not.toContain('repo.branch');
+    expect(def.grants).not.toContain('repo.pr');
     expect(def.grants).not.toContain('pattern-store.write-provisional');
   });
 

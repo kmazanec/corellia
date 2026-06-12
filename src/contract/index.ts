@@ -14,6 +14,7 @@ export type { BrainContext, Brain, StepMessage, StepTranscript, StepOutput } fro
 export type { DeterministicCheck, CheckContext, GoalTypeDef, Registry } from './goal-type.js';
 export type { ToolDef, ToolCall, ToolResult, ToolImpl, ToolBroker, ScriptResult } from './tool.js';
 export { GRANT_TOOL_MAP } from './tool.js';
+export type { CommissionInput, ParkedBrief, FrontDoorStatus, StandingEnvelope } from './brief.js';
 export type { MemoryView } from './memory.js';
 export type { SplitMemo, PatternStore } from './pattern.js';
 export type { RiskClass, SensitivityFact } from './risk.js';

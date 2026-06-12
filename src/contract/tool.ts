@@ -121,4 +121,9 @@ export const GRANT_TOOL_MAP = {
   conventions_for: ['retrieval.api', 'fs.read'],
   stack_versions: ['retrieval.api', 'fs.read'],
   impact: ['retrieval.api', 'fs.read'],
+  // The PR-opening boundary (ADR-025): a granted leaf pushes its branch and
+  // opens exactly one PR. The ToolImpls are registered in assembly by F-61; the
+  // grant map entries are inert until then.
+  push_branch: ['repo.branch'],
+  open_pr: ['repo.pr'],
 } as const satisfies Record<string, readonly string[]>;

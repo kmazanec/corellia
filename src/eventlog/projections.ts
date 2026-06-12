@@ -178,6 +178,9 @@ export function traceStats(events: FactoryEvent[]): Record<string, GoalTypeStats
       case 'knowledge-facts-written':
       case 'knowledge-checked':
       case 'golden-candidate':
+      case 'branch-pushed':
+      case 'pr-opened':
+      case 'blocker-routed':
         break;
     }
   }
@@ -343,6 +346,9 @@ export function costSummary(events: FactoryEvent[]): CostSummary {
       case 'knowledge-facts-written':
       case 'knowledge-checked':
       case 'golden-candidate':
+      case 'branch-pushed':
+      case 'pr-opened':
+      case 'blocker-routed':
         break;
     }
   }
@@ -454,6 +460,9 @@ export function projectKnowledge(events: FactoryEvent[]): KnowledgeView {
       case 'transport-retry':
       case 'malformation-reprompt':
       case 'golden-candidate':
+      case 'branch-pushed':
+      case 'pr-opened':
+      case 'blocker-routed':
         break;
     }
   }
