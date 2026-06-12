@@ -36,7 +36,7 @@ import { randomBytes } from 'node:crypto';
 import type { Goal } from '../contract/goal.js';
 import type { ToolImpl } from '../contract/tool.js';
 import type { EventStore } from '../contract/events.js';
-import { scanDiffForProcessLanguage } from './process-clean.js';
+import { scanDiffForProcessLanguage, ALWAYS_DANGEROUS_PATTERNS } from './process-clean.js';
 
 // ---------------------------------------------------------------------------
 // Fetch transport injection — isolates the GitHub REST path so tests never
@@ -248,8 +248,18 @@ export function pushBranchTool(deps: PushBranchDeps): ToolImpl {
       // 3. Process-clean gate (AC-20, ADR-025). Run over the diff before any
       //    push; a dirty diff refuses naming offending file:line; nothing reaches
       //    the remote.
+      //
+      //    Target-aware pattern selection:
+      //      - improve-factory goal type → pushing to the factory's own repo.
+      //        Factory vocabulary (corellia, improve-factory, toolimpl, etc.) is
+      //        legitimate in factory source diffs. Apply only ALWAYS_DANGEROUS_PATTERNS
+      //        (goal-ids, run-specific refs) — never the foreign-repo vocabulary set.
+      //      - Any other goal type → pushing to a foreign product repo.
+      //        Apply the full PROCESS_CLEAN_PATTERNS set (always-dangerous + foreign-repo-only).
+      const isFactoryRepo = goal.type === 'improve-factory';
+      const patterns = isFactoryRepo ? ALWAYS_DANGEROUS_PATTERNS : undefined; // undefined → full set (default)
       const diff = getDiffForCleanCheck(worktreeRoot, branch);
-      const cleanResult = scanDiffForProcessLanguage(diff);
+      const cleanResult = scanDiffForProcessLanguage(diff, patterns);
       if (!cleanResult.ok) {
         const lines = cleanResult.offenses.slice(0, 20).join('\n');
         const truncated = cleanResult.offenses.length > 20

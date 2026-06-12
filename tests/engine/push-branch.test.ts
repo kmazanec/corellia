@@ -312,9 +312,11 @@ describe('push_branch — process-clean gate', () => {
     const store = new InMemoryEventStore();
     const tool = pushBranchTool({ worktreeRoot: worktreeDir, branch, treeId: 'dirty-evt', store });
 
+    // Use a foreign-repo goal type so the full PROCESS_CLEAN_PATTERNS set applies
+    // (goalid is in FOREIGN_REPO_ONLY_PATTERNS and is blocked on foreign-repo pushes).
     const goal = {
       id: 'g1',
-      type: 'improve-factory',
+      type: 'implement',
       parentId: null as null,
       title: 't',
       spec: {},

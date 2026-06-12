@@ -3,13 +3,24 @@
  * must never appear in a tree's diff before it reaches the remote. Shared with
  * any judge harness that re-runs the same check (AC-20 / ADR-025).
  *
- * Three categories:
- *   goal-ids        — raw UUID-shaped goal identifiers that would expose the
- *                     factory's internal addressing to the product repo.
- *   plan-refs       — references to iteration plans, build artefacts, and
- *                     factory-internal file paths.
- *   process-language — factory vocabulary that signals the author is the model
- *                     rather than a human developer.
+ * Pattern split (target-aware gate):
+ *
+ *   ALWAYS_DANGEROUS — patterns that must NEVER appear in any diff, regardless
+ *     of whether the push target is a foreign product repo or the factory's own
+ *     repo. Includes goal-ids (which expose the factory's internal addressing),
+ *     run-specific plan refs (build/06- branch prefixes, feat(tree): commits),
+ *     and worktree path leakage. These are wrong on every repo.
+ *
+ *   FOREIGN_REPO_ONLY — factory vocabulary that is legitimately present in the
+ *     factory's own source code but must not bleed into a foreign product repo's
+ *     diff. On the improve-factory path (goal.type === 'improve-factory'), the
+ *     target IS the factory's own repo, so diffs of factory files (skill docs,
+ *     type definitions, contract files) will necessarily contain this vocabulary.
+ *     Blocking it would prevent the factory from self-improving — the opposite of
+ *     the intent. On any other path, these patterns indicate a genuine leak.
+ *
+ * Use `PROCESS_CLEAN_PATTERNS` (the full set) for foreign-repo pushes.
+ * Use `ALWAYS_DANGEROUS_PATTERNS` alone for factory-repo (improve-factory) pushes.
  *
  * The grep set is exported as a `readonly string[]` so it is importable by both
  * `pushBranchTool` (the gate runs here before push) and any judge harness that
@@ -21,23 +32,40 @@
  */
 
 /**
- * Patterns whose presence in a diff line signals factory-internal content that
- * must not reach the remote. The gate runs `line.toLowerCase().includes(pat)`
- * for each pattern in this list.
+ * Patterns that are always dangerous — wrong on every push target, foreign or
+ * factory-own. Blocks goal-id leakage (via the `tree/` branch-name prefix that
+ * is the canonical goal-id format), run-specific commit-message prefixes, and
+ * worktree path leakage that would expose runtime internals.
+ *
+ * Note: `goalid` and `treeid` as substring patterns are NOT here because they
+ * would match legitimate TypeScript type names (`GoalId`, `TreeId`) in factory
+ * source code. Actual goal-id leakage in diffs is caught by the `tree/` prefix
+ * (the canonical format of both branch names and sanitized tree identifiers).
  */
-export const PROCESS_CLEAN_PATTERNS: readonly string[] = [
-  // --- goal-id prefixes ---
-  // Goal ids are formatted as `<type>/<uuid>` or `<slug>-<8hex>` (sanitizeTreeId).
-  // The branch name itself (`tree/<treeId>`) must not bleed into diff content.
+export const ALWAYS_DANGEROUS_PATTERNS: readonly string[] = [
+  // --- goal-id format ---
+  // Goal ids appear in diffs as `tree/<uuid>` (branch names, worktree paths).
+  // The `tree/` prefix is the canonical indicator; it catches branch-name
+  // references (tree/abc12345) that must never appear in committed code.
   'tree/',
 
+  // --- run-specific plan & worktree refs ---
+  '.claude/worktrees',
+  'build/06-',
+  'feat(tree):',        // collectTree's auto-commit message prefix
+];
+
+/**
+ * Patterns that are only dangerous on foreign product repo pushes. On the
+ * improve-factory path (pushing to the factory's own repo), these terms are
+ * legitimate vocabulary that appears in factory source files and must be allowed.
+ * On any other path they signal a factory-internal content leak.
+ */
+export const FOREIGN_REPO_ONLY_PATTERNS: readonly string[] = [
   // --- plan & factory-internal file refs ---
   'build-plan',
   'docs/iterations',
   'docs/adrs',
-  '.claude/worktrees',
-  'build/06-',
-  'feat(tree):',        // collectTree's auto-commit message prefix
 
   // --- factory process language ---
   // Vocabulary that an LLM author is likely to emit but a human dev would not.
@@ -53,6 +81,15 @@ export const PROCESS_CLEAN_PATTERNS: readonly string[] = [
 ];
 
 /**
+ * The full pattern set for foreign product repo pushes (ALWAYS_DANGEROUS +
+ * FOREIGN_REPO_ONLY). Used when `goal.type !== 'improve-factory'`.
+ */
+export const PROCESS_CLEAN_PATTERNS: readonly string[] = [
+  ...ALWAYS_DANGEROUS_PATTERNS,
+  ...FOREIGN_REPO_ONLY_PATTERNS,
+];
+
+/**
  * Scan a unified diff string (as produced by `git diff`) for any line that
  * contains a process-clean pattern. Only added/context lines are scanned;
  * removed lines (prefixed with `-`) are ignored since they are leaving the tree.
@@ -64,8 +101,17 @@ export const PROCESS_CLEAN_PATTERNS: readonly string[] = [
  * 1-based line number within the diff output (not the source file's line
  * number — it uniquely locates the finding within the diff for fast human
  * review).
+ *
+ * The `patterns` parameter selects which pattern set to enforce:
+ *   - Omit (or pass `PROCESS_CLEAN_PATTERNS`) for foreign product repo pushes
+ *     (the full gate: always-dangerous + foreign-repo-only patterns).
+ *   - Pass `ALWAYS_DANGEROUS_PATTERNS` for improve-factory / factory-own-repo
+ *     pushes (narrowed gate: goal-ids + run-refs only; factory vocabulary allowed).
  */
-export function scanDiffForProcessLanguage(diff: string): { ok: true } | { ok: false; offenses: string[] } {
+export function scanDiffForProcessLanguage(
+  diff: string,
+  patterns: readonly string[] = PROCESS_CLEAN_PATTERNS,
+): { ok: true } | { ok: false; offenses: string[] } {
   const lines = diff.split('\n');
   const offenses: string[] = [];
   let currentFile = '<unknown>';
@@ -93,7 +139,7 @@ export function scanDiffForProcessLanguage(diff: string): { ok: true } | { ok: f
     const content = raw.startsWith('+') ? raw.slice(1) : raw;
     const lower = content.toLowerCase();
 
-    for (const pat of PROCESS_CLEAN_PATTERNS) {
+    for (const pat of patterns) {
       if (lower.includes(pat.toLowerCase())) {
         offenses.push(`${currentFile}:${lineNo}: ${raw.trimEnd()}`);
         break; // One offense per line — don't double-count multiple pattern hits.

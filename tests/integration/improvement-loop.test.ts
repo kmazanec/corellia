@@ -458,6 +458,72 @@ describe('improvement-loop e2e: AC 3 — generality routing (bare-repo PR path)'
     expect(prEvents2).toHaveLength(1);
   });
 
+  it('process-clean gate is target-aware: factory vocabulary allowed on improve-factory, blocked on foreign-repo', async () => {
+    // This test pins BOTH directions of the target-aware gate (Fix 1 regression pin).
+    withToken('ghp_fake_gate_test');
+
+    // Shared: a temp repo + bare origin + a worktree containing factory vocabulary.
+    const repo = makeTempRepo();
+    const bare = makeBareRepo(repo);
+    execFileSync('git', ['-C', repo, 'remote', 'add', 'origin', bare], { stdio: 'pipe' });
+
+    const FACTORY_VOCAB_CONTENT = [
+      '# improve-factory skill',
+      '',
+      '`improve-factory` goal type uses `grant_tool_map`, `toolimpl`, `corellia`',
+      'internals. See docs/iterations/ and docs/adrs/ for context.',
+    ].join('\n');
+
+    // ── Path A: improve-factory goal type → ALWAYS_DANGEROUS_PATTERNS only ──
+    // Factory vocabulary in the diff must PASS so the factory can self-improve.
+    const branchA = 'tree/gate-factory-a';
+    const worktreeDirA = makeWorktree(repo, branchA, 'improve-skill.md', FACTORY_VOCAB_CONTENT);
+    const storeA = new InMemoryEventStore();
+    const pushToolA = pushBranchTool({
+      worktreeRoot: worktreeDirA,
+      branch: branchA,
+      treeId: 'gate-factory-a',
+      store: storeA,
+    });
+
+    const factoryGoal: Goal = {
+      id: 'improve-gate-test',
+      type: 'improve-factory',
+      parentId: null,
+      title: 'improve-factory: test target-aware gate',
+      spec: {},
+      intent: 'production',
+      scope: [],
+      budget: { attempts: 3, tokens: 5000, toolCalls: 20, wallClockMs: 120_000 },
+      memories: [],
+    };
+
+    const resultA = await pushToolA.execute(factoryGoal, {});
+    expect(resultA.ok).toBe(true); // Factory vocab allowed on factory-repo path.
+
+    // ── Path B: foreign-repo goal type → full PROCESS_CLEAN_PATTERNS ──
+    // Same factory vocabulary in a diff for a non-factory goal must be REFUSED.
+    const branchB = 'tree/gate-foreign-b';
+    const worktreeDirB = makeWorktree(repo, branchB, 'leaked-vocab.md', FACTORY_VOCAB_CONTENT);
+    const storeB = new InMemoryEventStore();
+    const pushToolB = pushBranchTool({
+      worktreeRoot: worktreeDirB,
+      branch: branchB,
+      treeId: 'gate-foreign-b',
+      store: storeB,
+    });
+
+    const foreignGoal: Goal = {
+      ...factoryGoal,
+      id: 'deliver-gate-test',
+      type: 'implement', // foreign-repo type → full gate applies
+    };
+
+    const resultB = await pushToolB.execute(foreignGoal, {});
+    expect(resultB.ok).toBe(false); // Factory vocab blocked on foreign-repo path.
+    expect(resultB.output).toContain('process-clean');
+  });
+
   it('the event log projections do not throw on improvement-loop events', async () => {
     const store = new InMemoryEventStore();
 

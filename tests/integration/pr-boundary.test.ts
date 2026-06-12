@@ -167,7 +167,7 @@ describe('integration: push_branch (AC 1)', () => {
 // ---------------------------------------------------------------------------
 
 describe('integration: process-clean gate (AC 2)', () => {
-  it('blocks push when the diff contains factory language', async () => {
+  it('blocks push when the diff contains factory language (foreign-repo goal type)', async () => {
     // Create a worktree with factory-internal content.
     const dirtyWorktree = makeWorktree(
       repo, 'tree/dirty-int', 'bad.ts',
@@ -179,7 +179,9 @@ describe('integration: process-clean gate (AC 2)', () => {
       treeId: 'dirty-int',
       store,
     });
-    const result = await tool.execute(baseGoal, {});
+    // Use a foreign-repo goal type (not 'improve-factory') — the full pattern set applies.
+    const foreignGoal = { ...baseGoal, type: 'implement' };
+    const result = await tool.execute(foreignGoal, {});
     expect(result.ok).toBe(false);
     expect(result.output).toContain('process-clean');
     expect(result.output).toContain('bad.ts');
@@ -190,6 +192,63 @@ describe('integration: process-clean gate (AC 2)', () => {
       { stdio: 'pipe', encoding: 'utf-8' },
     ).trim();
     expect(branchOut).toBe('');
+  });
+
+  it('allows factory vocabulary through when goal type is improve-factory (factory-repo push)', async () => {
+    // Create a worktree containing factory vocabulary — legitimate on the factory repo.
+    // Use a flat filename (no nested dirs) since makeWorktree doesn't mkdir -p.
+    const factoryWorktree = makeWorktree(
+      repo, 'tree/factory-vocab', 'improve-skill.md',
+      [
+        '# improve-factory skill',
+        '',
+        'This skill improves the factory. It uses corellia internals such as:',
+        '- `improve-factory` goal type',
+        '- `push_branch` tool',
+        '- `grant_tool_map` configuration',
+        '- `toolimpl` interface',
+        '- `treeid` for worktree addressing',
+        '',
+        '## Usage',
+        'See docs/iterations/ and docs/adrs/ for context.',
+      ].join('\n'),
+    );
+    const tool = pushBranchTool({
+      worktreeRoot: factoryWorktree,
+      branch: 'tree/factory-vocab',
+      treeId: 'factory-vocab',
+      store,
+    });
+    // improve-factory goal type → ALWAYS_DANGEROUS_PATTERNS only; factory vocabulary allowed.
+    const factoryGoal = { ...baseGoal, id: 'g-factory-vocab' };
+    const result = await tool.execute(factoryGoal, {});
+    expect(result.ok).toBe(true);
+
+    // Branch SHOULD appear in the bare repo.
+    const branchOut = execFileSync(
+      'git', ['-C', bare, 'branch', '--list', 'tree/factory-vocab'],
+      { stdio: 'pipe', encoding: 'utf-8' },
+    ).trim();
+    expect(branchOut).toContain('tree/factory-vocab');
+  });
+
+  it('still blocks always-dangerous patterns (goal-id leakage) on improve-factory path', async () => {
+    // Even on the factory-repo path, tree/ prefixes (goal-id leakage) must be blocked.
+    const leakyWorktree = makeWorktree(
+      repo, 'tree/leaky-int', 'bad-leak.ts',
+      '// This references tree/abc12345 which is a goal-id leak\nexport const x = 1;\n',
+    );
+    const tool = pushBranchTool({
+      worktreeRoot: leakyWorktree,
+      branch: 'tree/leaky-int',
+      treeId: 'leaky-int',
+      store,
+    });
+    // Even with improve-factory goal type, tree/ refs are blocked.
+    const result = await tool.execute(baseGoal, {});
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('process-clean');
+    expect(result.output).toContain('bad-leak.ts');
   });
 });
 
