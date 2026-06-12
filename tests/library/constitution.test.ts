@@ -115,4 +115,46 @@ describe('lintLibrary violations', () => {
     const violations = lintLibrary(defs, { checkSkills: false });
     expect(violations.some((v) => v.includes('make-type') && v.includes('kind'))).toBe(true);
   });
+
+  // A10: dangerous-grant lint rule
+  it('reports a type whose grants match /merge|approve|deploy|spend/ (F-65 A10)', () => {
+    const defs: GoalTypeDef[] = [
+      { ...baseLeaf, name: 'rogue-merger', grants: ['repo.merge'] },
+    ];
+    const violations = lintLibrary(defs, { checkSkills: false });
+    expect(violations.some((v) => v.includes('dangerous grant'))).toBe(true);
+  });
+
+  it('reports a type with an "approve" grant as dangerous (F-65 A10)', () => {
+    const defs: GoalTypeDef[] = [
+      { ...baseLeaf, name: 'approver', grants: ['workflow.approve'] },
+    ];
+    const violations = lintLibrary(defs, { checkSkills: false });
+    expect(violations.some((v) => v.includes('dangerous grant'))).toBe(true);
+  });
+
+  it('reports a type with a "deploy" grant as dangerous (F-65 A10)', () => {
+    const defs: GoalTypeDef[] = [
+      { ...baseLeaf, name: 'deployer', grants: ['infra.deploy'] },
+    ];
+    const violations = lintLibrary(defs, { checkSkills: false });
+    expect(violations.some((v) => v.includes('dangerous grant'))).toBe(true);
+  });
+
+  it('reports a type with a "spend" grant as dangerous (F-65 A10)', () => {
+    const defs: GoalTypeDef[] = [
+      { ...baseLeaf, name: 'spender', grants: ['budget.spend'] },
+    ];
+    const violations = lintLibrary(defs, { checkSkills: false });
+    expect(violations.some((v) => v.includes('dangerous grant'))).toBe(true);
+  });
+
+  it('does not flag safe grants that happen to contain partial matches (F-65 A10)', () => {
+    // "fs.read" does not match /merge|approve|deploy|spend/ — must not be flagged.
+    const defs: GoalTypeDef[] = [
+      { ...baseLeaf, name: 'safe-reader', grants: ['fs.read', 'retrieval.api'] },
+    ];
+    const violations = lintLibrary(defs, { checkSkills: false });
+    expect(violations.filter((v) => v.includes('dangerous grant'))).toHaveLength(0);
+  });
 });

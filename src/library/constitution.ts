@@ -80,6 +80,19 @@ export function lintLibrary(defs: GoalTypeDef[], opts: LintOptions = {}): string
       );
     }
 
+    // Dangerous grant ceiling: no type may grant merge, approve, deploy, or spend
+    // capability — these strings in any grant are above the factory's blast-radius
+    // ceiling. This is the single source of truth for the invariant; tests must
+    // not duplicate the loop (they should assert this lint rule fires).
+    const dangerousGrant = /merge|approve|deploy|spend/;
+    for (const grant of def.grants) {
+      if (dangerousGrant.test(grant)) {
+        violations.push(
+          `Type "${def.name}" has a dangerous grant: "${grant}" (matches /merge|approve|deploy|spend/)`,
+        );
+      }
+    }
+
     // judgeType validity: when judgeType is non-null it must name a registered
     // def whose kind === 'judge'. A judgeType pointing at an unknown name or a
     // non-judge kind is a misconfiguration that would produce silent misbehaviour

@@ -89,18 +89,16 @@ afterEach(async () => {
 // ── 1. Constitution lint — no merge/approve/deploy/spend grant anywhere ───────
 
 describe('constitution-lint — dangerous grant invariant', () => {
-  it('no type in the library grants merge, approve, deploy, or spend', () => {
-    const types = starterTypes();
-    const dangerous = /merge|approve|deploy|spend/;
-    const violations: string[] = [];
-    for (const def of types) {
-      for (const grant of def.grants) {
-        if (dangerous.test(grant)) {
-          violations.push(`"${def.name}" has dangerous grant: "${grant}"`);
-        }
-      }
-    }
-    expect(violations).toHaveLength(0);
+  it('no type in the library grants merge, approve, deploy, or spend — via lint rule', () => {
+    // The dangerous-grant invariant is owned by lintLibrary (constitution.ts).
+    // This test delegates to the lint rule rather than duplicating the loop:
+    // if a type acquires a dangerous grant, lintLibrary fires and this assertion
+    // catches it through the rule, not a parallel manual check.
+    const violations = lintLibrary(starterTypes(), { checkSkills: false });
+    const dangerousViolations = violations.filter((v) =>
+      v.includes('dangerous grant'),
+    );
+    expect(dangerousViolations).toHaveLength(0);
   });
 
   it('lintLibrary passes for the full starter set (constitution clean)', () => {
