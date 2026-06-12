@@ -424,3 +424,97 @@ this iteration; cloud deployment deferred). Four chunks, no `src/` changes.
 - **NOT CI-gated (operator-verified):** `docker build`, `docker compose up`,
   `scripts/smoke-container.ts`. The vitest suite is never run inside the
   container (runtime stage carries no test deps).
+
+---
+
+# Iteration 06 — Assembly: the closed loop (F-67)
+
+Built by the autonomous agent on 2026-06-12. This section records the F-67
+assembly decisions, live evidence placeholders, and the convergence-loop
+suite's CI gate status.
+
+## What was assembled
+
+| Artifact | What it is |
+|---|---|
+| `tests/integration/convergence-loop.test.ts` | Primary CI gate. 12 tests covering path A (commission→push→PR→report) and path B (blocker→improve-factory→bare-repo PR). Zero network, zero real LLMs. |
+| `src/daemon/live-engine.ts` | Production seam: `buildLiveEngine()` replaces the null stub for live commissions. Wires LlmBrain + knowledge + prBoundary end-to-end. |
+| `examples/live-foreign-eyes.ts` | AC-2 checkpoint (operator-run). |
+| `examples/live-self.ts` | AC-3 strange-loop deliver (operator-run). |
+| `examples/live-foreign.ts` | AC-4 cats deliver (operator-run). |
+
+## Implementation decisions
+
+1. **buildNullEngine() left in daemon.ts.** The existing null stub was not
+   replaced in daemon.ts because `docker compose up` + the smoke script use
+   the daemon entrypoint directly and must not require OPENROUTER_API_KEY at
+   container start time. Instead, `src/daemon/live-engine.ts` exports
+   `buildLiveEngine()` which live harness scripts and a future live daemon
+   entrypoint import. This is the seam documented in F-62's implementation
+   notes.
+
+2. **Strange-loop hygiene documented, not enforced mechanically.** The
+   live:self harness includes pre-run and post-run hygiene checks (primary
+   branch clean, worktree list, .git/info/exclude verification). The
+   mechanical isolation is provided by the worktree model itself: the factory
+   opens a tree/<treeId> worktree under .claude/worktrees/ which is gitignored,
+   and the primary checkout is on `main`/`build/06-loop` and never touched by
+   the build engine. The process-clean gate (AC-20) additionally blocks any
+   diff containing factory-internal content before push.
+
+3. **Convergence suite: process-clean gate test uses `build-plan` pattern.**
+   The test suite verifies the gate fires on factory vocabulary by using
+   `build-plan` (a known PROCESS_CLEAN_PATTERNS entry). The `improve-factory`
+   pattern is also in PROCESS_CLEAN_PATTERNS, which means improvement-loop
+   test content must be process-clean (no `## improve-factory` headings in
+   test worktree files). The path B end-to-end test uses `eval-harness.md`
+   with process-clean content.
+
+4. **Scripted vs live engine for convergence suite.** The convergence suite
+   (chunk 2) uses a ScriptedEngine that appends events and returns scripted
+   reports — it does NOT use buildLiveEngine(). This is by design: the suite
+   is the CI gate and must be zero-network. The live engine path is exercised
+   only by the operator-run harness scripts (chunks 3-5).
+
+## Live evidence (operator to fill)
+
+### AC-2: live:foreign-eyes early checkpoint
+
+> Run `npm run live:foreign-eyes` with OPENROUTER_API_KEY and CATS_REPO_PATH set.
+> Paste the evidence template output below.
+
+```
+PLACEHOLDER — operator to fill after running live:foreign-eyes
+```
+
+**Decision:** [ ] Approve deliver spend   [ ] Root-cause failures first
+
+### AC-3: live:self (corellia delivers to itself)
+
+> Run `npm run live:self` with OPENROUTER_API_KEY, GITHUB_TOKEN, CORELLIA_FEATURE,
+> CORELLIA_SCOPE set. Must be gated on AC-2 passing first.
+> Paste the evidence template output below.
+
+```
+PLACEHOLDER — operator to fill after running live:self
+```
+
+### AC-4: live:foreign (cats deliver)
+
+> Run `npm run live:foreign` with OPENROUTER_API_KEY, GITHUB_TOKEN, CATS_REPO_PATH,
+> CATS_FEATURE, CATS_SCOPE set. Must be gated on AC-3 succeeding.
+> Paste the evidence template output below.
+
+```
+PLACEHOLDER — operator to fill after running live:foreign
+```
+
+## CI gate status
+
+| Gate | Status |
+|---|---|
+| `npm run typecheck` | PASS |
+| `npm run lint` | PASS |
+| `npx vitest run` | PASS — 1335 passed / 21 skipped / 0 failed |
+| `tests/integration/convergence-loop.test.ts` (12 tests) | PASS — zero network confirmed |
+

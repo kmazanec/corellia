@@ -142,3 +142,58 @@ cats checkout path must be set before chunk 4 or chunk 5.
 
 ## Implementation notes
 
+### Live engine wiring (replaces buildNullEngine for live commissions)
+
+`src/daemon/live-engine.ts` exports `buildLiveEngine(opts: LiveEngineOptions)`.
+The null stub in `daemon.ts` is preserved (it rejects every run immediately) so
+`docker compose up` + the smoke script continue to work without OPENROUTER_API_KEY.
+For live commissions, operator-run harness scripts (`examples/live-*.ts`) call
+`buildLiveEngine()` directly instead of spawning the daemon process.
+
+Wire path:
+- `LlmBrain` via `openRouterConfig()` (OPENROUTER_API_KEY required at runtime).
+- `starterTypes()` with `rebindKnowledgeScan()` for learn-goal architecture checks.
+- `assembleKnowledgeWiring()` when `opts.knowledge: true`.
+- `SandboxConfig.prBoundary` with `repoSlug` (from `deriveRepoSlug()`) and an
+  optional `fetchTransport` for test isolation.
+- `goldenCapture: true` for all live runs (ADR-024).
+
+The Listener wraps the Engine and the daemon's substrate-selected store; the
+improvement loop uses `buildStandingEnvelope()` from `src/daemon/config.ts`.
+
+### Convergence suite fixtures (chunk 2)
+
+`tests/integration/convergence-loop.test.ts` uses:
+- `InMemoryEventStore` — real event log, no I/O.
+- `ScriptedEngine` — returns Map-keyed reports; appends goal-received + emitted events.
+- `makeTempRepo()` / `makeBareRepo()` / `makeWorktree()` — local git fixture; all
+  git operations target absolute temp paths under `os.tmpdir()`. Zero network.
+- `stubFetchTransport(prUrl)` — records calls, returns canned 201; never calls
+  global fetch. Network isolation is structural (no URL starting with https:// or
+  git@… is ever used in the git fixture helpers).
+- `withToken()` / `afterEach(cleanups)` — env var pinning and cleanup.
+
+Process-clean note: the path B end-to-end test uses `eval-harness.md` content
+(not `test-skill.md` with `## improve-factory`) because `improve-factory` is in
+`PROCESS_CLEAN_PATTERNS` and the gate correctly blocks it.
+
+### Strange-loop isolation mechanism (live:self)
+
+`examples/live-self.ts` documents and verifies the isolation:
+1. Pre-run: `git status --porcelain` on the primary checkout must be clean (or
+   operator warned). `git branch --show-current` records the branch.
+2. The factory opens a worktree under `<corelliaRoot>/.claude/worktrees/<treeId>/`
+   (gitignored via `.git/info/exclude`). The primary checkout's working tree is
+   never modified.
+3. `write_file` calls in the worktree are scoped to the declared feature scope;
+   the scope gate (`diffWithinScope`) catches any out-of-scope writes before emit.
+4. The process-clean gate (`scanDiffForProcessLanguage`) blocks any diff containing
+   factory vocabulary (`corellia`, `improve-factory`, `tree/`, `build-plan`, etc.)
+   before the branch is pushed.
+5. Post-run: `git status --porcelain` must still be clean; `git worktree list` shows
+   only the primary checkout (the engine collects or preserves the tree worktree
+   on completion, leaving no dangling worktree).
+
+The primary checkout's branch is recorded before and after the run. Any divergence
+is flagged as an isolation violation (should be impossible by construction).
+
