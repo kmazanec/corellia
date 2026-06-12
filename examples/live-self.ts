@@ -185,6 +185,12 @@ const engine = buildLiveEngine({
     // if the deliver completes with blockers and the improvement loop routes a fix.
     prBoundary: {
       repoSlug,
+      // factoryRepoSlug: corellia is pushing to its own repo. Setting this to
+      // `repoSlug` tells the process-clean gate that this push's target IS the
+      // factory's own repo, so factory vocabulary in the diff is permitted
+      // (only ALWAYS_DANGEROUS_PATTERNS are blocked). Without this, the full
+      // gate would fire and block legitimate factory-internal file changes.
+      factoryRepoSlug: repoSlug,
       // No fetchTransport override: uses real GitHub REST (live run).
     },
   },

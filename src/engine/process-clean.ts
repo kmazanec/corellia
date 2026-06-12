@@ -20,7 +20,26 @@
  *     the intent. On any other path, these patterns indicate a genuine leak.
  *
  * Use `PROCESS_CLEAN_PATTERNS` (the full set) for foreign-repo pushes.
- * Use `ALWAYS_DANGEROUS_PATTERNS` alone for factory-repo (improve-factory) pushes.
+ * Use `ALWAYS_DANGEROUS_PATTERNS` alone for factory-repo (own-repo) pushes.
+ *
+ * The gate decision MUST be keyed on whether the actual push target IS the
+ * factory's own repo (repoSlug === factoryRepoSlug in PushBranchDeps), NOT on
+ * goal.type. An improve-factory goal tree that is bound to a foreign repo slug
+ * must still receive the full gate — goal.type is not a safe proxy because it
+ * is architectural convention, not a runtime-enforced invariant.
+ *
+ * Two-tier rationale:
+ *   ALWAYS_DANGEROUS — blocks run-specific identifiers (tree/ prefixes, worktree
+ *     paths, build/06- branch refs, feat(tree): commit prefixes) that are wrong
+ *     on every repo. These are never legitimate in committed code.
+ *   FOREIGN_REPO_ONLY — blocks factory vocabulary (corellia, improve-factory,
+ *     toolimpl, grant_tool_map, docs/iterations, etc.) that IS legitimate in
+ *     the factory's own source files but must never bleed into a foreign product
+ *     repo's diff. goalid/treeid are here (not in ALWAYS_DANGEROUS) because they
+ *     would match TypeScript type names (GoalId, TreeId) in factory source. On
+ *     foreign pushes the full set applies, so goalid/treeid substring matches
+ *     are still caught. On factory-own-repo pushes only ALWAYS_DANGEROUS applies,
+ *     so factory vocabulary (including goalid/treeid as type names) is permitted.
  *
  * The grep set is exported as a `readonly string[]` so it is importable by both
  * `pushBranchTool` (the gate runs here before push) and any judge harness that

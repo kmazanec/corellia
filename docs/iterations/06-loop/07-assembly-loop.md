@@ -175,6 +175,35 @@ The improvement loop uses `buildStandingEnvelope()` from `src/daemon/config.ts`.
 Operator-run harness scripts (`examples/live-*.ts`) continue to call
 `buildLiveEngine()` directly and do not go through the daemon process.
 
+### Process-clean gate: corrected target detection (security fix, post-review)
+
+Commit 7a00439 introduced the target-aware gate but keyed the narrowing decision
+on `goal.type === 'improve-factory'` — a proxy that is not enforced at runtime.
+The concrete hole: `live-foreign.ts` builds an engine with `repoRoot = catsRoot`
+and an `improve-factory` goal tree running on it would pass factory vocabulary
+through the gate onto a foreign cats PR.
+
+**Corrected approach (`PushBranchDeps.factoryRepoSlug`):**
+
+The narrowing decision is now keyed on `repoSlug === factoryRepoSlug`:
+- `repoSlug` (already in `PushBranchDeps`): the GitHub `owner/repo` slug of the
+  push's declared PR target. Set at assembly time from `prBoundary.repoSlug`.
+- `factoryRepoSlug` (new field): the `owner/repo` slug of the factory's own repo.
+  Set only where the target genuinely IS the factory's own repo:
+  - `examples/live-self.ts`: sets both to the corellia slug (derived from origin).
+  - `examples/live-foreign.ts`: leaves `factoryRepoSlug` unset → full gate.
+  - `src/daemon/daemon.ts`: reads `FACTORY_REPO_SLUG` env var; unset = full gate.
+
+An improve-factory goal bound to a foreign engine (cats) still receives the full
+gate because `repoSlug` (`acme/cats`) never equals `factoryRepoSlug` (unset or
+`acme/corellia`). The security invariant is structural, not conventional.
+
+The `goalid`/`treeid` patterns remain in `FOREIGN_REPO_ONLY_PATTERNS` (not
+ALWAYS_DANGEROUS) because they would match TypeScript type names (GoalId, TreeId)
+in factory source. On foreign pushes the full set catches them. On factory-own-repo
+pushes only ALWAYS_DANGEROUS applies and factory type names are permitted. With
+the corrected target detection, this placement is sound.
+
 ### Convergence suite fixtures (chunk 2)
 
 `tests/integration/convergence-loop.test.ts` uses:
@@ -203,7 +232,13 @@ Process-clean note: the path B end-to-end test uses `eval-harness.md` content
    the scope gate (`diffWithinScope`) catches any out-of-scope writes before emit.
 4. The process-clean gate (`scanDiffForProcessLanguage`) blocks any diff containing
    factory vocabulary (`corellia`, `improve-factory`, `tree/`, `build-plan`, etc.)
-   before the branch is pushed.
+   before the branch is pushed. The gate is target-aware: it narrows to
+   ALWAYS_DANGEROUS_PATTERNS (run-specific identifiers only) when the push's
+   declared `repoSlug` equals the configured `factoryRepoSlug` — i.e., when the
+   target genuinely IS the factory's own repo. `live:self` sets both to the
+   corellia slug; `live:foreign` leaves `factoryRepoSlug` unset so the full gate
+   applies. The daemon reads `FACTORY_REPO_SLUG` from the environment (unset =
+   full gate for all pushes — safe default).
 5. Post-run: `git status --porcelain` must still be clean; `git worktree list` shows
    only the primary checkout (the engine collects or preserves the tree worktree
    on completion, leaving no dangling worktree).

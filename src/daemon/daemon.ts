@@ -99,15 +99,34 @@ function selectEngine(): Engine {
   try {
     const repoRoot = process.env['CORELLIA_REPO_ROOT'] ?? process.cwd();
     const repoSlug = deriveRepoSlug(repoRoot);
+    // FACTORY_REPO_SLUG: the GitHub owner/repo slug of the factory's own repo.
+    // When set and equal to the push target's repoSlug, the process-clean gate
+    // narrows to ALWAYS_DANGEROUS_PATTERNS only (factory vocabulary is permitted
+    // in factory-own-repo diffs). Unset = no repo is the factory repo → full
+    // gate always. Safe default: do NOT set unless this daemon is corellia
+    // pushing to its own repo.
+    const factoryRepoSlugEnv = process.env['FACTORY_REPO_SLUG'] ?? undefined;
     const sandbox = {
       repoRoot,
       declaredScripts: {},
-      ...(repoSlug ? { prBoundary: { repoSlug } } : {}),
+      ...(repoSlug
+        ? {
+            prBoundary: {
+              repoSlug,
+              ...(factoryRepoSlugEnv !== undefined ? { factoryRepoSlug: factoryRepoSlugEnv } : {}),
+            },
+          }
+        : {}),
     };
     const engine = buildLiveEngine({ store, sandbox, goldenCapture: true });
     console.log('[daemon] engine: live engine — commissions will be processed via OpenRouter');
     if (repoSlug) {
       console.log(`[daemon] engine: target repo slug: ${repoSlug}`);
+      if (factoryRepoSlugEnv) {
+        console.log(`[daemon] engine: factory repo slug: ${factoryRepoSlugEnv} (process-clean gate narrowed for own-repo pushes)`);
+      } else {
+        console.log('[daemon] engine: FACTORY_REPO_SLUG unset → full process-clean gate for all pushes');
+      }
     } else {
       console.log('[daemon] engine: no GitHub remote detected; push_branch/open_pr will not be available');
     }

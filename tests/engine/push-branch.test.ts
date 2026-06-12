@@ -271,6 +271,7 @@ describe('push_branch — process-clean gate', () => {
     );
 
     const store = new InMemoryEventStore();
+    // No factoryRepoSlug → full gate applies (tree/ is in ALWAYS_DANGEROUS regardless).
     const tool = pushBranchTool({ worktreeRoot: worktreeDir, branch, treeId: 'dirty-diff', store });
 
     const goal = {

@@ -81,10 +81,29 @@ export interface SandboxConfig {
    * construct the GitHub REST URL. The optional `fetchTransport` is the
    * injectable network transport; absent → `realFetchTransport` (global fetch).
    * Absent → broker carries only the iteration-03 and retrieval tools.
+   *
+   * `factoryRepoSlug`: the `owner/repo` slug of the factory's OWN repo (e.g.
+   * `acme/corellia`). The process-clean gate narrows to ALWAYS_DANGEROUS_PATTERNS
+   * only when the push's `repoSlug` equals this value — i.e., when the target
+   * genuinely IS the factory's own repo. Set this ONLY for the live:self /
+   * improve-factory-to-own-repo path. Leave unset (or omit) for foreign product
+   * repo pushes — they always get the full gate regardless of goal type.
+   *
+   * Security invariant: the gate decision is bound to the ACTUAL push target
+   * (repoSlug vs factoryRepoSlug) not to goal.type, so an improve-factory goal
+   * tree that is accidentally (or maliciously) bound to a foreign repo still
+   * receives the full gate.
    */
   prBoundary?: {
     /** GitHub `owner/repo` slug for the bound repo (e.g. `acme/factory`). */
     repoSlug: string;
+    /**
+     * GitHub `owner/repo` slug of the factory's own repo. When set and equal to
+     * `repoSlug`, the process-clean gate narrows to ALWAYS_DANGEROUS_PATTERNS
+     * (factory vocabulary is legitimate in factory-own-repo diffs). Unset means
+     * "no repo is the factory repo → full gate always" (safe default).
+     */
+    factoryRepoSlug?: string;
     /** Injectable fetch transport for tests; omit for live runs (global fetch). */
     fetchTransport?: FetchTransport;
   };
@@ -225,6 +244,10 @@ export async function openSandboxAssembly(
           branch,
           treeId,
           store,
+          repoSlug: config.prBoundary.repoSlug,
+          ...(config.prBoundary.factoryRepoSlug !== undefined
+            ? { factoryRepoSlug: config.prBoundary.factoryRepoSlug }
+            : {}),
         }),
         openPrTool({
           branch,

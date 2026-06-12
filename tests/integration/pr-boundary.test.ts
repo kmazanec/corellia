@@ -167,7 +167,7 @@ describe('integration: push_branch (AC 1)', () => {
 // ---------------------------------------------------------------------------
 
 describe('integration: process-clean gate (AC 2)', () => {
-  it('blocks push when the diff contains factory language (foreign-repo goal type)', async () => {
+  it('blocks push when the diff contains factory language (factoryRepoSlug unset → full gate)', async () => {
     // Create a worktree with factory-internal content.
     const dirtyWorktree = makeWorktree(
       repo, 'tree/dirty-int', 'bad.ts',
@@ -178,8 +178,9 @@ describe('integration: process-clean gate (AC 2)', () => {
       branch: 'tree/dirty-int',
       treeId: 'dirty-int',
       store,
+      // factoryRepoSlug unset → full PROCESS_CLEAN_PATTERNS applies regardless of goal type.
     });
-    // Use a foreign-repo goal type (not 'improve-factory') — the full pattern set applies.
+    // Even with improve-factory goal type, the full gate fires when factoryRepoSlug is not set.
     const foreignGoal = { ...baseGoal, type: 'implement' };
     const result = await tool.execute(foreignGoal, {});
     expect(result.ok).toBe(false);
@@ -194,7 +195,7 @@ describe('integration: process-clean gate (AC 2)', () => {
     expect(branchOut).toBe('');
   });
 
-  it('allows factory vocabulary through when goal type is improve-factory (factory-repo push)', async () => {
+  it('allows factory vocabulary through when repoSlug === factoryRepoSlug (factory-repo push)', async () => {
     // Create a worktree containing factory vocabulary — legitimate on the factory repo.
     // Use a flat filename (no nested dirs) since makeWorktree doesn't mkdir -p.
     const factoryWorktree = makeWorktree(
@@ -213,13 +214,16 @@ describe('integration: process-clean gate (AC 2)', () => {
         'See docs/iterations/ and docs/adrs/ for context.',
       ].join('\n'),
     );
+    // Set repoSlug === factoryRepoSlug → gate narrows to ALWAYS_DANGEROUS only.
+    // Factory vocabulary (improve-factory, corellia, toolimpl, etc.) is permitted.
     const tool = pushBranchTool({
       worktreeRoot: factoryWorktree,
       branch: 'tree/factory-vocab',
       treeId: 'factory-vocab',
       store,
+      repoSlug: 'acme/corellia',
+      factoryRepoSlug: 'acme/corellia',
     });
-    // improve-factory goal type → ALWAYS_DANGEROUS_PATTERNS only; factory vocabulary allowed.
     const factoryGoal = { ...baseGoal, id: 'g-factory-vocab' };
     const result = await tool.execute(factoryGoal, {});
     expect(result.ok).toBe(true);
@@ -249,6 +253,108 @@ describe('integration: process-clean gate (AC 2)', () => {
     expect(result.ok).toBe(false);
     expect(result.output).toContain('process-clean');
     expect(result.output).toContain('bad-leak.ts');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Security regression: gate must key on ACTUAL target repo, not goal.type
+//
+// The concrete hole (commit 7a00439): the gate used `goal.type === 'improve-factory'`
+// as a proxy for "this push targets the factory's own repo." That proxy is not
+// enforced — an improve-factory tree could be bound to a foreign repo (e.g.
+// live-foreign.ts) and factory vocabulary would pass through.
+//
+// Fix: the gate now compares repoSlug === factoryRepoSlug (both from PushBranchDeps).
+// These tests pin both sides of the corrected gate.
+// ---------------------------------------------------------------------------
+
+describe('security regression F-67: gate narrows on real target, not goal.type (pinned hole)', () => {
+  it('HOLE: improve-factory goal pushing to a FOREIGN slug is REFUSED (factory vocab blocked)', async () => {
+    // This test directly reproduces the hole: an improve-factory goal tree is
+    // bound to a foreign repo slug (cats), not the factory's own repo. The
+    // old gate keyed on goal.type and would have let factory vocabulary through.
+    // The corrected gate keys on repoSlug vs factoryRepoSlug and refuses it.
+    const FACTORY_VOCAB_CONTENT = [
+      '# improve-factory skill doc',
+      '',
+      'Uses `grant_tool_map`, `toolimpl`, and `corellia` internals.',
+      'See docs/iterations/ and docs/adrs/ for full context.',
+    ].join('\n');
+
+    const foreignWorktree = makeWorktree(
+      repo, 'tree/hole-repro', 'leaked-skill.md', FACTORY_VOCAB_CONTENT,
+    );
+
+    const tool = pushBranchTool({
+      worktreeRoot: foreignWorktree,
+      branch: 'tree/hole-repro',
+      treeId: 'hole-repro',
+      store,
+      repoSlug: 'acme/cats',          // foreign repo — NOT the factory
+      // factoryRepoSlug intentionally absent (the foreign engine path never sets it)
+    });
+
+    // improve-factory goal type — but target is foreign. Gate must fire.
+    const improveGoal = { ...baseGoal, id: 'g-hole-repro', type: 'improve-factory' };
+    const result = await tool.execute(improveGoal, {});
+
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('process-clean');
+  });
+
+  it('HOLE: improve-factory goal + repoSlug !== factoryRepoSlug is REFUSED even if factoryRepoSlug is set to something else', async () => {
+    // Sanity: even if factoryRepoSlug is configured but doesn't match repoSlug,
+    // the full gate applies.
+    const FACTORY_VOCAB_CONTENT = '`corellia` and `toolimpl` references.\n';
+
+    const mismatchWorktree = makeWorktree(
+      repo, 'tree/hole-mismatch', 'mismatch.md', FACTORY_VOCAB_CONTENT,
+    );
+
+    const tool = pushBranchTool({
+      worktreeRoot: mismatchWorktree,
+      branch: 'tree/hole-mismatch',
+      treeId: 'hole-mismatch',
+      store,
+      repoSlug: 'acme/cats',              // foreign repo
+      factoryRepoSlug: 'acme/corellia',   // factory slug set, but different from repoSlug
+    });
+
+    const improveGoal = { ...baseGoal, id: 'g-hole-mismatch', type: 'improve-factory' };
+    const result = await tool.execute(improveGoal, {});
+
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('process-clean');
+  });
+
+  it('factory-own-repo push (repoSlug === factoryRepoSlug) containing factory vocab SUCCEEDS', async () => {
+    // Confirm the narrowed gate allows factory vocabulary when the target is
+    // genuinely the factory's own repo.
+    const FACTORY_VOCAB_CONTENT = [
+      '# skill: improve-factory harness',
+      '',
+      'Uses `grant_tool_map`, `toolimpl`, `corellia` internals.',
+      'See docs/iterations/ and docs/adrs/ for context.',
+    ].join('\n');
+
+    const factoryWorktree = makeWorktree(
+      repo, 'tree/factory-own-ok', 'own-skill.md', FACTORY_VOCAB_CONTENT,
+    );
+
+    const tool = pushBranchTool({
+      worktreeRoot: factoryWorktree,
+      branch: 'tree/factory-own-ok',
+      treeId: 'factory-own-ok',
+      store,
+      repoSlug: 'acme/corellia',
+      factoryRepoSlug: 'acme/corellia',   // target IS the factory → narrow gate
+    });
+
+    const improveGoal = { ...baseGoal, id: 'g-factory-own-ok', type: 'improve-factory' };
+    const result = await tool.execute(improveGoal, {});
+
+    // Branch with factory vocabulary must land on the factory's own repo.
+    expect(result.ok).toBe(true);
   });
 });
 

@@ -199,6 +199,24 @@ export interface PushBranchDeps {
   treeId: string;
   /** Append `branch-pushed` to the log on success. */
   store: EventStore;
+  /**
+   * The GitHub `owner/repo` slug of the push target (the repo the PR will be
+   * opened against). Used by the process-clean gate to determine whether this
+   * push targets the factory's own repo. Should match `OpenPrDeps.repoSlug`
+   * at assembly time.
+   */
+  repoSlug?: string;
+  /**
+   * The GitHub `owner/repo` slug of the factory's own repo. When this equals
+   * `repoSlug`, the process-clean gate narrows to ALWAYS_DANGEROUS_PATTERNS
+   * (factory vocabulary is legitimate in factory-own-repo diffs). Absent or
+   * unequal → full gate (ALWAYS_DANGEROUS + FOREIGN_REPO_ONLY patterns).
+   *
+   * Security invariant: narrowing is keyed on the ACTUAL push target identity,
+   * not on goal.type. An improve-factory goal bound to a foreign repo slug
+   * still receives the full gate.
+   */
+  factoryRepoSlug?: string;
 }
 
 /**
@@ -211,7 +229,7 @@ export interface PushBranchDeps {
  *   5. A fast-forward repeat is allowed (git is idempotent for ff pushes).
  */
 export function pushBranchTool(deps: PushBranchDeps): ToolImpl {
-  const { worktreeRoot, branch, treeId, store } = deps;
+  const { worktreeRoot, branch, treeId, store, repoSlug, factoryRepoSlug } = deps;
 
   return {
     def: {
@@ -249,14 +267,21 @@ export function pushBranchTool(deps: PushBranchDeps): ToolImpl {
       //    push; a dirty diff refuses naming offending file:line; nothing reaches
       //    the remote.
       //
-      //    Target-aware pattern selection:
-      //      - improve-factory goal type → pushing to the factory's own repo.
-      //        Factory vocabulary (corellia, improve-factory, toolimpl, etc.) is
-      //        legitimate in factory source diffs. Apply only ALWAYS_DANGEROUS_PATTERNS
-      //        (goal-ids, run-specific refs) — never the foreign-repo vocabulary set.
-      //      - Any other goal type → pushing to a foreign product repo.
-      //        Apply the full PROCESS_CLEAN_PATTERNS set (always-dangerous + foreign-repo-only).
-      const isFactoryRepo = goal.type === 'improve-factory';
+      //    Target-aware pattern selection (security: keyed on ACTUAL push target,
+      //    NOT on goal.type):
+      //      - repoSlug === factoryRepoSlug (both set and equal) → this push's
+      //        declared target IS the factory's own repo. Factory vocabulary
+      //        (corellia, improve-factory, toolimpl, etc.) is legitimate in
+      //        factory source diffs. Apply only ALWAYS_DANGEROUS_PATTERNS.
+      //      - Otherwise (foreign repo, or factoryRepoSlug unset) → apply the full
+      //        PROCESS_CLEAN_PATTERNS set (always-dangerous + foreign-repo-only).
+      //        This is the safe default and covers the case where an improve-factory
+      //        goal tree is bound to a foreign repo slug — the gate does NOT narrow
+      //        based on goal.type alone.
+      const isFactoryRepo =
+        repoSlug !== undefined &&
+        factoryRepoSlug !== undefined &&
+        repoSlug === factoryRepoSlug;
       const patterns = isFactoryRepo ? ALWAYS_DANGEROUS_PATTERNS : undefined; // undefined → full set (default)
       const diff = getDiffForCleanCheck(worktreeRoot, branch);
       const cleanResult = scanDiffForProcessLanguage(diff, patterns);

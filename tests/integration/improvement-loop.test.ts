@@ -458,8 +458,10 @@ describe('improvement-loop e2e: AC 3 — generality routing (bare-repo PR path)'
     expect(prEvents2).toHaveLength(1);
   });
 
-  it('process-clean gate is target-aware: factory vocabulary allowed on improve-factory, blocked on foreign-repo', async () => {
+  it('process-clean gate is target-aware: factory vocabulary allowed when repoSlug === factoryRepoSlug, blocked otherwise', async () => {
     // This test pins BOTH directions of the target-aware gate (Fix 1 regression pin).
+    // Gate decision is keyed on ACTUAL push target (repoSlug vs factoryRepoSlug),
+    // NOT on goal.type — see security fix commit.
     withToken('ghp_fake_gate_test');
 
     // Shared: a temp repo + bare origin + a worktree containing factory vocabulary.
@@ -474,7 +476,9 @@ describe('improvement-loop e2e: AC 3 — generality routing (bare-repo PR path)'
       'internals. See docs/iterations/ and docs/adrs/ for context.',
     ].join('\n');
 
-    // ── Path A: improve-factory goal type → ALWAYS_DANGEROUS_PATTERNS only ──
+    const FACTORY_SLUG = 'acme/corellia';
+
+    // ── Path A: repoSlug === factoryRepoSlug → ALWAYS_DANGEROUS_PATTERNS only ──
     // Factory vocabulary in the diff must PASS so the factory can self-improve.
     const branchA = 'tree/gate-factory-a';
     const worktreeDirA = makeWorktree(repo, branchA, 'improve-skill.md', FACTORY_VOCAB_CONTENT);
@@ -484,6 +488,8 @@ describe('improvement-loop e2e: AC 3 — generality routing (bare-repo PR path)'
       branch: branchA,
       treeId: 'gate-factory-a',
       store: storeA,
+      repoSlug: FACTORY_SLUG,
+      factoryRepoSlug: FACTORY_SLUG, // target IS the factory → narrow gate
     });
 
     const factoryGoal: Goal = {
@@ -499,10 +505,11 @@ describe('improvement-loop e2e: AC 3 — generality routing (bare-repo PR path)'
     };
 
     const resultA = await pushToolA.execute(factoryGoal, {});
-    expect(resultA.ok).toBe(true); // Factory vocab allowed on factory-repo path.
+    expect(resultA.ok).toBe(true); // Factory vocab allowed when target is the factory repo.
 
-    // ── Path B: foreign-repo goal type → full PROCESS_CLEAN_PATTERNS ──
-    // Same factory vocabulary in a diff for a non-factory goal must be REFUSED.
+    // ── Path B: factoryRepoSlug unset (foreign repo) → full PROCESS_CLEAN_PATTERNS ──
+    // Same factory vocabulary for a push targeting a foreign repo must be REFUSED,
+    // even if goal.type === 'improve-factory'.
     const branchB = 'tree/gate-foreign-b';
     const worktreeDirB = makeWorktree(repo, branchB, 'leaked-vocab.md', FACTORY_VOCAB_CONTENT);
     const storeB = new InMemoryEventStore();
@@ -511,15 +518,12 @@ describe('improvement-loop e2e: AC 3 — generality routing (bare-repo PR path)'
       branch: branchB,
       treeId: 'gate-foreign-b',
       store: storeB,
+      repoSlug: 'acme/cats',
+      // factoryRepoSlug not set → full gate, regardless of goal.type
     });
 
-    const foreignGoal: Goal = {
-      ...factoryGoal,
-      id: 'deliver-gate-test',
-      type: 'implement', // foreign-repo type → full gate applies
-    };
-
-    const resultB = await pushToolB.execute(foreignGoal, {});
+    // Even with improve-factory goal type, the full gate fires on a foreign repo slug.
+    const resultB = await pushToolB.execute(factoryGoal, {});
     expect(resultB.ok).toBe(false); // Factory vocab blocked on foreign-repo path.
     expect(resultB.output).toContain('process-clean');
   });
