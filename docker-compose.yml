@@ -1,4 +1,8 @@
-# Start with: docker compose up -d postgres
+# Dev-only Postgres helper. Invoke EXPLICITLY with -f to avoid being shadowed
+# by compose.yaml (Docker Compose v2 prefers compose.yaml when both files exist):
+#
+#   docker compose -f docker-compose.yml up -d postgres
+#
 # Connect: DATABASE_URL=postgres://postgres:corellia@localhost:54329/postgres
 
 services:

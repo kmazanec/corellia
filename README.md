@@ -68,11 +68,15 @@ idempotent under retry.
 ### Starting Postgres with docker-compose
 
 ```bash
-docker compose up -d postgres
+docker compose -f docker-compose.yml up -d postgres
 ```
 
 This starts Postgres on port `54329` (non-standard to avoid colliding with any
 local Postgres on the default 5432).
+
+> **Note:** The `-f docker-compose.yml` flag is required because Docker Compose v2
+> prefers `compose.yaml` when both files are present. Without it, `docker compose up`
+> picks up `compose.yaml` (the full daemon stack) instead of the dev-only Postgres helper.
 
 ### DATABASE_URL convention
 
@@ -88,7 +92,7 @@ Call `ensureSchema()` once at startup before the first append or record.
 ### Running the integration tests
 
 ```bash
-docker compose up -d postgres
+docker compose -f docker-compose.yml up -d postgres
 DATABASE_URL=postgres://postgres:corellia@localhost:54329/postgres npx vitest run tests/substrate
 ```
 
