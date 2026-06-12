@@ -478,16 +478,55 @@ suite's CI gate status.
 
 ## Live evidence (operator to fill)
 
-### AC-2: live:foreign-eyes early checkpoint
+### AC-2: live:foreign-eyes early checkpoint result
 
-> Run `npm run live:foreign-eyes` with OPENROUTER_API_KEY and CATS_REPO_PATH set.
-> Paste the evidence template output below.
+**Date:** 2026-06-12 · **Target:** cats (/Users/keith/dev/gauntlet/cats) · **Run nonce:** a87862f4
 
-```
-PLACEHOLDER — operator to fill after running live:foreign-eyes
-```
+| Category | Result |
+|---|---|
+| architecture | FAIL — `step-loop:exhausted` (isomorphic → block) |
+| stack | FAIL — tokens budget exhausted |
+| conventions | FAIL — `step-loop:exhausted` (isomorphic → block) |
+| test-scaffold | FAIL — `step-loop:exhausted` (isomorphic → block) |
+| dive:src | FAIL — `step-loop:exhausted` (isomorphic → block) |
 
-**Decision:** [ ] Approve deliver spend   [ ] Root-cause failures first
+**0/5 categories passed.** Cost: **$1.2897** · Cache-hit share: **49.0%** (F-64
+pinning fired — up from 0.0% in iteration 04) · prompt 1,779,558 / completion
+14,101 tokens · 0 knowledge artifacts written.
+
+**Decision:** ✗ Root-cause first — deliver spend NOT approved. The gate did its
+job: it blocked AC-2/AC-3 spend against a comprehension layer that cannot yet
+comprehend cats.
+
+#### Root cause (confident)
+
+A **budget-shape mismatch**, not a code defect — the iteration-5 carried debt
+("models over-explore real repos; token/toolCall exhaustion") that iteration 6
+named but only half-addressed.
+
+- The harness sets `toolCalls: 20` per category (`examples/live-foreign-eyes.ts`
+  `DEFAULT_BUDGET`). The step loop seeds `remainingToolCalls = budget.toolCalls`
+  and returns `exhausted` at 0 (`engine.ts:1869`, `:1935`). On a real repo of
+  cats's size, 20 `list_dir`/`search`/`read_file` calls is not enough to map
+  `src/` **and** emit an artifact — the model exhausts exploration before it
+  produces. Every category fails with the identical `step-loop:exhausted`
+  signature → isomorphic-failure block.
+- **F-64 worked, but on the cost axis, not the discipline axis.** Cache-hit
+  share 0% → 49% and the duplicate-guard prevented wasted re-reads. The model
+  isn't being wasteful — it's under-provisioned. F-64 never claimed to grant
+  more exploration budget.
+- **Not a tier problem.** `map-repo`/`deep-dive-region` run
+  `tier: { default: 'mid', ladder: ['mid','high'] }` — they already escalate to
+  high on retry. "Isomorphic failure" means high failed identically to mid: a
+  stronger model with the same 20-call ceiling still can't finish. The ceiling,
+  not the model, is the wall.
+
+#### The fix is an iteration-7 brief (the unbuilt iter-5 lever)
+
+The remaining lever from iter-5's debt list: **per-category budget shapes** (and
+possibly a breadth-first index pass before the expensive read pass). This is a
+real design question, not a one-line bump — see the options recorded in the
+session and the next roadmap iteration.
 
 ### AC-3: live:self (corellia delivers to itself)
 
