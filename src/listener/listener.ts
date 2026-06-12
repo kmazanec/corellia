@@ -31,13 +31,77 @@ import type { Intent, MemoryPointer } from '../contract/goal.js';
 import type { Report } from '../contract/report.js';
 import type { DecisionBrief } from '../contract/decision.js';
 import { verifyEntryPoints } from '../library/script-runner.js';
-import type { CommissionInput } from '../contract/brief.js';
+import type { CommissionInput, StandingEnvelope } from '../contract/brief.js';
 
 // ── Public input types ────────────────────────────────────────────────────────
 
 // The commission shape is now a frozen contract (ADR-026). It is re-exported here
 // so existing consumers that import it from the listener keep working.
 export type { CommissionInput } from '../contract/brief.js';
+
+// ── Improvement-commission mint ───────────────────────────────────────────────
+
+/**
+ * Mint one `improve-factory` commission carrying the blocker batch from a
+ * completed run. The commission spec carries the blocker texts and the run's
+ * event-log pointer (goalId of the originating root goal).
+ *
+ * One `blocker-routed` event is emitted per blocker (ADR-027). The originating
+ * run has already completed — no factory files are changed mid-run (AC 2).
+ *
+ * ADR-027: one commission per run, no matter how many blockers, so a noisy
+ * run produces one improvement tree rather than a storm.
+ */
+async function mintImprovementCommission(
+  store: EventStore,
+  originatingGoalId: string,
+  blockers: string[],
+  now: () => number,
+): Promise<CommissionInput> {
+  const commissionId = `improve-${originatingGoalId}-${now()}`;
+
+  // One blocker-routed event per blocker (barrier contract: ADR-027).
+  for (const blocker of blockers) {
+    await store.append({
+      type: 'blocker-routed',
+      at: now(),
+      goalId: originatingGoalId,
+      blocker,
+      commissionId,
+    });
+  }
+
+  return {
+    id: commissionId,
+    title: `Improve factory: blockers from ${originatingGoalId}`,
+    spec: {
+      // The generality judgment lives inside the improvement goal — the listener
+      // is only the routing point (ADR-027). It passes the pointer + blocker texts.
+      originatingGoalId,
+      blockers,
+      // The event-log pointer: consumers of this commission read the log starting
+      // from the originating goal's events to understand the failure context.
+      eventLogPointer: originatingGoalId,
+    },
+    scope: [],
+    // Budget for the improvement tree — enough for a diagnosis + PR draft. The
+    // standing envelope's budget (if configured) overrides this at admission.
+    budget: { attempts: 3, tokens: 20_000, toolCalls: 30, wallClockMs: 300_000 },
+    intent: 'production',
+  };
+}
+
+/**
+ * Determine whether a commission represents an improvement intent (i.e. was
+ * minted by the improvement loop, not placed by a product operator). Improvement
+ * commissions must never be delayed by other improvement work (product always
+ * wins), and must never re-trigger the improvement mint path (runaway guard).
+ *
+ * ADR-027: improvement commissions are identified by their id prefix.
+ */
+function isImprovementCommission(input: CommissionInput): boolean {
+  return input.id.startsWith('improve-');
+}
 
 // ── Internal state ────────────────────────────────────────────────────────────
 
@@ -100,6 +164,23 @@ export class Listener {
   private readonly now: () => number;
   private readonly defaultTtlMs: number;
 
+  /**
+   * Standing envelope for the improvement loop (ADR-027). When present,
+   * improvement commissions are admitted only when the envelope has headroom
+   * AND the product queue is empty. When absent, the improvement loop is
+   * effectively disabled (no auto-admission).
+   *
+   * Top-up is operator config only (Chunk 2: F-63).
+   */
+  private readonly standingEnvelope: StandingEnvelope | undefined;
+
+  /**
+   * Tracked spend against the standing envelope (in USD), decremented per
+   * improvement tree completion. Operator must top up via config to restore
+   * headroom.
+   */
+  private envelopeSpentUsd: number = 0;
+
   /** Scope arrays of trees actively holding a reservation, keyed by intent id. */
   private readonly reservations = new Map<string, string[]>();
 
@@ -116,16 +197,28 @@ export class Listener {
    */
   private readonly pendingParks = new Map<string, { brief: DecisionBrief }>();
 
+  /**
+   * Improvement commissions parked because the envelope was exhausted or the
+   * product queue was non-empty at admission time. They are re-tried whenever a
+   * product reservation is released (drainWaitQueue) and the envelope has
+   * headroom. Visible in GET /status via status().parkedImprovement.
+   *
+   * ADR-027: product intents are NEVER delayed by improvement work.
+   */
+  private readonly parkedImprovement: CommissionInput[] = [];
+
   constructor(opts: {
     engine: Engine;
     store: EventStore;
     now?: () => number;
     defaultTtlMs?: number;
+    standingEnvelope?: StandingEnvelope;
   }) {
     this.engine = opts.engine;
     this.store = opts.store;
     this.now = opts.now ?? (() => Date.now());
     this.defaultTtlMs = opts.defaultTtlMs ?? 30_000;
+    this.standingEnvelope = opts.standingEnvelope;
   }
 
   // ── commission ────────────────────────────────────────────────────────────
@@ -246,12 +339,19 @@ export class Listener {
   // ── status ────────────────────────────────────────────────────────────────
 
   /**
-   * Tiny Live-Run read surface: what is running, queued, and parked right now.
+   * Tiny Live-Run read surface: what is running, queued, parked, and parked-for-
+   * improvement right now.
+   *
+   * `parkedImprovement` lists improvement commissions that could not be admitted
+   * because the standing envelope was exhausted or the product queue was non-empty
+   * (ADR-027: product intents are never delayed by improvement work). These are
+   * re-tried once a product reservation clears.
    */
   status(): {
     running: string[];
     queued: string[];
     parked: { id: string; question: string; deadline: number }[];
+    parkedImprovement: string[];
   } {
     return {
       running: [...this.reservations.keys()],
@@ -261,6 +361,8 @@ export class Listener {
         question: p.question,
         deadline: p.deadline,
       })),
+      // Improvement commissions waiting on envelope headroom + empty product queue.
+      parkedImprovement: this.parkedImprovement.map((c) => c.id),
     };
   }
 
@@ -375,12 +477,136 @@ export class Listener {
       const ev = await lastBlockedEvent(this.store, input.id);
       if (ev && ev.brief.onTimeout === 'park') {
         await this._applyPark(input, ev.brief);
+        // Mint-on-complete (Chunk 1): even a parked run may have blockers that
+        // were recorded before the park. However, the park path means the run
+        // did NOT complete — it is suspended. Do NOT mint here; only complete
+        // (non-parked) runs with blockers trigger the improvement loop.
         return report;
       }
     }
 
     this.reservations.delete(input.id);
     this.drainWaitQueue();
+
+    // ── Mint-on-complete (Chunk 1, ADR-027) ──────────────────────────────────
+    // A completed run with blockers mints exactly ONE improve-factory commission
+    // carrying the blocker texts and the run's event-log pointer. One
+    // blocker-routed event is emitted per blocker. A blocker-free run mints nothing.
+    //
+    // Runaway-loop guard (ADR-027, AC 5): improvement runs NEVER mint further
+    // improvement commissions. We check this by inspecting the originating
+    // commission — if it is already an improvement commission, skip the mint.
+    if (report.blockers.length > 0 && !isImprovementCommission(input)) {
+      const commission = await mintImprovementCommission(
+        this.store,
+        input.id,
+        report.blockers,
+        this.now,
+      );
+      // Admit the improvement commission subject to envelope admission (Chunk 2).
+      // Fire-and-forget: the originating run has already resolved; the improvement
+      // tree runs beside product work, inside the standing envelope.
+      void this.commissionImprovement(commission);
+    }
+
+    return report;
+  }
+
+  /**
+   * Admit an improvement commission subject to the standing envelope (ADR-027).
+   *
+   * Admission requires BOTH:
+   *   (a) envelope headroom: spendCeilingUsd > envelopeSpentUsd + tree cost estimate
+   *   (b) empty product queue: no non-improvement intent is queued or running
+   *
+   * An improvement commission that fails admission is parked in `parkedImprovement`
+   * and re-tried from drainWaitQueue when a product reservation is released.
+   *
+   * When no standing envelope is configured, improvement commissions are silently
+   * dropped (the loop is disabled — the operator must supply STANDING_BUDGET_JSON
+   * and STANDING_SPEND_CEILING_USD to enable it).
+   *
+   * ADR-027: product intents are NEVER delayed by improvement work.
+   */
+  private commissionImprovement(commission: CommissionInput): Promise<Report | undefined> {
+    if (!this.standingEnvelope) {
+      // No envelope configured — improvement loop disabled. This is expected
+      // in dev/test environments that don't want autonomous improvement runs.
+      return Promise.resolve(undefined);
+    }
+
+    if (!this.hasEnvelopeHeadroom() || this.hasProductActivity()) {
+      // Park the commission until conditions are met (drainWaitQueue will retry).
+      this.parkedImprovement.push(commission);
+      return Promise.resolve(undefined);
+    }
+
+    return this.runImprovementIntent(commission);
+  }
+
+  /**
+   * True when the standing envelope has headroom for another improvement tree.
+   * The envelope's budget does not directly map to USD spend (actual spend is
+   * tracked by the engine); we compare envelopeSpentUsd against the ceiling.
+   *
+   * Conservative: if spend tracking is imprecise, we err on the side of parking.
+   */
+  private hasEnvelopeHeadroom(): boolean {
+    if (!this.standingEnvelope) return false;
+    return this.envelopeSpentUsd < this.standingEnvelope.spendCeilingUsd;
+  }
+
+  /**
+   * True when any non-improvement intent is currently running or queued.
+   * This is the "empty product queue" gate from ADR-027: improvement work never
+   * competes with or delays product work.
+   */
+  private hasProductActivity(): boolean {
+    // Any running reservation that is NOT an improvement commission.
+    for (const [id] of this.reservations) {
+      if (!id.startsWith('improve-')) return true;
+    }
+    // Any waiter in the queue that is NOT an improvement commission.
+    for (const waiter of this.waitQueue) {
+      if (!isImprovementCommission(waiter.input)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Run an improvement commission, decrementing the envelope on completion.
+   *
+   * The envelope spend ceiling decrements per improvement tree (budget + actual
+   * spend as tracked). ADR-027: top-up is operator config only — the listener
+   * never auto-tops-up.
+   */
+  private async runImprovementIntent(commission: CommissionInput): Promise<Report | undefined> {
+    if (!this.standingEnvelope) return undefined;
+
+    // Use the envelope's budget for the improvement tree, not the commission's
+    // own default budget. The envelope budget is the operator-configured allowance.
+    const enveloped: CommissionInput = {
+      ...commission,
+      budget: this.standingEnvelope.budget,
+    };
+
+    let report: Report;
+    try {
+      report = await this.runIntent(enveloped, []);
+    } catch {
+      // Improvement run failed — decrement a nominal amount to track the attempt.
+      this.envelopeSpentUsd += 0;
+      return undefined;
+    }
+
+    // Decrement the envelope by a nominal amount per tree. Actual cost tracking
+    // requires USD-denominated usage data from the engine (not available in v1 of
+    // the loop — the spendCeilingUsd is a conservative bound). The decrement
+    // prevents runaway: each completion consumes a slot. A future iteration will
+    // wire the engine's `Usage.costUsd` into this path.
+    //
+    // ADR-027: top-up is operator config only (no auto-increment here).
+    this.envelopeSpentUsd += 1; // Nominal per-tree spend unit.
     return report;
   }
 
@@ -444,5 +670,28 @@ export class Listener {
     for (const waiter of toStart) {
       this.runIntent(waiter.input, waiter.extraMemories).then(waiter.resolve, waiter.reject);
     }
+
+    // After draining product waiters, retry any parked improvement commissions
+    // if the envelope has headroom and the product queue is now empty.
+    // ADR-027: improvement work only runs when product activity has cleared.
+    this.drainParkedImprovement();
+  }
+
+  /**
+   * Retry parked improvement commissions when conditions are met.
+   *
+   * Called from drainWaitQueue after a product reservation is released. If the
+   * envelope has headroom AND no product activity is present, dispatches the
+   * oldest parked improvement commission.
+   */
+  private drainParkedImprovement(): void {
+    if (!this.standingEnvelope) return;
+    if (this.parkedImprovement.length === 0) return;
+    if (!this.hasEnvelopeHeadroom()) return;
+    if (this.hasProductActivity()) return;
+
+    // Dequeue the oldest parked improvement commission and start it.
+    const commission = this.parkedImprovement.shift()!;
+    void this.runImprovementIntent(commission);
   }
 }

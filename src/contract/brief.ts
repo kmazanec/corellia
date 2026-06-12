@@ -67,6 +67,12 @@ export interface FrontDoorStatus {
   queued: string[];
   /** Intents parked on a brief, awaiting an answer or TTL sweep. */
   parked: ParkedBrief[];
+  /**
+   * Improvement commission ids parked on exhausted envelope or non-empty
+   * product queue (ADR-027). Visible here so operators can see when the
+   * improvement loop is backed up waiting for headroom or product idle.
+   */
+  parkedImprovement?: string[];
 }
 
 // ── The standing envelope ──────────────────────────────────────────────────────
