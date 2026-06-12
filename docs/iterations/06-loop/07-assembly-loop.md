@@ -142,24 +142,38 @@ cats checkout path must be set before chunk 4 or chunk 5.
 
 ## Implementation notes
 
-### Live engine wiring (replaces buildNullEngine for live commissions)
+### Live engine wiring — daemonized front door now delivers (AC-3)
 
-`src/daemon/live-engine.ts` exports `buildLiveEngine(opts: LiveEngineOptions)`.
-The null stub in `daemon.ts` is preserved (it rejects every run immediately) so
-`docker compose up` + the smoke script continue to work without OPENROUTER_API_KEY.
-For live commissions, operator-run harness scripts (`examples/live-*.ts`) call
-`buildLiveEngine()` directly instead of spawning the daemon process.
+`src/daemon/daemon.ts` wires `buildLiveEngine()` behind an env guard so the
+containerized daemon delivers real commissions when keyed, while preserving the
+keyless `docker compose up` smoke/healthcheck path (F-66).
 
-Wire path:
+**Env-guard behavior (implemented in `selectEngine()`):**
+- `OPENROUTER_API_KEY` **present** → `buildLiveEngine()` is constructed with
+  `store` (the daemon's substrate-selected store), `sandbox.repoRoot`
+  (CORELLIA_REPO_ROOT, default cwd), and `repoSlug` derived via `deriveRepoSlug()`.
+  The daemon logs: `[daemon] engine: live engine — commissions will be processed via OpenRouter`.
+  AC-3 is satisfied: POSTing to the containerized daemon commissions a real tree.
+- `OPENROUTER_API_KEY` **absent** → `buildNullEngine()` (stub that rejects every
+  run). The daemon logs: `[daemon] engine: null engine — commissions will be rejected;
+  set OPENROUTER_API_KEY to enable delivery`. The HTTP surface (healthcheck, /status)
+  remains fully operational — no crash on cold boot without a key.
+
+**Startup log behavior:** the selected engine mode is always logged at startup so
+operators can confirm which path is active without inspecting env vars directly.
+
+**Wire path (live mode):**
 - `LlmBrain` via `openRouterConfig()` (OPENROUTER_API_KEY required at runtime).
 - `starterTypes()` with `rebindKnowledgeScan()` for learn-goal architecture checks.
-- `assembleKnowledgeWiring()` when `opts.knowledge: true`.
-- `SandboxConfig.prBoundary` with `repoSlug` (from `deriveRepoSlug()`) and an
-  optional `fetchTransport` for test isolation.
+- `SandboxConfig.prBoundary` with `repoSlug` (from `deriveRepoSlug()`) when a
+  GitHub remote is detected; omitted (no push_branch/open_pr) if no remote.
 - `goldenCapture: true` for all live runs (ADR-024).
+- The daemon's substrate-selected store (`buildStore()`) is shared between the
+  Listener and the Engine — one event log for the whole process.
 
-The Listener wraps the Engine and the daemon's substrate-selected store; the
-improvement loop uses `buildStandingEnvelope()` from `src/daemon/config.ts`.
+The improvement loop uses `buildStandingEnvelope()` from `src/daemon/config.ts`.
+Operator-run harness scripts (`examples/live-*.ts`) continue to call
+`buildLiveEngine()` directly and do not go through the daemon process.
 
 ### Convergence suite fixtures (chunk 2)
 

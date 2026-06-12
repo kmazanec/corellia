@@ -30,6 +30,7 @@ import { preserveTree, sanitizeTreeId } from '../engine/worktree.js';
 import type { Engine } from '../engine/engine.js';
 import { FrontDoorServer } from './http-server.js';
 import { buildStore, buildStandingEnvelope } from './config.js';
+import { buildLiveEngine, deriveRepoSlug } from './live-engine.js';
 import { join } from 'node:path';
 
 // ── Load env ─────────────────────────────────────────────────────────────────
@@ -55,6 +56,69 @@ if (standingEnvelope) {
   console.log('[daemon] standing envelope:', JSON.stringify(standingEnvelope));
 }
 
+// ── Engine selection (env-guarded) ────────────────────────────────────────────
+
+/**
+ * A stub engine used when OPENROUTER_API_KEY is absent.
+ *
+ * For the daemon's keyless smoke/healthcheck path (docker compose up without
+ * a real API key) this prevents the process from crashing at startup.
+ * The stub rejects every run immediately so commissioned intents do not silently
+ * succeed without a real brain.
+ *
+ * When OPENROUTER_API_KEY IS present, buildLiveEngine() is used instead and this
+ * stub is never constructed.
+ */
+function buildNullEngine(): Engine {
+  return {
+    run: (_goal: unknown) =>
+      Promise.reject(
+        new Error(
+          'No engine configured — set OPENROUTER_API_KEY to enable live commission delivery',
+        ),
+      ),
+  } as unknown as Engine;
+}
+
+/**
+ * Select the engine based on environment:
+ *   - OPENROUTER_API_KEY present → buildLiveEngine() (real LLM delivery, AC-3)
+ *   - OPENROUTER_API_KEY absent  → buildNullEngine() (keyless smoke/healthcheck path)
+ *
+ * The repo root for the live engine is CORELLIA_REPO_ROOT (default: cwd).
+ * If the repo root is not a git repository, the daemon logs a warning and falls
+ * back to the null engine rather than crashing — the HTTP surface stays up.
+ */
+function selectEngine(): Engine {
+  const apiKey = process.env['OPENROUTER_API_KEY'];
+  if (!apiKey) {
+    console.log('[daemon] engine: null engine — commissions will be rejected; set OPENROUTER_API_KEY to enable delivery');
+    return buildNullEngine();
+  }
+
+  try {
+    const repoRoot = process.env['CORELLIA_REPO_ROOT'] ?? process.cwd();
+    const repoSlug = deriveRepoSlug(repoRoot);
+    const sandbox = {
+      repoRoot,
+      declaredScripts: {},
+      ...(repoSlug ? { prBoundary: { repoSlug } } : {}),
+    };
+    const engine = buildLiveEngine({ store, sandbox, goldenCapture: true });
+    console.log('[daemon] engine: live engine — commissions will be processed via OpenRouter');
+    if (repoSlug) {
+      console.log(`[daemon] engine: target repo slug: ${repoSlug}`);
+    } else {
+      console.log('[daemon] engine: no GitHub remote detected; push_branch/open_pr will not be available');
+    }
+    return engine;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[daemon] engine: failed to build live engine (${msg}); falling back to null engine`);
+    return buildNullEngine();
+  }
+}
+
 // ── Listener (the single brief authority — ADR-008) ───────────────────────────
 
 /**
@@ -62,31 +126,7 @@ if (standingEnvelope) {
  * REPL mode (when enabled) route through this same instance — there is no
  * second Listener anywhere in the process (ADR-008 invariant).
  */
-const listener = new Listener({ engine: buildNullEngine(), store });
-
-/**
- * A stub engine used when no real engine is configured.
- *
- * A production deployment supplies a real Engine (built with an LLM brain,
- * a registry, etc.). For the daemon's own use — particularly the SIGTERM test
- * that spawns a child and only needs the HTTP surface to respond — a minimal
- * null engine prevents the process from crashing at startup. F-67 replaces
- * this with real engine construction by importing and extending this file.
- *
- * The stub rejects every run so that commissioned intents do not silently
- * succeed without a real brain. Callers that want a live engine should wire
- * it via the REPL path or extend daemon.ts.
- */
-function buildNullEngine(): Engine {
-  return {
-    run: (_goal: unknown) =>
-      Promise.reject(
-        new Error(
-          'No engine configured — start the daemon via a live entrypoint that wires a real Engine',
-        ),
-      ),
-  } as unknown as Engine;
-}
+const listener = new Listener({ engine: selectEngine(), store });
 
 // ── HTTP server ───────────────────────────────────────────────────────────────
 
