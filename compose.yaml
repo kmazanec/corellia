@@ -1,0 +1,82 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Corellia — daemon + Postgres (F-66)
+#
+# `docker compose up` brings up the front-door daemon and its Postgres
+# substrate. The daemon runs via tsx (the image has no compiled dist/ — see
+# Dockerfile). Schema migration fires on cold boot: daemon.ts calls
+# store.ensureSchema() when DATABASE_URL is set, which runs the Pg store's
+# CREATE TABLE IF NOT EXISTS path (src/substrate/pg-event-store.ts).
+#
+# SECRETS (ADR-012): every secret arrives via env_file ONLY. There are NO
+# literal secret values in this file or in the image. Copy .env.example to
+# .env and populate it before `docker compose up`.
+#
+# The healthcheck hits GET /status with the bearer token and expects HTTP 200.
+# The bearer token is read from the daemon container's own FRONT_DOOR_TOKEN
+# env (sourced from .env via env_file) — never hard-coded here.
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    # POSTGRES_PASSWORD is supplied via .env (env_file) — no literal here.
+    env_file:
+      - .env
+    volumes:
+      - corellia-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # pg_isready gates the daemon's depends_on so migration never races an
+      # unready database on cold boot.
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER:-postgres}"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  daemon:
+    build:
+      context: .
+      target: runtime
+    restart: unless-stopped
+    # ALL config — including FRONT_DOOR_TOKEN, DATABASE_URL, GITHUB_TOKEN, and
+    # the envelope vars — is supplied via .env (env_file). No `environment:`
+    # secret literals (ADR-012).
+    env_file:
+      - .env
+    ports:
+      # Publish the front door. FRONT_DOOR_PORT defaults to 8080 in the daemon;
+      # the host-side port is operator-overridable via HOST_PORT in .env.
+      - '${HOST_PORT:-8080}:8080'
+    volumes:
+      # Mount the target repo the factory operates on. TARGET_REPO_PATH is set
+      # in .env; the container sees it at /workspace. v1 constraint: the target
+      # repo must be a Node/TypeScript project (the image ships Node only).
+      - '${TARGET_REPO_PATH:-./}:/workspace'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # GET /status with the bearer token must return HTTP 200. We use wget
+      # (present in node:slim via busybox? no — use node itself) to avoid an
+      # extra dependency: a tiny node one-liner that exits non-zero on != 200.
+      # NOTE: $$ escapes compose interpolation so the literal ${...} reaches
+      # node's template strings. The token is read from the container env
+      # (FRONT_DOOR_TOKEN, via env_file) — never written here.
+      test:
+        - CMD
+        - node
+        - '-e'
+        - >
+          const t=process.env.FRONT_DOOR_TOKEN;
+          const p=process.env.FRONT_DOOR_PORT||8080;
+          fetch(`http://127.0.0.1:$${p}/status`,{headers:{authorization:`Bearer $${t}`}})
+            .then(r=>process.exit(r.status===200?0:1))
+            .catch(()=>process.exit(1));
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+volumes:
+  corellia-pgdata:
