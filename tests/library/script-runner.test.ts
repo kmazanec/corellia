@@ -65,6 +65,22 @@ const baseGoal: Goal = {
 
 // ── Chunk 1: ScriptRunner core ───────────────────────────────────────────────
 
+describe('npm-script declared entries', () => {
+  it('runs an npm-script:<name> entry via the package manager, shell-free', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'runner-npm-'));
+    writeFileSync(join(repo, 'package.json'), JSON.stringify({
+      name: 'fixture', version: '0.0.0',
+      scripts: { ok: 'node -e "process.exit(0)"', bad: 'node -e "process.exit(3)"' },
+    }));
+    const runner = createScriptRunner(repo, { ok: 'npm-script:ok', bad: 'npm-script:bad' });
+    const green = await runner.run('ok', 60_000);
+    expect(green.exitStatus).toBe(0);
+    const red = await runner.run('bad', 60_000);
+    expect(red.exitStatus).toBe(3);
+    rmSync(repo, { recursive: true, force: true });
+  });
+});
+
 describe('createScriptRunner — green script', () => {
   it('returns ok:true with exit status 0 and captured output', async () => {
     const repoRoot = makeTmp();

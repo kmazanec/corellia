@@ -67,14 +67,22 @@ export function createScriptRunner(
         });
       }
 
-      const scriptPath = join(repoRoot, entryPoint);
+      // Two declared-entry forms, both name-based and shell-free:
+      //   "npm-script:<name>"  -> execute via the package manager (npm run <name>),
+      //                           the form package.json scripts actually require;
+      //   anything else        -> a repo-relative node script file path.
+      const npmScript = entryPoint.startsWith('npm-script:')
+        ? entryPoint.slice('npm-script:'.length)
+        : null;
+      const command = npmScript !== null ? 'npm' : process.execPath;
+      const args = npmScript !== null ? ['run', npmScript] : [join(repoRoot, entryPoint)];
       const started = Date.now();
 
       return new Promise<ScriptResult>((resolve) => {
         const chunks: Buffer[] = [];
         let settled = false;
 
-        const child = spawn(process.execPath, [scriptPath], {
+        const child = spawn(command, args, {
           cwd: repoRoot,
           shell: false,
           stdio: ['ignore', 'pipe', 'pipe'],

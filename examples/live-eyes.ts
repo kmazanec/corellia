@@ -92,7 +92,8 @@ function detectTestScript(repo: string): { name: string; entry: string } | null 
   try {
     const pkg = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')) as { scripts?: Record<string, string> };
     if (pkg.scripts && typeof pkg.scripts['test'] === 'string') {
-      return { name: 'test', entry: pkg.scripts['test'] };
+      // package.json scripts run through the package manager, by name.
+      return { name: 'test', entry: 'npm-script:test' };
     }
   } catch {
     /* no package.json */
@@ -175,7 +176,7 @@ const diveRegion = pickDiveRegion(targetRepo);
 const DEFAULT_BUDGET = {
   attempts: 3,
   tokens: 500_000,
-  toolCalls: 40,
+  toolCalls: 16,
   wallClockMs: 600_000,
 };
 
