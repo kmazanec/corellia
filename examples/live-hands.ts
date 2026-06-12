@@ -123,6 +123,8 @@ const engine = new Engine({
   store,
   memory,
   sandbox: { repoRoot, declaredScripts: { test: 'check.mjs' } },
+  // This is a real run — accrue golden candidates (ADR-024) at every judge verdict.
+  goldenCapture: true,
 });
 
 // ---------------------------------------------------------------------------
@@ -259,8 +261,15 @@ const cost = costSummary(allEvents);
 console.log(`  prompt tokens:     ${cost.tree.promptTokens}`);
 console.log(`  completion tokens: ${cost.tree.completionTokens}`);
 console.log(
+  `  cache-hit share:   ${cost.tree.cacheHitShare === undefined ? '(no cached tokens reported)' : (cost.tree.cacheHitShare * 100).toFixed(1) + '%'}`,
+);
+console.log(
   `  total cost:        ${cost.tree.costUsd === undefined ? '(no cost reported)' : '$' + cost.tree.costUsd.toFixed(4)}`,
 );
+
+// Golden candidates captured this run (ADR-024) — one per judge verdict.
+const goldenCount = allEvents.filter((e) => e.type === 'golden-candidate').length;
+console.log(`  golden candidates: ${goldenCount}`);
 
 // ---------------------------------------------------------------------------
 // Outcome

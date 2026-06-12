@@ -188,17 +188,10 @@ function mapGoal(category: KnowledgeCategory): Goal {
     spec: {
       repoRoot: targetRepo,
       category,
-      description:
-        `Map the "${category}" knowledge of the repo. ` +
-        `Emit a KnowledgeArtifact as JSON: { repoRoot, category: "${category}", generatedAtSha (current HEAD), ` +
-        `confidence, status: "provisional", pointers: [{path, line?, note}], summary }. ` +
-        (category === 'architecture'
-          ? `For architecture, point at the real entry/module files; every pointer path must exist and at least one must appear in the import graph. `
-          : category === 'stack'
-            ? `For stack, point at the manifest; encode version claims in a pointer note as "version:<name>@<version>". `
-            : category === 'conventions'
-              ? `For conventions, point at exemplar files that demonstrate the project's conventions. `
-              : `For test-scaffold, read package.json, run the test script AT MOST ONCE via run_script, then emit immediately; include a pointer whose note contains "script:test". `),
+      // Task intent only. The KnowledgeArtifact envelope is guaranteed by the
+      // type's outputSchema (structured emission, ADR-023) and the per-category
+      // craft lives in the comprehend family skill — no need to recite either here.
+      description: `Map the "${category}" knowledge of the repo at ${targetRepo}.`,
     },
     intent: 'production',
     scope: [],
@@ -216,10 +209,9 @@ function diveGoal(region: string): Goal {
     spec: {
       repoRoot: targetRepo,
       region,
-      description:
-        `Deep-dive the region "${region}". ` +
-        `Emit RegionFacts as JSON: { repoRoot, region: "${region}", ` +
-        `generatedAtSha (current HEAD), facts: [{ claim, anchors: [{path, line}], sha, confidence }] }.`,
+      // Task intent only. The RegionFacts envelope is guaranteed by the type's
+      // outputSchema and the anchoring craft lives in the comprehend family skill.
+      description: `Deep-dive the region "${region}" of the repo at ${targetRepo}.`,
     },
     intent: 'production',
     scope: [region],
@@ -273,6 +265,8 @@ async function runLearnGoal(goal: Goal, label: string): Promise<void> {
     memory: { query: async (topic: string, scope: string[]) => projectMemory(await store.list()).query(topic, scope) },
     sandbox: { repoRoot: targetRepo, ...sandboxBase },
     knowledge: assembleKnowledgeWiring({ repoRoot: targetRepo, ...sandboxBase }, store, registry),
+    // This is a real run — accrue golden candidates (ADR-024) at every judge verdict.
+    goldenCapture: true,
   });
 
   let report;
@@ -382,7 +376,12 @@ console.log('── cost summary (from event usage) ─────────�
 const cost = costSummary(finalEvents);
 console.log(`  prompt tokens:     ${cost.tree.promptTokens}`);
 console.log(`  completion tokens: ${cost.tree.completionTokens}`);
+console.log(`  cache-hit share:   ${cost.tree.cacheHitShare === undefined ? '(no cached tokens reported)' : (cost.tree.cacheHitShare * 100).toFixed(1) + '%'}`);
 console.log(`  total cost:        ${cost.tree.costUsd === undefined ? '(no cost reported)' : '$' + cost.tree.costUsd.toFixed(4)}`);
+// Golden candidates captured this run (ADR-024) — one per judge verdict; learn
+// types have no judge, so this is typically zero unless a judged leaf ran.
+const goldenCount = finalEvents.filter((e) => e.type === 'golden-candidate').length;
+console.log(`  golden candidates: ${goldenCount}`);
 console.log('');
 console.log('live:eyes complete. The target repo was left byte-identical (worktrees + branches torn down).');
 console.log('');
