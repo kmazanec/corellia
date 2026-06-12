@@ -16,7 +16,8 @@ import http from 'node:http';
 import { Readable, Writable } from 'node:stream';
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import type { FactoryEvent, EventStore } from '../../src/contract/events.js';
 import type { Goal } from '../../src/contract/goal.js';
@@ -26,6 +27,13 @@ import type { CommissionInput, FrontDoorStatus } from '../../src/contract/brief.
 import { FrontDoorServer } from '../../src/daemon/http-server.js';
 import { startRepl } from '../../src/daemon/repl.js';
 import { buildStore } from '../../src/daemon/config.js';
+
+// Resolve the repo root and tsx CLI from this file's location, so the daemon
+// spawns from whatever worktree the suite runs in (never a hardcoded path) and
+// launches via the running node binary + tsx's CLI (never `npx`, absent on the
+// spawned child's PATH).
+const REPO_ROOT = resolve(fileURLToPath(import.meta.url), '../../..');
+const TSX_CLI = resolve(REPO_ROOT, 'node_modules/tsx/dist/cli.mjs');
 
 // ── Stubs ─────────────────────────────────────────────────────────────────────
 
@@ -423,8 +431,8 @@ describe('AC 5 — SIGTERM: exit 0 + preserved worktree events', () => {
       const tok = 'int-sigterm-tok';
       const port = 19_200 + Math.floor(Math.random() * 800);
 
-      const child = spawn('npx', ['tsx', 'src/daemon/daemon.ts'], {
-        cwd: '/Users/keith/dev/gauntlet/corellia/.claude/worktrees/06-loop-f62',
+      const child = spawn(process.execPath, [TSX_CLI, 'src/daemon/daemon.ts'], {
+        cwd: REPO_ROOT,
         env: {
           ...process.env,
           FRONT_DOOR_TOKEN: tok,

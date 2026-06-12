@@ -16,9 +16,17 @@ import { describe, it, expect } from 'vitest';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import http from 'node:http';
 import type { FactoryEvent } from '../../src/contract/events.js';
+
+// Resolve the repo root and the tsx CLI from this test file's own location, so
+// the daemon spawns correctly from whatever worktree the suite runs in (never a
+// hardcoded path), and is launched via the running node binary + tsx's CLI
+// entrypoint (never `npx`, which is not guaranteed on the spawned child's PATH).
+const REPO_ROOT = resolve(fileURLToPath(import.meta.url), '../../..');
+const TSX_CLI = resolve(REPO_ROOT, 'node_modules/tsx/dist/cli.mjs');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -82,10 +90,10 @@ describe('SIGTERM: clean shutdown with preserved worktrees', () => {
       // Spawn the daemon as a child process.
       // We use tsx so we can run the TypeScript source directly.
       const child = spawn(
-        'npx',
-        ['tsx', 'src/daemon/daemon.ts'],
+        process.execPath,
+        [TSX_CLI, 'src/daemon/daemon.ts'],
         {
-          cwd: '/Users/keith/dev/gauntlet/corellia/.claude/worktrees/06-loop-f62',
+          cwd: REPO_ROOT,
           env: {
             ...process.env,
             FRONT_DOOR_TOKEN: token,
