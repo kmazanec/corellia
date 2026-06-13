@@ -31,6 +31,9 @@ export interface FamilySkill {
 /** In-memory cache: family name → parsed FamilySkill. */
 const cache = new Map<string, FamilySkill | null>();
 
+/** In-memory cache for the shared preamble (undefined = not yet loaded). */
+let sharedPreambleCache: string | undefined = undefined;
+
 /**
  * Load the skill bundle for a family. Returns a {@link FamilySkill} when the
  * file exists, or null when it is absent (the constitution lint catches real
@@ -93,9 +96,30 @@ function extractSection(markdown: string, typeName: string): string | null {
 }
 
 /**
+ * Load the shared preamble from `_shared.md`. Returns the full file text when
+ * the file exists, or an empty string when it is absent (the engine stays
+ * lenient). The result is cached after the first load — repeated calls are free.
+ */
+export function loadSharedPreamble(): string {
+  if (sharedPreambleCache !== undefined) {
+    return sharedPreambleCache;
+  }
+
+  const filePath = join(SKILLS_DIR, '_shared.md');
+  if (!existsSync(filePath)) {
+    sharedPreambleCache = '';
+    return '';
+  }
+
+  sharedPreambleCache = readFileSync(filePath, 'utf8');
+  return sharedPreambleCache;
+}
+
+/**
  * Clear the loader cache. Intended for tests that need isolated loader state.
  * Not part of the production surface.
  */
 export function _clearSkillCache(): void {
   cache.clear();
+  sharedPreambleCache = undefined;
 }
