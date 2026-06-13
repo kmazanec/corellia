@@ -1,6 +1,6 @@
 # Build plan — Layered conventions
 
-**Status:** Draft (pending human approval) · **Iteration goal:** a code-writing
+**Status:** Approved · **Approved by:** Keith (conversation, 2026-06-12) · **Iteration goal:** a code-writing
 goal carries the factory's global conventions AND the relevant slice of the host
 repo's `AGENTS.md`/`CLAUDE.md`, with the host overriding global on conflict;
 "comments are timeless" reaches the factory at runtime via the shared preamble. ·
