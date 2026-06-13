@@ -97,7 +97,7 @@ both sites anyway.
 
 ---
 
-- [ ] **Chunk 1 — `_shared.md` source file + `loadSharedPreamble()` loader:**
+- [x] **Chunk 1 — `_shared.md` source file + `loadSharedPreamble()` loader:**
   create `src/library/skills/_shared.md` with the "comments are timeless"
   convention (and any other cross-cutting advisory conventions identified at
   build time); add `loadSharedPreamble(): string` to `src/library/skills.ts`
@@ -111,7 +111,7 @@ both sites anyway.
   duplicate of an enforced rule; contract touchpoint: `src/library/skills.ts`
   public surface gains `loadSharedPreamble`.
 
-- [ ] **Chunk 2 — `conventionsBlock` injection in `runStepLoop` (engine.ts):**
+- [x] **Chunk 2 — `conventionsBlock` injection in `runStepLoop` (engine.ts):**
   declare `const conventionsBlock: string` in `runStepLoop` immediately after
   `memoryLines` (~:1932); set it by calling `loadSharedPreamble()` when
   `typeDef.kind === 'make'`, empty string otherwise; append it to the content
@@ -123,7 +123,7 @@ both sites anyway.
   does NOT contain it; contract touchpoint: `conventionsBlock` seam (frozen
   below — F-69 consumes).
 
-- [ ] **Chunk 3 — CLAUDE.md migration:**
+- [x] **Chunk 3 — CLAUDE.md migration:**
   move "comments are timeless" out of the factory's outer `CLAUDE.md` as the
   operative rule into `_shared.md` (chunk 1's file); `CLAUDE.md` keeps only a
   pointer ("cross-cutting code conventions live in
@@ -226,3 +226,37 @@ machine-enforced ceilings.
   a follow-on concern, not an AC here.
 
 ## Implementation notes
+
+**`_shared.md` location:** `src/library/skills/_shared.md`. The `_` prefix is
+safe — `loadFamilySkill` uses an explicit `join(SKILLS_DIR, \`${family}.md\`)` path
+and never globs the directory, so `_shared` cannot be accidentally loaded as a
+family.
+
+**Loader cache discipline:** `loadSharedPreamble()` in `src/library/skills.ts`
+uses a module-level `sharedPreambleCache: string | undefined` sentinel (distinct
+from the family `cache` Map). `undefined` = not yet loaded; `''` = file was
+absent; any non-empty string = cached content. `_clearSkillCache()` resets both
+caches so tests can isolate loader state.
+
+**Exact `conventionsBlock` declaration as committed (F-69 builds against this):**
+
+```ts
+const conventionsBlock: string =
+  typeDef.kind === 'make'
+    ? `\n\nShared conventions (quoted data — advisory context to weigh; ` +
+      `a host repo's conventions override these on conflict):\n` +
+      loadSharedPreamble()
+    : '';
+```
+
+Declared in `runStepLoop` in `src/engine/engine.ts`, immediately after
+`memoryLines` is assigned. Appended in the content concatenation between
+`memoryLines` and `priorEvidenceBlock`.
+
+**`enrichRubric` not touched:** confirmed. The judge harness at `~:1761` in
+`engine.ts` was not modified. Judge families do not receive the shared preamble.
+
+**Empty-string contract:** when `loadSharedPreamble()` returns `''` (file absent),
+`conventionsBlock` is `''` and the content concatenation is unaffected — the
+string concatenation of `'' + priorEvidenceBlock` is identical to
+`priorEvidenceBlock` alone.
