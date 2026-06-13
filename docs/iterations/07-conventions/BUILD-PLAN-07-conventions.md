@@ -1,6 +1,6 @@
 # Build plan — Layered conventions
 
-**Status:** Approved · **Approved by:** Keith (conversation, 2026-06-12) · **Iteration goal:** a code-writing
+**Status:** Built · **Approved by:** Keith (conversation, 2026-06-12) · **Iteration goal:** a code-writing
 goal carries the factory's global conventions AND the relevant slice of the host
 repo's `AGENTS.md`/`CLAUDE.md`, with the host overriding global on conflict;
 "comments are timeless" reaches the factory at runtime via the shared preamble. ·
@@ -91,3 +91,26 @@ The comprehension-must-recurse structural fix (recorded in
 `docs/prototype-build-notes.md` from the AC-2 eyes-on-cats result) is an
 independent candidate for this iteration or its own. Not planned here; the human
 decides its scope before building.
+
+## Outcome (built 2026-06-12)
+
+Both features Shipped on `build/07-conventions`, linear by construction.
+
+- **F-68** — `_shared.md` + `loadSharedPreamble()` + `conventionsBlock` injection
+  (`kind === 'make'` gate); "comments are timeless" moved out of `CLAUDE.md` into
+  `_shared.md`, now read by the factory at runtime. +10 tests.
+- **F-69** — `loadHostConventions()` (AGENTS.md > CLAUDE.md, operational-strip,
+  8000-char cap, lenient `''` on any failure incl. binary/oversized/unreadable)
+  + the in-place seam edit with the `_activeAssembly !== undefined` guard. +23 tests.
+
+**Final gate:** typecheck clean · lint ok · `vitest run --no-file-parallelism`
+**1379 passed / 21 skipped / 0 failed** (1346 baseline + 33).
+
+**Review:** the plan-phase opus critique caught the one structural defect (the
+`_activeAssembly` null dereference) before any code was written; the builder
+pinned it with a no-sandbox-make test. The post-build opus review found **no
+gating issues — mergeable as-is**, independently verifying the guard, the
+failure-safety of `loadHostConventions`, the trust posture (foreign host file is
+data-to-weigh, derives no authority), the empty-string/no-regression contract,
+and that `enrichRubric` (judges) is untouched. Three minor non-gating notes
+accepted for v1.

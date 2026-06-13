@@ -4,14 +4,14 @@ title: "Host-conventions reader (repo layer + override)"
 iteration: 07-conventions
 type: implement
 intent: production
-status: Not started
+status: Shipped
 dependsOn: [F-68]
 contracts: [ADR-028]
 ---
 
 # Feature: Host-conventions reader (repo layer + override)
 
-**ID:** F-69 · **Iteration:** 07-conventions · **Status:** Not started
+**ID:** F-69 · **Iteration:** 07-conventions · **Status:** Shipped
 
 ## What this delivers (before → after)
 **Before:** the target repo's `AGENTS.md`/`CLAUDE.md` — the tool-neutral place a

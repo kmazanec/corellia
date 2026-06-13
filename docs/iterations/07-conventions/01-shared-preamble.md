@@ -4,14 +4,14 @@ title: "Shared skill preamble (global convention layer)"
 iteration: 07-conventions
 type: implement
 intent: production
-status: Not started
+status: Shipped
 dependsOn: []
 contracts: [ADR-028, ADR-022]
 ---
 
 # Feature: Shared skill preamble (global convention layer)
 
-**ID:** F-68 · **Iteration:** 07-conventions · **Status:** Not started
+**ID:** F-68 · **Iteration:** 07-conventions · **Status:** Shipped
 
 ## What this delivers (before → after)
 **Before:** global factory conventions can only live in per-family skill files
