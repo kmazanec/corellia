@@ -172,7 +172,7 @@ file is read from the source checkout. Read from `worktree.repoRoot`, never from
 
 ---
 
-- [ ] Chunk 1 — `loadHostConventions` module: create `src/engine/host-conventions.ts`
+- [x] Chunk 1 — `loadHostConventions` module: create `src/engine/host-conventions.ts`
   with `loadHostConventions(repoRoot: string): string`; implements file search
   (AGENTS.md > CLAUDE.md fallback), operational-section stripping, and the 8 000-char
   cap with truncation suffix. **Lenient on every failure** (matching
@@ -187,7 +187,7 @@ file is read from the source checkout. Read from `worktree.repoRoot`, never from
   oversized-on-disk → `''`); contract touchpoint: exported function signature
   `(repoRoot: string) => string` is the seam boundary.
 
-- [ ] Chunk 2 — Engine injection: **edit F-68's `conventionsBlock` declaration in
+- [x] Chunk 2 — Engine injection: **edit F-68's `conventionsBlock` declaration in
   place** in `runStepLoop` (`src/engine/engine.ts`) per the seam shown above —
   add the `hostConventions` binding (gated
   `typeDef.kind === 'make' && this._activeAssembly !== undefined`) and append its
@@ -200,7 +200,7 @@ file is read from the source checkout. Read from `worktree.repoRoot`, never from
   global-only block; contract touchpoint: F-68 `conventionsBlock` shape (host text
   appended, never prepended; edited in place).
 
-- [ ] Chunk 3 — Override precedence and trust tests: add tests to
+- [x] Chunk 3 — Override precedence and trust tests: add tests to
   `tests/engine/conventions-injection.test.ts` (or a sibling) that (a) place a host
   rule that contradicts a shared-preamble rule and assert "Host repo conventions
   (override global on conflict):" label appears with the host rule after the global
@@ -209,7 +209,7 @@ file is read from the source checkout. Read from `worktree.repoRoot`, never from
   contract touchpoint: posture label string is a contract — changing it requires a
   plan update.
 
-- [ ] Chunk 4 — No-file and greenfield path tests: add a dedicated integration path
+- [x] Chunk 4 — No-file and greenfield path tests: add a dedicated integration path
   to `tests/engine/conventions-injection.test.ts` that sets `repoRoot` to a temp
   dir with no AGENTS.md and no CLAUDE.md; asserts the final `conventionsBlock` is
   identical to what F-68 alone would produce (i.e. host additions are absent);
@@ -246,3 +246,36 @@ change to the model's stated precedence understanding.
   throw or skip gracefully if not.
 
 ## Implementation notes
+
+**File-resolution rule:** AGENTS.md is read first and is authoritative. If
+absent, CLAUDE.md is tried as a fallback. If both are present only AGENTS.md
+is used. If neither is present `loadHostConventions` returns `''`. The rule is
+implemented in `tryReadFile` (returns null on any failure, including absent
+files) called in sequence inside a try/catch that itself returns `''` on any
+unexpected error.
+
+**Strip + cap + lenient-read mechanics:**
+- `stripOperationalSections` walks lines and drops any section whose heading
+  matches one of `Commands | Bash | Shell | Hooks | Permissions | Tools | MCP |
+  Settings` (any ATX heading depth). A skipping state tracks depth so nested
+  content under a matched heading is also dropped. This is a noise-reduction
+  heuristic, NOT a security boundary (noted in a JSDoc comment).
+- `applyContextCap` truncates at the last newline before the 8 000th character
+  and appends `[… truncated — host file exceeds 8 000-char budget]`.
+- Lenient-read: `tryReadFile` uses `statSync` to check file size before
+  reading (skip if > 512 KB). NUL bytes in the decoded string → treated as
+  binary → `null`. Any `readFileSync` or `statSync` error → `null`. The outer
+  `loadHostConventions` wraps everything in try/catch → `''` so the harness
+  is never exposed to a thrown exception from host-file reads.
+
+**F-68 conventionsBlock edited in place (not redeclared):**
+The existing `const conventionsBlock: string =` declaration in
+`src/engine/engine.ts` (`runStepLoop`) was edited in place per the spec's
+"Consumes F-68's seam" section. A `const hostConventions` binding is added
+immediately above it, gated on `typeDef.kind === 'make' &&
+this._activeAssembly !== undefined`. The `_activeAssembly` guard is mandatory:
+a make goal can legally reach `runStepLoop` without a sandbox
+(`effectiveBroker` falls back to `this.broker`), so the unguarded access to
+`this._activeAssembly.worktree.repoRoot` would throw a TypeError. The guard
+closes this bug and is pinned by a dedicated integration test
+(`_activeAssembly guard` test in `conventions-injection.test.ts`).
