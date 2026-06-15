@@ -108,12 +108,37 @@ with host-overrides-global precedence). Specs in
 
 A sibling structural thread — **comprehension must recurse** (`map-repo`/
 `deep-dive-region` are wrongly `leafOnly`, recorded in the build notes from the
-AC-2 eyes-on-cats result) — is a candidate to ride this iteration or stand as its
-own; that scope call is open.
+AC-2 eyes-on-cats result) — was a candidate to ride this iteration; the scope
+call (2026-06-15) was to **stand it up as its own iteration 08**, since it is an
+independent structural fix and gates the PRD's whole Desired Outcome.
 
 *Done when:* a code-writing goal's context carries the factory's global
 conventions and the relevant slice of the host repo's convention file, with host
 overriding global on conflict.
+
+### Iteration 08 — Recursion: comprehension obeys the split law *(next)*
+
+Decision locked in ADR-029 (comprehension recursion). The comprehend family
+(`map-repo`, `deep-dive-region`) is the one family hard-coded `leafOnly` — it
+cannot decompose, so whole-repo comprehension exhausts its budget on any
+non-trivial repo. This is the **named root cause of iteration 06's AC-2 failure**
+(corellia delivering a feature to its own repo: 1/5); AC-2 failing blocks AC-3/AC-4,
+the PRD's whole Desired Outcome. The fix makes comprehension obey the central law
+*any goal too big for one node splits*: remove `leafOnly` from the comprehend
+family; teach the split criterion (region too large → partition into sub-region
+comprehensions) and the integrate contract via the harness prompts; and — the
+load-bearing piece — add a **structured integration merge** so child
+`KnowledgeArtifact`s / `RegionFacts` merge into one valid parent artifact that
+passes the deterministic gate (the engine's generic text-join would emit invalid
+JSON). `live:foreign-eyes` is rewritten to commission a scoped intent pulled by
+the split gate (JIT per DESIGN.md), and AC-2 is re-verified live.
+
+This iteration is being built through the factory's own front door (`live:self`)
+— the strange loop building the very fix that makes the strange loop converge.
+
+*Done when:* a comprehension goal whose region exceeds one node splits, integrates
+its children into one gate-passing artifact, and AC-2 is re-run live with the
+honest result recorded.
 
 ## Features index — iteration 3
 
