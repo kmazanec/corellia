@@ -152,6 +152,38 @@ describe('LlmBrain.decide', () => {
     expect(result.value.kind).toBe('split');
   });
 
+  it('normalizes a split child that omits dependsOn/scope to empty arrays', async () => {
+    // Regression: the live model omitted `dependsOn`, and the raw child flowed
+    // into the engine's split/integrate machinery where `[...child.dependsOn]`
+    // threw "child.dependsOn is not iterable". The parse seam must fill the
+    // natural empty defaults so a terse-but-valid child never crashes downstream.
+    const { fetch } = stubFetch(
+      chatResponse(JSON.stringify({
+        kind: 'split',
+        children: [{ localId: 'c1', type: 'implement', title: 'sub', spec: {}, budgetShare: 1 }],
+      })),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(result.value.kind).toBe('split');
+    if (result.value.kind !== 'split') throw new Error('expected split');
+    expect(result.value.children[0]!.dependsOn).toEqual([]);
+    expect(result.value.children[0]!.scope).toEqual([]);
+  });
+
+  it('rejects a split child missing a load-bearing field at the parse seam', async () => {
+    // A child missing `type` is malformed, not merely terse — it must fail here
+    // with a clear message rather than corrupting the split downstream. Two such
+    // responses (parse fails, retried once, fails again) → decide throws.
+    const malformed = chatResponse(JSON.stringify({
+      kind: 'split',
+      children: [{ localId: 'c1', title: 'sub', spec: {}, budgetShare: 1 }],
+    }));
+    const { fetch } = stubFetch(malformed, malformed);
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    await expect(brain.decide(baseGoal, ctxSonnet)).rejects.toThrow();
+  });
+
   it('retries once on JSON parse failure and succeeds on second attempt', async () => {
     const { fetch, calls } = stubFetch(
       chatResponse('not json at all'),

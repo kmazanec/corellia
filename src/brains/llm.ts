@@ -22,7 +22,7 @@ import type { Goal, Metered, TransportIncident, Usage } from '../contract/goal.j
 import { ZERO_USAGE } from '../contract/goal.js';
 import type { Tier } from '../contract/goal.js';
 import type { MemoryPointer } from '../contract/goal.js';
-import type { Decision } from '../contract/decision.js';
+import type { Decision, ChildPlan } from '../contract/decision.js';
 import type { Artifact } from '../contract/report.js';
 import type { ToolDef, ToolCall } from '../contract/tool.js';
 import type { Verdict, Finding } from '../contract/verdict.js';
@@ -413,6 +413,45 @@ function parseFileBlocks(text: string): { path: string; content: string }[] {
 // JSON shape guards for decide and judge responses
 // ---------------------------------------------------------------------------
 
+/**
+ * Coerce one raw split-child object from the model into a structurally-complete
+ * {@link ChildPlan}. List fields with a natural empty default are filled;
+ * load-bearing fields are required so a malformed child is rejected at the parse
+ * seam rather than crashing the engine's split/integrate machinery downstream.
+ */
+function normalizeChild(raw: unknown, i: number): ChildPlan {
+  if (typeof raw !== 'object' || raw === null) {
+    throw new Error(`split child ${i} is not an object`);
+  }
+  const c = raw as Record<string, unknown>;
+  if (typeof c['localId'] !== 'string' || c['localId'] === '') {
+    throw new Error(`split child ${i} missing "localId"`);
+  }
+  if (typeof c['type'] !== 'string' || c['type'] === '') {
+    throw new Error(`split child "${c['localId']}" missing "type"`);
+  }
+  if (typeof c['budgetShare'] !== 'number') {
+    throw new Error(`split child "${c['localId']}" missing numeric "budgetShare"`);
+  }
+  const dependsOn = Array.isArray(c['dependsOn'])
+    ? (c['dependsOn'].filter((d) => typeof d === 'string') as string[])
+    : [];
+  const scope = Array.isArray(c['scope'])
+    ? (c['scope'].filter((s) => typeof s === 'string') as string[])
+    : [];
+  const child: ChildPlan = {
+    localId: c['localId'],
+    type: c['type'],
+    title: typeof c['title'] === 'string' ? c['title'] : c['localId'],
+    spec: c['spec'] ?? {},
+    dependsOn,
+    scope,
+    budgetShare: c['budgetShare'],
+  };
+  if (c['intent'] !== undefined) child.intent = c['intent'] as NonNullable<ChildPlan['intent']>;
+  return child;
+}
+
 function parseDecision(raw: string): Decision {
   const obj = JSON.parse(raw) as Record<string, unknown>;
   const kind = obj['kind'];
@@ -422,7 +461,14 @@ function parseDecision(raw: string): Decision {
   if (kind === 'split') {
     const children = obj['children'];
     if (!Array.isArray(children)) throw new Error('split decision missing children array');
-    return { kind: 'split', children: children as Decision extends { kind: 'split'; children: infer C } ? C : never };
+    // Normalize each child into a structurally-complete ChildPlan. The model
+    // routinely omits the list fields that have a natural empty default
+    // (`dependsOn`, `scope`) — left raw, those omissions crash deep in the engine
+    // (`[...child.dependsOn]`) instead of being caught here. The genuinely
+    // structural fields (`localId`, `type`, `budgetShare`) are required: a child
+    // missing one is malformed, not merely terse, and fails at the parse seam
+    // with a clear message rather than corrupting the split.
+    return { kind: 'split', children: children.map(normalizeChild) };
   }
   if (kind === 'block') {
     const brief = obj['brief'];
