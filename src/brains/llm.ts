@@ -613,22 +613,51 @@ export class LlmBrain implements Brain {
       messages,
       ...(responseFormat !== undefined ? { response_format: responseFormat } : {}),
     };
-    const response = await fetchFn(`${this.config.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.config.apiKey}`,
-        ...this.config.headers,
-      },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`LLM request failed (${response.status}): ${text}`);
+    const sleepFn = this.config.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    const MAX_RETRIES = 3;
+    // Retry transient transport failures the same way the step path does. The
+    // failure that motivated this: a flaky provider dropped the connection
+    // (ECONNRESET) mid-body even after a 200 — the throw happened on the body
+    // read, not the fetch — so BOTH the fetch and the .json() read are inside
+    // the retry. Retryable HTTP statuses (429/5xx) also retry; terminal ones
+    // (401/403/404) throw immediately.
+    let attempt = 0;
+    while (true) {
+      try {
+        const response = await fetchFn(`${this.config.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${this.config.apiKey}`,
+            ...this.config.headers,
+          },
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          const err = new TransportError(response.status, text);
+          if (err.errorClass === 'retryable' && attempt < MAX_RETRIES) {
+            await sleepFn(Math.pow(2, attempt) * 200 + Math.random() * 100);
+            attempt++;
+            continue;
+          }
+          throw new Error(`LLM request failed (${response.status}): ${text}`);
+        }
+        const data = (await response.json()) as ChatResponse;
+        const content = data.choices[0]?.message?.content ?? '';
+        return { content, usage: readUsage(data) };
+      } catch (err) {
+        // Network-level failure (ECONNRESET, timeout) on the fetch or body read.
+        // A TransportError we already chose to rethrow above is terminal — let it out.
+        if (err instanceof Error && err.message.startsWith('LLM request failed')) throw err;
+        if (attempt < MAX_RETRIES) {
+          await sleepFn(Math.pow(2, attempt) * 200 + Math.random() * 100);
+          attempt++;
+          continue;
+        }
+        throw err;
+      }
     }
-    const data = (await response.json()) as ChatResponse;
-    const content = data.choices[0]?.message?.content ?? '';
-    return { content, usage: readUsage(data) };
   }
 
   /**

@@ -32,9 +32,16 @@ const DEFAULT_MODELS = {
   low: 'deepseek/deepseek-v4-flash',
   // ~$0.44/$0.87 per M — 1M ctx; frontier-class agentic/coding.
   mid: 'deepseek/deepseek-v4-pro',
-  // ~$0.455/$1.82 per M — judge-grade quality, different vendor from mid/low
-  // for provider diversity; BFCL top-10 tool-call reliability.
-  high: 'qwen/qwen3-235b-a22b',
+  // judge-grade quality for the decide/judge tiers. NOTE: the prior default
+  // here, `qwen/qwen3-235b-a22b`, was replaced 2026-06-18 after a live:self
+  // probe found it UNRELIABLE on OpenRouter — it intermittently drops the
+  // connection (ECONNRESET) and returns truncated/garbage bodies (a bare `{`),
+  // which surfaced downstream as "Unknown decision kind: undefined" and blocked
+  // every deliver-intent (it decides on the high tier). deepseek v4-flash/pro
+  // (low/mid) and claude-sonnet-4 (high) all returned clean structured output
+  // across repeated probes. Provider diversity is a nice-to-have; a decide tier
+  // that actually returns a parseable decision is not optional.
+  high: 'anthropic/claude-sonnet-4',
 } as const;
 
 /**

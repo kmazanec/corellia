@@ -291,6 +291,35 @@ describe('LlmBrain.decide', () => {
     expect(reaskMsg).toContain('could not be parsed');
     expect(reaskMsg.toLowerCase()).toContain('kind');
   });
+
+  it('retries a transport drop (ECONNRESET) on the decide call and succeeds', async () => {
+    // Motivating failure: the high-tier provider dropped the connection mid-call
+    // intermittently; a bare fetch with no retry turned a transient drop into a
+    // hard block. callCompletions must retry network-level failures.
+    let n = 0;
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, _opts?: RequestInit) => {
+      n++;
+      if (n === 1) {
+        const e = new TypeError('terminated');
+        (e as { cause?: { code: string } }).cause = { code: 'ECONNRESET' };
+        throw e;
+      }
+      return new Response(JSON.stringify(chatResponse(JSON.stringify({ kind: 'satisfy' }))), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+    const brain = new LlmBrain({
+      baseUrl: 'https://x',
+      apiKey: 'k',
+      modelByTier,
+      fetchImpl,
+      sleepFn: async () => {}, // no real backoff in tests
+    });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(result.value.kind).toBe('satisfy');
+    expect(n).toBe(2); // dropped once, retried, succeeded
+  });
 });
 
 // ---------------------------------------------------------------------------
