@@ -669,8 +669,31 @@ export class LlmBrain implements Brain {
           `Reply with ONLY the JSON object — no prose, no markdown fences.`,
       },
     ];
-    const result = await this.callJson(model, messages, parseDecision);
-    return { value: result.value, usage: result.usage };
+    // A node that cannot obtain a parseable decision — even after callJson's
+    // built-in re-ask — must BLOCK, not crash the whole tree. The factory's law
+    // is that a node which can't proceed responsibly blocks; an unparseable
+    // decision is exactly that. Returning a block here lets the engine route it
+    // through the existing block-handling path instead of an uncaught throw
+    // killing every sibling. (Surfaced by a live:self run: the model returned a
+    // decision with no valid `kind` twice, and brain.decide's throw was uncaught
+    // at the engine's decide call sites.)
+    try {
+      const result = await this.callJson(model, messages, parseDecision);
+      return { value: result.value, usage: result.usage };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      const block: Decision = {
+        kind: 'block',
+        brief: {
+          question: `Decision-maker could not produce a valid decision: ${reason}`,
+          options: ['retry', 'abandon'],
+          links: [],
+          deadlineMs: 0,
+          onTimeout: 'bounce',
+        },
+      };
+      return { value: block, usage: ZERO_USAGE };
+    }
   }
 
   async produce(goal: Goal, ctx: BrainContext): Promise<Metered<Artifact>> {

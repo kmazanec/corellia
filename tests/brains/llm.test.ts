@@ -174,14 +174,17 @@ describe('LlmBrain.decide', () => {
   it('rejects a split child missing a load-bearing field at the parse seam', async () => {
     // A child missing `type` is malformed, not merely terse — it must fail here
     // with a clear message rather than corrupting the split downstream. Two such
-    // responses (parse fails, retried once, fails again) → decide throws.
+    // responses (parse fails, re-asked once, fails again) → decide blocks.
     const malformed = chatResponse(JSON.stringify({
       kind: 'split',
       children: [{ localId: 'c1', title: 'sub', spec: {}, budgetShare: 1 }],
     }));
     const { fetch } = stubFetch(malformed, malformed);
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
-    await expect(brain.decide(baseGoal, ctxSonnet)).rejects.toThrow();
+    // The malformed child is rejected at the parse seam both times; decide() then
+    // blocks rather than emitting a corrupt split (and rather than throwing).
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(result.value.kind).toBe('block');
   });
 
   it('retries once on JSON parse failure and succeeds on second attempt', async () => {
@@ -195,13 +198,17 @@ describe('LlmBrain.decide', () => {
     expect(calls).toHaveLength(2);
   });
 
-  it('throws after two consecutive parse failures', async () => {
+  it('blocks (does not throw) after two consecutive parse failures', async () => {
+    // A node that cannot get a parseable decision after the re-ask must BLOCK,
+    // not crash the tree. Regression: an unparseable decision used to throw out
+    // of decide() uncaught at the engine, killing every sibling.
     const { fetch } = stubFetch(
       chatResponse('bad json #1'),
       chatResponse('bad json #2'),
     );
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
-    await expect(brain.decide(baseGoal, ctxSonnet)).rejects.toThrow();
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(result.value.kind).toBe('block');
   });
 
   it('includes memories quoted as data in the user message', async () => {
