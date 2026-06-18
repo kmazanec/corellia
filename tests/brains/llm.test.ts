@@ -247,6 +247,50 @@ describe('LlmBrain.decide', () => {
     expect(userMsg).toContain('implement');
     expect(userMsg).toContain('src/');
   });
+
+  it('constrains the decision OUTPUT SHAPE via json_schema, not just json_object', async () => {
+    // The live failure: under json_object mode the model returned valid JSON
+    // with no `kind` field. The decide request must use json_schema mode with a
+    // schema that requires `kind`, so the discriminator can't be omitted.
+    const { fetch, calls } = stubFetch(chatResponse(JSON.stringify({ kind: 'satisfy' })));
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    await brain.decide(baseGoal, ctxSonnet);
+    const body = JSON.parse(calls[0]?.options.body as string);
+    expect(body.response_format.type).toBe('json_schema');
+    expect(body.response_format.json_schema.schema.required).toContain('kind');
+    expect(body.response_format.json_schema.schema.properties.kind.enum).toEqual([
+      'satisfy', 'split', 'block',
+    ]);
+  });
+
+  it('parses a decision wrapped in a ```json markdown fence', async () => {
+    // Some providers wrap structured output in a markdown fence even under JSON
+    // mode; a raw JSON.parse would choke. stripJsonEnvelope must unwrap it.
+    const { fetch } = stubFetch(
+      chatResponse('```json\n{"kind":"satisfy"}\n```'),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(result.value.kind).toBe('satisfy');
+  });
+
+  it('re-ask echoes the actual parse error (e.g. the missing kind), not a generic message', async () => {
+    // First response is valid JSON of the WRONG shape (no `kind`). The re-ask
+    // must name the real problem so the model can fix it — the original generic
+    // "not valid JSON" was a mis-diagnosis that never helped.
+    const { fetch, calls } = stubFetch(
+      chatResponse(JSON.stringify({ decision: 'split' })), // valid JSON, no kind
+      chatResponse(JSON.stringify({ kind: 'satisfy' })),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(result.value.kind).toBe('satisfy');
+    expect(calls).toHaveLength(2);
+    const reaskBody = JSON.parse(calls[1]?.options.body as string);
+    const reaskMsg: string = reaskBody.messages[reaskBody.messages.length - 1].content;
+    expect(reaskMsg).toContain('could not be parsed');
+    expect(reaskMsg.toLowerCase()).toContain('kind');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -309,6 +353,15 @@ describe('LlmBrain.judge', () => {
     const result = await brain.judge(baseGoal, subject, 'Be strict.', ctxSonnet);
     expect(result.value.pass).toBe(true);
     expect(result.value.findings).toHaveLength(0);
+  });
+
+  it('constrains the verdict output shape via json_schema requiring `pass`', async () => {
+    const { fetch, calls } = stubFetch(chatResponse(JSON.stringify({ pass: true, findings: [] })));
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    await brain.judge(baseGoal, subject, 'Be strict.', ctxSonnet);
+    const body = JSON.parse(calls[0]?.options.body as string);
+    expect(body.response_format.type).toBe('json_schema');
+    expect(body.response_format.json_schema.schema.required).toContain('pass');
   });
 
   it('parses a failing verdict with findings', async () => {

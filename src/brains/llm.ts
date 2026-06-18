@@ -77,7 +77,9 @@ interface ChatRequest {
   model: string;
   messages: ChatMessage[];
   temperature?: number;
-  response_format?: { type: 'json_object' };
+  response_format?:
+    | { type: 'json_object' }
+    | { type: 'json_schema'; json_schema: WireJsonSchema };
 }
 
 interface ChatChoice {
@@ -452,8 +454,59 @@ function normalizeChild(raw: unknown, i: number): ChildPlan {
   return child;
 }
 
+/**
+ * Strip a leading ```json (or bare ```) fence and trailing ``` from a model
+ * response, and trim leading prose before the first `{`. Some providers wrap
+ * structured output in markdown fences or a sentence of preamble even under
+ * JSON mode; a raw `JSON.parse` would choke. Returns the original string when
+ * no fence/preamble is detected.
+ */
+function stripJsonEnvelope(raw: string): string {
+  let s = raw.trim();
+  const fence = s.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i);
+  if (fence && fence[1] !== undefined) s = fence[1].trim();
+  // If prose precedes the object, slice from the first balanced-looking brace.
+  if (s[0] !== '{' && s[0] !== '[') {
+    const brace = s.indexOf('{');
+    if (brace > 0) s = s.slice(brace).trim();
+  }
+  return s;
+}
+
+/**
+ * The Decision shape as a JSON schema for schema-constrained decode. Expressed
+ * as a single object whose `kind` is a required enum — NOT a oneOf union, which
+ * many providers reject under `strict`. `kind` being required is the whole point:
+ * the live failure was a model returning valid JSON with no `kind` field at all.
+ * The variant payloads (`children`, `brief`) are optional here and validated by
+ * `parseDecision`; the schema's job is to force the discriminator, not to police
+ * every nested field.
+ */
+const DECISION_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    kind: { type: 'string', enum: ['satisfy', 'split', 'block'] },
+    children: { type: 'array' },
+    brief: { type: 'object' },
+  },
+  required: ['kind'],
+  additionalProperties: true,
+};
+
+/** The Verdict shape as a JSON schema — `pass` is the load-bearing field. */
+const VERDICT_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    pass: { type: 'boolean' },
+    findings: { type: 'array' },
+    failureSignature: { type: 'string' },
+  },
+  required: ['pass'],
+  additionalProperties: true,
+};
+
 function parseDecision(raw: string): Decision {
-  const obj = JSON.parse(raw) as Record<string, unknown>;
+  const obj = JSON.parse(stripJsonEnvelope(raw)) as Record<string, unknown>;
   const kind = obj['kind'];
   if (kind === 'satisfy') {
     return { kind: 'satisfy' };
@@ -487,7 +540,7 @@ function isValidSeverity(s: unknown): s is Finding['severity'] {
 }
 
 function parseVerdict(raw: string): Verdict {
-  const obj = JSON.parse(raw) as Record<string, unknown>;
+  const obj = JSON.parse(stripJsonEnvelope(raw)) as Record<string, unknown>;
   const pass = Boolean(obj['pass']);
   const rawFindings = obj['findings'];
   const findings: Finding[] = [];
@@ -538,13 +591,27 @@ export class LlmBrain implements Brain {
   private async callCompletions(
     model: string,
     messages: ChatMessage[],
-    jsonMode: boolean,
+    /**
+     * `false` → no response_format (free-form text, e.g. produce/repair).
+     * `true`  → `json_object` mode (valid JSON, unconstrained shape).
+     * a schema → `json_schema` mode: the provider constrains the OUTPUT SHAPE,
+     *   not just JSON validity. This is what decide/judge need — the live
+     *   failure was a model returning valid JSON with the wrong shape (no
+     *   `kind`), which `json_object` mode does nothing to prevent.
+     */
+    jsonMode: boolean | { schemaName: string; schema: Record<string, unknown> },
   ): Promise<{ content: string; usage: Usage }> {
     const fetchFn = this.config.fetchImpl ?? globalThis.fetch;
+    const responseFormat: ChatRequest['response_format'] =
+      jsonMode === false
+        ? undefined
+        : jsonMode === true
+          ? { type: 'json_object' }
+          : { type: 'json_schema', json_schema: { name: jsonMode.schemaName, strict: false, schema: jsonMode.schema } };
     const body: ChatRequest = {
       model,
       messages,
-      ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
+      ...(responseFormat !== undefined ? { response_format: responseFormat } : {}),
     };
     const response = await fetchFn(`${this.config.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -565,30 +632,43 @@ export class LlmBrain implements Brain {
   }
 
   /**
-   * Attempt a strict-JSON call; on parse failure, issue one re-ask with the
-   * bad response echoed back. Throws if the second attempt also fails to parse.
-   * Returns the parsed value and the accumulated usage from all HTTP calls made.
+   * Attempt a schema-constrained JSON call; on parse failure, issue one re-ask
+   * that echoes BACK THE ACTUAL PARSE ERROR (not a generic "not valid JSON" —
+   * the live failure was valid JSON of the wrong shape, which the generic
+   * correction never addressed). Throws if the second attempt also fails to
+   * parse. Returns the parsed value and accumulated usage from all HTTP calls.
+   *
+   * `schema` constrains the output shape at the provider (json_schema mode) so
+   * the discriminator can't simply be omitted; passing it is what closes the
+   * wrong-shape-JSON class for decide and judge.
    */
   private async callJson<T>(
     model: string,
     messages: ChatMessage[],
     parse: (raw: string) => T,
+    schema?: { schemaName: string; schema: Record<string, unknown> },
   ): Promise<{ value: T; usage: Usage }> {
-    const first = await this.callCompletions(model, messages, true);
+    const mode = schema ?? true;
+    const first = await this.callCompletions(model, messages, mode);
     try {
       return { value: parse(first.content), usage: first.usage };
-    } catch (_firstErr) {
-      // Re-ask: append the bad response and a correction request.
+    } catch (firstErr) {
+      // Re-ask: echo the bad response AND the specific parse error so the model
+      // can correct the actual problem (e.g. a missing `kind` field), not a
+      // mis-diagnosed "invalid JSON".
+      const reason = firstErr instanceof Error ? firstErr.message : String(firstErr);
       const correctionMessages: ChatMessage[] = [
         ...messages,
         { role: 'assistant', content: first.content },
         {
           role: 'user',
           content:
-            'Your previous response was not valid JSON. Please reply with ONLY valid JSON, no prose.',
+            `Your previous response could not be parsed: ${reason}\n` +
+            `Reply with ONLY a valid JSON object matching the required shape — ` +
+            `no prose, no markdown fences. Include every required field.`,
         },
       ];
-      const second = await this.callCompletions(model, correctionMessages, true);
+      const second = await this.callCompletions(model, correctionMessages, mode);
       const usage: Usage = {
         promptTokens: first.usage.promptTokens + second.usage.promptTokens,
         completionTokens: first.usage.completionTokens + second.usage.completionTokens,
@@ -678,7 +758,10 @@ export class LlmBrain implements Brain {
     // decision with no valid `kind` twice, and brain.decide's throw was uncaught
     // at the engine's decide call sites.)
     try {
-      const result = await this.callJson(model, messages, parseDecision);
+      const result = await this.callJson(model, messages, parseDecision, {
+        schemaName: 'decision',
+        schema: DECISION_SCHEMA,
+      });
       return { value: result.value, usage: result.usage };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
@@ -767,7 +850,10 @@ export class LlmBrain implements Brain {
           `Set pass=false and add a gating finding whenever the artifact fails the rubric.`,
       },
     ];
-    const result = await this.callJson(model, messages, parseVerdict);
+    const result = await this.callJson(model, messages, parseVerdict, {
+      schemaName: 'verdict',
+      schema: VERDICT_SCHEMA,
+    });
     return { value: result.value, usage: result.usage };
   }
 
