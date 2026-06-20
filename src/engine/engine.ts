@@ -2623,7 +2623,7 @@ export class Engine {
     // first machinery pattern).
     const injectedLocalIds = allInjected.map((c) => c.localId);
 
-    const augmentedChildren: ChildPlan[] = [
+    const rawAugmented: ChildPlan[] = [
       ...allInjected,
       ...children.map((child) => ({
         ...child,
@@ -2631,11 +2631,21 @@ export class Engine {
       })),
     ];
 
-    // re-validate the augmented split against the parent budget.
-    // Comprehension/refresh injection can push the child count past the parent's
-    // attempt budget — that is a structural split error. Throw so the caller
-    // catches it and routes through the existing structural-error block path,
-    // never silently proceeding with an over-budget fan-out.
+    // Renormalize budgetShares across the augmented set. The brain's children
+    // already sum their shares to ~1; each injected comprehension/refresh child
+    // carries its own share (e.g. 0.1), so the concatenation overflows the
+    // "sum ≤ 1" structural rule ("budgetShares sum to 1.8000"). Scale every
+    // share by 1/total when the total exceeds 1 — this preserves each child's
+    // RELATIVE allocation (so subdivide() still apportions proportionally) while
+    // bringing the sum back to 1. The comprehension children thus take a real
+    // slice of the parent budget rather than the gate rejecting the whole split.
+    const augmentedChildren = renormalizeShares(rawAugmented);
+
+    // re-validate the augmented split against the parent budget. After
+    // renormalization the share sum is ≤ 1; a remaining violation (e.g. child
+    // count past the attempt budget) is a genuine structural error — throw so
+    // the caller routes it through the structural-error block path rather than
+    // silently proceeding with an invalid fan-out.
     const augmentedErr = validateSplit(augmentedChildren, goal.budget);
     if (augmentedErr) {
       throw new Error(`coverage-gate-invalid-split:${augmentedErr}`);
@@ -3098,6 +3108,20 @@ function deriveToolDefs(
 }
 
 // ── HELPERS ─────────────────────────────────────────────────────────────────
+
+/**
+ * Scale every child's `budgetShare` by `1/total` when the shares sum to more
+ * than 1, so the sum becomes exactly 1 while each child keeps its RELATIVE
+ * allocation. Used after the coverage gate injects comprehension/refresh
+ * children onto a split whose original shares already summed to ~1. When the
+ * total is already ≤ 1 the children are returned unchanged (a deliberate
+ * under-allocation, e.g. a single small child, is preserved).
+ */
+function renormalizeShares(children: ChildPlan[]): ChildPlan[] {
+  const total = children.reduce((s, c) => s + c.budgetShare, 0);
+  if (total <= 1 || total === 0) return children;
+  return children.map((c) => ({ ...c, budgetShare: c.budgetShare / total }));
+}
 
 /**
  * Validate structural constraints on a proposed split.

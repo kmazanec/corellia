@@ -923,6 +923,58 @@ describe('coverage gate — injection that exceeds attempt budget is blocked', (
   });
 });
 
+describe('coverage gate — injection renormalizes budgetShares instead of blocking', () => {
+  it('does not block when injected comprehension children push the share sum past 1', async () => {
+    const store = new MemoryEventStore();
+
+    // Brain children already sum their shares to 1.0. The coverage gate injects
+    // two comprehension children at 0.1 each → raw sum 1.2 > 1. Before the
+    // renormalization fix this failed the structural rule
+    // ("budgetShares sum to 1.2000, must be ≤ 1") and blocked the whole split;
+    // now the shares are scaled to sum to 1 and the run proceeds.
+    const splitDecision = {
+      kind: 'split' as const,
+      children: [
+        { localId: 'a', type: 'leaf', title: 'child A', spec: {}, dependsOn: [], scope: [], budgetShare: 0.5 },
+        { localId: 'b', type: 'leaf', title: 'child B', spec: {}, dependsOn: [], scope: [], budgetShare: 0.5 },
+      ],
+    };
+
+    const brain = new ScriptedBrain()
+      .queueDecide(splitDecision)
+      .queueProduce(textArtifact('A'))
+      .queueProduce(textArtifact('B'))
+      .queueProduce(textArtifact('map-arch'))
+      .queueProduce(textArtifact('map-stack'));
+
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'splitter' }),
+      leafTypeDef({ name: 'leaf' }),
+      leafTypeDef({ name: 'map-repo' }),
+    ]);
+
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      knowledge: knowledgeWiring(emptyKnowledge()),
+    });
+    injectAssembly(engine, fakeAssembly());
+
+    // attempts high enough that the count rule is satisfied — only the
+    // share-sum rule is under test here.
+    const goal = makeGoal({ type: 'splitter', budget: { attempts: 10, tokens: 10000, toolCalls: 100, wallClockMs: 60000 } });
+    const report = await engine.run(goal);
+
+    // No structural block — the over-1 share sum was renormalized, not rejected.
+    expect(report.blockers).toHaveLength(0);
+    const spawnEvents = await store.list({ type: 'child-spawned' });
+    const childTypes = spawnEvents.map((e) => (e as { childType: string }).childType);
+    expect(childTypes).toContain('map-repo');
+  });
+});
+
 // ── 15. double-spawn exact-count — stale+invalid category → EXACTLY one child
 
 describe('coverage gate — invalid category yields exactly one refresh child', () => {
