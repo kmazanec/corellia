@@ -722,3 +722,58 @@ URLs, costs, and cache-hit share after the live runs.
 - Two compose files coexist (`docker-compose.yml` dev-DB helper vs `compose.yaml`
   full stack); documented with explicit `-f`, not renamed (README/ADR-004
   reference the old name).
+
+---
+
+# Iteration 08 — Recursion (ADR-029): the strange loop proves its own thesis
+
+**Date:** 2026-06-20 · **Approach:** commissioned through the factory's own front
+door (`live:self`), per the self-hosting principle — corellia building the fix
+that lets corellia comprehend corellia.
+
+## What the self-build runs surfaced (7 fixes, all on main, all green)
+
+The attempt to self-build ADR-029 drove the factory progressively deeper, one
+real defect per run. Each was invisible to the scripted convergence suite (which
+uses a deterministic brain that never emits malformed JSON, never picks a flaky
+model, and never triggers a real multi-region coverage fan-out):
+
+| Run | Reached | Blocker | Fix |
+|---|---|---|---|
+| 1 | engine split | brain split child missing `dependsOn` → `[...child.dependsOn]` crash | `539334a` parse-seam normalization |
+| 2 | decide | unparseable decision threw uncaught → killed whole tree | `50e28f6` decide → block on parse failure |
+| 3 | decide | decide/judge used `json_object` (valid JSON, any shape) | `5a71054` schema-constrain output + real-error re-ask + fence-tolerant parse |
+| 4 | decide | **`qwen/qwen3-235b-a22b` broken on OpenRouter** (ECONNRESET / returns `{`) | `235d34e` high tier → `claude-sonnet-4` + transport retry on decide/judge |
+| 5 | coverage gate | legitimate 12-child fan-out > `attempts:5` harness budget | `af0cf47` live:self budget → 20/3M/300 |
+| 6 | coverage gate | injected comprehension shares pushed sum to 1.8 > 1 | `157e1a4` renormalize budgetShares after injection |
+| 7 | **comprehension (real work)** | `map-repo`/`deep-dive` exhausted token budgets — **the ADR-029 wall** | hand-implement (below) |
+
+**Key lesson (run 4):** I burned three commits theorizing about output *shape*
+before probing the raw wire response, which revealed the true cause was a flaky
+*model*. Capture the evidence before theorizing.
+
+## Run 7 — the wall is the result ($0.73, 1.87M prompt tokens, 75% cache)
+
+The factory cleared every structural gate and did genuine comprehension work,
+then blocked on exactly the signature ADR-029 was written to fix (from the
+iteration-06 AC-2 root-cause): `map-repo: architecture` and
+`deep-dive: src/engine/engine.ts` **exhausted their token budgets** trying to
+comprehend the engine in a single un-splittable node — because the comprehend
+family is still `leafOnly: true`, the very flag ADR-029 removes. The integration
+eval confirmed no implementation landed ("leafOnly still true and no integration
+merge logic"). No code was written; the run died in comprehension, before the
+implementation step.
+
+**The strange loop empirically proved its own thesis: comprehension must recurse
+— demonstrated by comprehension failing because it cannot.** The factory cannot
+bootstrap past this particular fix via `live:self`, by construction. No budget
+bump escapes it (the iter-06 notes already proved 2M tokens exhaust; this run
+burned 1.87M and died identically).
+
+## Decision: hand-implement ADR-029 on main, then prove via live:self
+
+Since the fix is the precondition for the factory self-building it, ADR-029 is
+implemented directly on `main` (interactive/cleanup work per the branch rules),
+offline-verified. `live:self` is then re-run on a SIMPLE feature to prove the
+now-recursing factory can self-build — the AC-2 proof, decoupled from the
+bootstrap paradox.
