@@ -219,9 +219,16 @@ const commission: CommissionInput = {
   },
   scope: SCOPE,
   budget: {
-    attempts: 5,
-    tokens: 1_000_000,
-    toolCalls: 80,
+    // Sized for a real multi-region feature, not a toy. A live:self run on a
+    // real ADR-sized feature splits into several implementation children AND
+    // the coverage gate injects one comprehension child per region/category it
+    // must map first — the prior attempts:5 cap rejected the legitimate
+    // fan-out ("Fan-out of 12 children exceeds parent attempt budget of 5").
+    // attempts bounds the per-level fan-out width, so it must exceed
+    // (implementation children + injected comprehension children).
+    attempts: 20,
+    tokens: 3_000_000,
+    toolCalls: 300,
     wallClockMs: 1_800_000,
   },
   intent: 'production',
@@ -229,7 +236,7 @@ const commission: CommissionInput = {
 
 console.log('── commissioning ─────────────────────────────────────────────────────────');
 console.log(`  Intent id:  ${intentId}`);
-console.log(`  Budget:     5 attempts, 1M tokens, 80 tool calls, 30 min`);
+console.log(`  Budget:     20 attempts, 3M tokens, 300 tool calls, 30 min`);
 console.log('');
 console.log('Running... (this is a live LLM run; costs are real)');
 console.log('');
