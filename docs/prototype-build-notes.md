@@ -777,3 +777,32 @@ implemented directly on `main` (interactive/cleanup work per the branch rules),
 offline-verified. `live:self` is then re-run on a SIMPLE feature to prove the
 now-recursing factory can self-build — the AC-2 proof, decoupled from the
 bootstrap paradox.
+
+## ADR-029 implemented on main (92a00b7)
+
+Hand-implemented (the factory can't bootstrap past its own missing recursion),
+built in an isolated worktree by a Sonnet builder, reviewed and cherry-picked
+onto main linearly. Three parts:
+
+1. **comprehend.ts** — `leafOnly: false` on `map-repo` and `deep-dive-region`;
+   harness prompts teach the split criterion (partition a too-large region into
+   disjoint sub-regions covering the parent, each a child of the same type) and
+   the integrate contract.
+2. **engine.ts INTEGRATE + src/library/comprehend-merge.ts** — a structured
+   merge replaces the generic `\n`-join for the comprehend family: child
+   `KnowledgeArtifact`s merge into one (union pointers, min confidence,
+   provisional, parent HEAD SHA); child `RegionFacts` merge into one (union
+   anchored facts). The merged artifact is gated by the type's own
+   `mapRepoCheck`/`diveAnchorCheck` and persisted via the same
+   knowledge-written / knowledge-facts-written path a leaf uses. Gate failure
+   blocks the split honestly; no valid child → graceful empty fallback.
+3. **tests/engine/comprehend-recursion.test.ts** — proves both merges pass their
+   gate and land exactly one parent knowledge event, plus the no-valid-child
+   fallback.
+
+Gates green on main: typecheck, lint, engine+brain+library suites (1109 passed).
+
+**Open (Part 4, deferred):** `examples/live-foreign-eyes.ts` rewrite to a scoped
+JIT intent (ADR-029 Decision 4) was out of the implementation scope. The AC-2
+proof is the next step: re-run `live:self` on a SIMPLE feature to show the
+now-recursing factory can self-build — decoupled from the bootstrap paradox.
