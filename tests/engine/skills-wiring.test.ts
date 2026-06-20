@@ -162,16 +162,19 @@ function rubricCaptureBrain(): Brain & { rubrics: string[] } {
 const ALL_TYPES = starterTypes();
 
 /**
- * One representative tool-granted, leafOnly make/learn type per family that
- * reaches the STEP-LOOP harness seam. Skips non-leaf (decide path), judge kinds,
- * and types with no step-loop tool grant.
+ * One representative tool-granted make/learn type per family that reaches the
+ * STEP-LOOP harness seam. The step loop runs for any tool-granted make/learn type
+ * whose attempt loop executes — a leafOnly type goes straight there, and a
+ * non-leaf type reaches it on the SATISFY branch of its decide path (ADR-029: the
+ * comprehend family is no longer leafOnly yet still drives the step loop when it
+ * decides to satisfy rather than split). Skips judge/evolve kinds and types with
+ * no step-loop tool grant.
  */
 function stepLoopReps(): GoalTypeDef[] {
   const seen = new Set<string>();
   const reps: GoalTypeDef[] = [];
   for (const d of ALL_TYPES) {
     if (seen.has(d.family)) continue;
-    if (!d.leafOnly) continue;
     if (d.kind === 'judge' || d.kind === 'evolve') continue;
     if (!isToolGranted(d.grants)) continue;
     seen.add(d.family);

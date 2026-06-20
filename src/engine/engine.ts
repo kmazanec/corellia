@@ -46,6 +46,7 @@ import {
   type KnowledgeForCoverage,
   type MissingRequirement,
 } from '../library/coverage.js';
+import { mergeComprehensionArtifacts, childShaFallback } from '../library/comprehend-merge.js';
 
 /**
  * Per-tree spend ceiling default (learning phase, ADR-017).
@@ -2875,8 +2876,86 @@ export class Engine {
       }
     }
 
+    // Blockers/findings raised by the comprehend-family structured merge gate.
+    // Surfaced into the parent report so a merged artifact that fails its
+    // deterministic gate blocks the split honestly (never silently emits).
+    const comprehendBlockers: string[] = [];
+    const comprehendFindings: string[] = [];
+
     let mergedArtifact: import('../contract/report.js').Artifact | null = null;
-    if (hasFiles) {
+
+    // ── COMPREHEND-FAMILY STRUCTURED MERGE (ADR-029) ───────────────────────
+    // map-repo / deep-dive-region children emit structured JSON artifacts
+    // (KnowledgeArtifact / RegionFacts) gated by mapRepoCheck / diveAnchorCheck.
+    // The generic `\n`-join below would concatenate JSON blobs into invalid JSON
+    // that fails the parent's gate. Instead merge the children into ONE valid
+    // artifact, gate it like a leaf, and persist via the same knowledge path.
+    const integTypeDefForMerge = this.registry.get(goal.type);
+    const comprehendType: 'map-repo' | 'deep-dive-region' | null =
+      integTypeDefForMerge.family === 'comprehend' &&
+      (goal.type === 'map-repo' || goal.type === 'deep-dive-region')
+        ? goal.type
+        : null;
+
+    if (comprehendType !== null) {
+      const childArtifacts = childReports.map((r) => r.artifact);
+      // The merged artifact is anchored to the parent's HEAD SHA — the same SHA
+      // source the leaf path uses (the assembly's headSha hook). When no
+      // knowledge wiring is present (tests, or a sandbox-less run) fall back to a
+      // child's own generatedAtSha (children share the parent's SHA in practice).
+      const specRepoRoot = (goal.spec as Record<string, unknown>)['repoRoot'];
+      const repoRoot =
+        this._activeAssembly?.worktree.repoRoot ??
+        (typeof specRepoRoot === 'string' ? specRepoRoot : '');
+      let headSha = '';
+      if (this.knowledge !== undefined && repoRoot.length > 0) {
+        try {
+          headSha = await this.knowledge.headSha(repoRoot);
+        } catch {
+          headSha = '';
+        }
+      }
+      if (headSha.length === 0) {
+        headSha = childShaFallback(childArtifacts, comprehendType);
+      }
+
+      const merged = mergeComprehensionArtifacts(comprehendType, childArtifacts, headSha);
+      if (merged !== null) {
+        // Gate the merged artifact with the SAME deterministic checks a leaf
+        // passes — mapRepoCheck / diveAnchorCheck. A failing gate blocks the
+        // split; a passing gate persists via the leaf knowledge path.
+        const checkCtx = this.checkContextFor(goal.id);
+        let allOk = true;
+        for (const check of integTypeDefForMerge.deterministic) {
+          const result = await check.run(goal, merged, checkCtx);
+          if (!result.ok) {
+            allOk = false;
+            comprehendFindings.push(`comprehend-merge ${check.name}: ${result.detail}`);
+          }
+        }
+        const mergeVerdict: Verdict = {
+          pass: allOk,
+          findings: [],
+          ...(allOk ? {} : { failureSignature: `comprehend-merge:${comprehendFindings.join(',')}` }),
+        };
+        await this.store.append({
+          type: 'deterministic-checked',
+          at: t(),
+          goalId: goal.id,
+          verdict: mergeVerdict,
+        });
+        if (allOk) {
+          mergedArtifact = merged;
+          await this.persistLeafKnowledge(goal, merged);
+        } else {
+          comprehendBlockers.push(
+            `Comprehension integrate merge failed its deterministic gate: ${comprehendFindings.join('; ')}`,
+          );
+        }
+      }
+      // merged === null → no child produced a valid artifact; fall through with
+      // mergedArtifact left null (empty integrate, handled like any empty merge).
+    } else if (hasFiles) {
       mergedArtifact = { kind: 'files', files: allFiles };
     } else if (hasText) {
       mergedArtifact = { kind: 'text', text: allTexts.join('\n') };
@@ -2972,8 +3051,8 @@ export class Engine {
     const uniqueLearnedLines = [...new Set(allLearnedLines)];
 
     // Collect all blockers and child findings, plus terraced-scan loser findings.
-    const allBlockers: string[] = [...integrationBlockers];
-    const allFindings: string[] = [...extraFindings, ...integrationFindings];
+    const allBlockers: string[] = [...integrationBlockers, ...comprehendBlockers];
+    const allFindings: string[] = [...extraFindings, ...integrationFindings, ...comprehendFindings];
     for (const r of childReports) {
       allBlockers.push(...r.blockers);
       allFindings.push(...r.findings);

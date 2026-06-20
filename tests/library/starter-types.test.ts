@@ -291,10 +291,10 @@ describe('starterTypes', () => {
   });
 
   describe('map-repo', () => {
-    it('has kind learn and IS leafOnly', () => {
+    it('has kind learn and is NOT leafOnly (ADR-029: comprehension recurses)', () => {
       const def = createRegistry(starterTypes()).get('map-repo');
       expect(def.kind).toBe('learn');
-      expect(def.leafOnly).toBe(true);
+      expect(def.leafOnly).toBe(false);
     });
 
     it('belongs to the comprehend family', () => {
@@ -332,10 +332,10 @@ describe('starterTypes', () => {
   });
 
   describe('deep-dive-region', () => {
-    it('has kind learn and IS leafOnly', () => {
+    it('has kind learn and is NOT leafOnly (ADR-029: comprehension recurses)', () => {
       const def = createRegistry(starterTypes()).get('deep-dive-region');
       expect(def.kind).toBe('learn');
-      expect(def.leafOnly).toBe(true);
+      expect(def.leafOnly).toBe(false);
     });
 
     it('belongs to the comprehend family', () => {

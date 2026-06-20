@@ -24,6 +24,14 @@ export function comprehendTypes(): GoalTypeDef[] {
      *
      * Harness prompt instructs the brain to:
      *   - Read the repo at `spec.repoRoot` (category `spec.category`).
+     *   - DECIDE first (ADR-029): a `map-repo` goal obeys the recursion law like
+     *     every other family. If the region (`spec.repoRoot` / `spec.scope`) is
+     *     too large to comprehend FAITHFULLY in one node's context — too many
+     *     files or subsystems to map without dropping evidence or exhausting the
+     *     budget — return a SPLIT. The split partitions the region into DISJOINT
+     *     sub-regions whose UNION COVERS the parent (no overlap, no gaps); each
+     *     child is itself a `map-repo` goal of the SAME `category` scoped to one
+     *     sub-region. Otherwise SATISFY and emit the artifact directly.
      *   - Build a `KnowledgeArtifact` with pointers-not-bodies, a summary, a
      *     confidence rating, `status: "provisional"`, and `generatedAtSha`
      *     set to the current HEAD SHA.
@@ -32,13 +40,25 @@ export function comprehendTypes(): GoalTypeDef[] {
      *     engine appends a `knowledge-written` event.
      *   - Discovery loop: probe → learn → next probe; extract pointers, not
      *     file bodies.
+     *
+     * Integrate contract (ADR-029): when this goal splits, its children are
+     * sub-region `map-repo` comprehensions. The engine MERGES their child
+     * `KnowledgeArtifact`s into ONE parent `KnowledgeArtifact` (union of
+     * pointers, merged summary, `status: "provisional"`, `generatedAtSha` = the
+     * parent's HEAD SHA, confidence = the conservative min across children) and
+     * gates the merged artifact with the same `mapRepoCheck` a leaf passes — a
+     * structured merge, never a `\n`-join of JSON blobs.
      */
     {
       name: 'map-repo',
       kind: 'learn',
       family: 'comprehend',
       outputSchema: KNOWLEDGE_ARTIFACT_SCHEMA,
-      leafOnly: true,
+      // ADR-029: comprehension recurses — NOT leafOnly. The brain decides
+      // satisfy | split | block; a too-large region splits into sub-region
+      // map-repo children whose KnowledgeArtifacts the engine merges at the
+      // integrate edge (structured merge, mapRepoCheck-gated).
+      leafOnly: false,
       // Live traces (2026-06-11, four mapping runs on a real repo): low-tier
       // first attempts burn the shared token budget exploring before the mid
       // retry starts — mid default is the instrumented call, not a decree.
@@ -64,6 +84,13 @@ export function comprehendTypes(): GoalTypeDef[] {
      *
      * Harness prompt instructs the brain to:
      *   - Read the region at `spec.repoRoot`/`spec.region`.
+     *   - DECIDE first (ADR-029): a `deep-dive-region` goal obeys the recursion
+     *     law. If the region is too large to dive FAITHFULLY in one node — too
+     *     much load-bearing behavior to anchor without dropping facts or
+     *     exhausting the budget — return a SPLIT. The split partitions the region
+     *     into DISJOINT sub-regions whose UNION COVERS the parent (no overlap, no
+     *     gaps); each child is itself a `deep-dive-region` goal scoped to one
+     *     sub-region. Otherwise SATISFY and emit the facts directly.
      *   - Produce a `RegionFacts` with one `DiveFact` per claim; each fact
      *     must carry at least one `{ path, line }` anchor valid at
      *     `generatedAtSha`.
@@ -71,13 +98,22 @@ export function comprehendTypes(): GoalTypeDef[] {
      *     RegionFacts. The deterministic gate verifies every anchor.
      *   - Discovery loop: read region → form claim → find anchoring evidence
      *     → emit; prefer depth over breadth.
+     *
+     * Integrate contract (ADR-029): when this goal splits, its children are
+     * sub-region `deep-dive-region` comprehensions. The engine MERGES their
+     * child `RegionFacts` into ONE parent `RegionFacts` (union of anchored facts,
+     * every fact's anchors preserved) and gates the merged artifact with the same
+     * `diveAnchorCheck` a leaf passes — a structured merge, never a `\n`-join.
      */
     {
       name: 'deep-dive-region',
       kind: 'learn',
       family: 'comprehend',
       outputSchema: REGION_FACTS_SCHEMA,
-      leafOnly: true,
+      // ADR-029: comprehension recurses — NOT leafOnly. A too-large region
+      // splits into sub-region deep-dive-region children whose RegionFacts the
+      // engine merges at the integrate edge (structured merge, diveAnchor-gated).
+      leafOnly: false,
       tier: { default: 'mid', ladder: ['mid', 'high'] },
       deterministic: [artifactPresent, diveAnchorCheck()],
       judgeType: null,
