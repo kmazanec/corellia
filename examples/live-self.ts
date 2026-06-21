@@ -219,16 +219,17 @@ const commission: CommissionInput = {
   },
   scope: SCOPE,
   budget: {
-    // Sized for a real multi-region feature, not a toy. A live:self run on a
-    // real ADR-sized feature splits into several implementation children AND
-    // the coverage gate injects one comprehension child per region/category it
-    // must map first — the prior attempts:5 cap rejected the legitimate
-    // fan-out ("Fan-out of 12 children exceeds parent attempt budget of 5").
-    // attempts bounds the per-level fan-out width, so it must exceed
-    // (implementation children + injected comprehension children).
-    attempts: 20,
-    tokens: 3_000_000,
-    toolCalls: 300,
+    // Proving-run headroom: deliberately generous so that structural budget
+    // rejections (subdivide floors attempts, so a small share of a small parent
+    // collapses to attempts:1 — which a now-RECURSING comprehension child cannot
+    // fan out from) stop masking the real question of whether recursive
+    // comprehension functions end-to-end. attempts is the lever: it bounds
+    // per-level fan-out width AND, after subdivision, how much each child can
+    // itself split. Tune down later; while validating the architecture, keep it
+    // off the critical path.
+    attempts: 80,
+    tokens: 5_000_000,
+    toolCalls: 600,
     wallClockMs: 1_800_000,
   },
   intent: 'production',
@@ -236,7 +237,7 @@ const commission: CommissionInput = {
 
 console.log('── commissioning ─────────────────────────────────────────────────────────');
 console.log(`  Intent id:  ${intentId}`);
-console.log(`  Budget:     20 attempts, 3M tokens, 300 tool calls, 30 min`);
+console.log(`  Budget:     80 attempts, 5M tokens, 600 tool calls, 30 min`);
 console.log('');
 console.log('Running... (this is a live LLM run; costs are real)');
 console.log('');
