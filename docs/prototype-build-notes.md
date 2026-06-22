@@ -850,3 +850,94 @@ over-fires.
 real problem is comprehension SCOPING (over-firing / speculative whole-repo
 comprehension), which is the unbuilt half of the ADR (Decisions 2+4) — a real
 design iteration, not a knob.
+
+# Iteration 09 — Comprehension scoping (ADR-029 Decisions 2 + 4)
+
+Built on `main` (hand-build, per the bootstrap contract: commissioning this
+through `live:self` would drown in the very over-firing it fixes). The recursion
+MECHANISM (iteration 08, Decisions 1+3) was proven; this iteration builds the
+layer that decides WHAT to comprehend.
+
+## Root cause of the over-firing (iteration-08 proof runs: ~16 comprehension goals
+## for a trivial new-util feature)
+
+Two structural sources in the coverage policy table + the gate wiring:
+
+1. **Whole-repo `architecture`+`stack` on every root split** (`coverage.ts`
+   ROOT_SPLIT row). Any non-leaf make goal demanded the whole-repo maps
+   unconditionally — no notion of "this intent is trivial / greenfield". A new
+   isolated util triggered two whole-repo `map-repo` goals.
+2. **Region dives for every UNIONED child scope** (`engine.ts` runCoverageGate).
+   Every proposed make-leaf child's scope was unioned into the coverage goal,
+   then a `deep-dive-region` miss was minted per uncovered scope entry — incl.
+   regions a child was merely CREATING fresh. This was the ×10 dives of
+   unrelated regions.
+
+## The fix — relevance-bounded table (ADR-029 Decision 2)
+
+Kept the deterministic, brain-free coverage table (ADR-021); made its DEMANDS
+relevance-bounded by a new existence signal:
+
+- `CoverageGoal.existsByRegion?: Record<string, boolean>` (pure data; absent ⇒
+  treat-as-existing, so the whole pre-existing test corpus is byte-identical).
+- **Greenfield root split:** a root split whose scope is non-empty and points
+  ENTIRELY at new/untracked regions no longer pulls `architecture`+`stack`
+  (`requiredCategories = []`). A scope-less whole-repo intent still does.
+- **Region dives:** only EXISTING regions are dived; a region being created
+  fresh is skipped.
+- **Existence-filtered union (design fork, decided with the operator):** code-leaf
+  make types are `leafOnly` → they go straight to `satisfy` and NEVER run their
+  own coverage gate, so the PARENT is the only place their region dives can be
+  pulled. So the child-scope union was KEPT (removing it wholesale would mean an
+  existing-region feature never gets that region comprehended) but is now
+  bounded by `existsByRegion`: union child scopes, dive only the EXISTING ones.
+- Existence is an injectable seam on the knowledge wiring
+  (`EngineOptions.knowledge.regionExists`), real `existsSync`-backed impl in
+  `assembleKnowledgeWiring`, deterministic injection in tests. The engine keeps
+  a private `regionExistsInTree` fallback for when the hook is absent.
+
+## ADR-029 Decision 4 + robustness items
+
+3. **`examples/live-foreign-eyes.ts` rewritten** to commission ONE real scoped
+   intent against cats and let the split gate pull JIT comprehension, instead of
+   speculatively commissioning four whole-repo `map-repo` categories. Asserts
+   TWO things: the intent converges (no blockers) AND comprehension is scoped
+   (map-repo + deep-dive count ≤ `COMPREHENSION_BUDGET`, default 6). Read-only:
+   no prBoundary, so it cannot push or open a PR.
+4. **`parseDecision` tolerates a childless split** (`src/brains/llm.ts`): a
+   `{"kind":"split"}` with no/empty `children` now degrades to `satisfy` (handle
+   as a leaf) instead of throwing → blocking the whole node. (iteration-08
+   live:self failure mode.)
+5. **Comprehension decide schema-constraint — VERIFIED ALREADY COVERED, no code.**
+   There is exactly one decide path (`brain.decide`); it already passes
+   `DECISION_SCHEMA` in json_schema mode and blocks-on-unparseable in the catch.
+   The "conversational prose instead of a decision" mode the iteration-08 notes
+   flagged is guarded for ALL decide calls, comprehension included. To be
+   re-confirmed in the live proof run rather than re-coded.
+
+## Tests + gate
+
+- `tests/library/coverage.test.ts`: greenfield root split (no whole-repo demand),
+  mixed/existing root split (still demands), new region (no dive), existing
+  region (dive required), mixed dive, backward-compat (absent existsByRegion).
+- `tests/brains/llm.test.ts`: childless split → satisfy; empty-children → satisfy.
+- Two pre-existing tests updated to the new contract (NOT loosened): the
+  convergence-eyes root-gate missing-set and the gates.test region-dive injection
+  now turn on `regionExists` (the convergence fixture's `src/` really exists; the
+  gates fake-repo injects existence). Both still assert the dive fires for an
+  existing scoped region.
+- `npm test`: **1403 passed, 21 skipped, lint clean.**
+
+## Status — NOT YET PROVEN LIVE
+
+The scoping fix is built, typechecked, and unit-proven. The AC-2 RE-PROOF is the
+remaining step and is OPERATOR-RUN (needs OPENROUTER_API_KEY + GITHUB_TOKEN +
+real spend, cannot run from the dev harness):
+
+  - `live:self` on the trivial `formatDuration`-in-new-`src/util/` feature →
+    expect a PR this time, with comprehension goal count near zero (was ~16).
+  - `live:foreign-eyes` (rewritten) on cats → expect convergence + scoped
+    comprehension (≤ 6).
+
+Record the honest result here when run. Tune the `live:self` proving budget down
+(currently 80/5M/600) once scoping is proven to reduce the goal count.

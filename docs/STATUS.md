@@ -4,6 +4,18 @@
 
 ## Now
 
+Iteration 09 (Comprehension scoping — ADR-029 Decisions 2+4) **built on main,
+unit-proven, NOT YET PROVEN LIVE.** The coverage policy table is now
+relevance-bounded: a greenfield root split (scope entirely new/untracked) no
+longer pulls whole-repo `architecture`+`stack`, and region dives fire only for
+EXISTING regions — the child-scope union is kept but bounded by an injectable
+`regionExists` existence signal. `parseDecision` tolerates a childless split as
+satisfy; `live:foreign-eyes` is rewritten to commission one scoped intent and
+assert JIT-scoped comprehension. **1403 tests green, lint clean.** The AC-2
+re-proof (`live:self` on the trivial util → expect a PR with near-zero
+comprehension goals, was ~16) is OPERATOR-RUN and still pending — see the
+iteration-09 section of [prototype-build-notes.md](./prototype-build-notes.md).
+
 Iteration 08 (Recursion — ADR-029) **landed on main**: `leafOnly` is removed
 from the comprehend family and a structured integrate-merge composes child
 comprehension artifacts into one gate-passing parent artifact. The recursion
@@ -31,6 +43,7 @@ catch — see the iteration-08 sections of
 | 06 | Self-hosting | Shipped | — | 1345 tests; loop closes; AC-2 1/5 (comprehension can't recurse → iter 08) |
 | 07 | Conventions | Shipped | — | 1335 tests; F-68/F-69 layered conventions (ADR-028) |
 | 08 | Recursion | Landed on main; recursion proven; scoping is next | — | ADR-029 Dec 1+3 built (leafOnly off + structured merge); Dec 2+4 (scoped JIT comprehension) deferred → iteration 09 |
+| 09 | Comprehension scoping | Built on main; unit-proven; live re-proof pending | — | ADR-029 Dec 2+4: relevance-bounded coverage (greenfield root split + existence-filtered dives), childless-split tolerance, live-foreign-eyes scoped rewrite; 1403 tests green; AC-2 re-proof operator-run |
 
 ## What's next — iteration 09: comprehension scoping (ADR-029 Decisions 2 + 4)
 
