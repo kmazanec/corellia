@@ -34,6 +34,38 @@ Everything that must persist about this repo lives **in this repo** — in the d
 above, in code, in commit messages, in the event log. Never in an outer harness's
 config or memory. Record durable findings where the factory itself can read them.
 
+## Bootstrap phase — while the factory is still being built (read if you are a harness)
+
+Corellia is being built *by* sessions like yours. Until it can fully build
+itself, the factory legitimately leans on the harness when it stalls — and that
+leaning is itself the signal for what to build next. This is bootstrap-only and
+does not contradict "production depends on no harness" above; it is how we *reach*
+that state. The loop, when Keith hands you a goal:
+
+1. **Prefer the factory.** Where it's the right path, commission the goal through
+   Corellia's own front door (`npm run live:self`, env-driven — see
+   `examples/live-self.ts` for the strange-loop hygiene rules) rather than
+   building it ad hoc. Reason in the factory's terms throughout: `GOAL-TYPES.md`,
+   the constitution (`src/library/constitution.ts`), and verify-on-read
+   discipline govern *how* you work whether the factory or you are driving.
+2. **When the factory stalls, record the stuck point first.** Before hand-building,
+   write down *where* and *why* it stuck into the factory's own durable memory —
+   the per-iteration section of `docs/prototype-build-notes.md` (and `docs/STATUS.md`
+   when it changes the iteration picture; an ADR when it's a design decision; the
+   event log for run-level facts). The stuck point is now tracked factory work,
+   not lost context. This is the whole point: hand-building is the diagnostic.
+3. **Then hand-build the stuck part the Corellia way** — directly on `main` (this
+   is interactive build/cleanup work; the primary checkout stays on `main` and
+   undisturbed, per the strange-loop hygiene in `examples/live-self.ts`).
+   Build it as the factory would have: constitution-compliant, verify-on-read,
+   so the artifact is the kind of output the factory itself would produce.
+4. **Re-prove through the factory** where feasible, closing the loop (as iteration
+   08 did: ADR-029 hand-built on main, then proven via `live:self`).
+
+This section is a redirect, like the rest of this file: the *practice* lives in
+the recorded build notes and STATUS, not here. Delete this section once the
+factory builds itself without a harness in the loop.
+
 ## Code conventions
 
 Cross-cutting code conventions live in `src/library/skills/_shared.md`, read by

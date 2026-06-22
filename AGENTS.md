@@ -11,6 +11,13 @@ carries no operative instructions of its own. The full version of this guidance,
 including the pointers to Corellia's native config / memory / skills / harness,
 is in **`CLAUDE.md`** — read that. (Same content; one source of truth.)
 
+**Bootstrap phase:** while the factory is still being built, it legitimately
+leans on the harness when it stalls, and that leaning is the signal for what to
+build next. The loop — prefer the factory (`npm run live:self`), record the stuck
+point before hand-building, hand-build the stuck part the Corellia way on `main`,
+re-prove through the factory — is written out in the **Bootstrap phase** section
+of **`CLAUDE.md`**. Read it there (one source of truth).
+
 **The one rule:** everything that must persist about this repo lives **in this
 repo** — `DESIGN.md`, `GOAL-TYPES.md`, `docs/` (PRD + ADRs), `src/` (incl. the
 constitution lint in `src/library/constitution.ts` and the skills in
