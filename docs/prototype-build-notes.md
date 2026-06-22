@@ -806,3 +806,47 @@ Gates green on main: typecheck, lint, engine+brain+library suites (1109 passed).
 JIT intent (ADR-029 Decision 4) was out of the implementation scope. The AC-2
 proof is the next step: re-run `live:self` on a SIMPLE feature to show the
 now-recursing factory can self-build — decoupled from the bootstrap paradox.
+
+## AC-2 proof runs after ADR-029 landed — recursion WORKS, but comprehension over-fires
+
+Two `live:self` runs commissioning a TRIVIAL feature (a pure `formatDuration`
+util in a brand-new empty `src/util/`) after ADR-029 landed. Budget raised to
+80/5M/600 for the second to take budget arithmetic off the critical path.
+
+**The success signal (recursion works):**
+- A comprehension goal PASSED: `✓ [deep-dive-region] src/library/types/comprehend.ts`.
+- Comprehension goals now SPLIT — the tree shows a `map-repo` for `conventions`
+  with a nested `Map root /…` child. That nesting is ADR-029's recursion firing:
+  a comprehension parent fanning out comprehension children, which `leafOnly`
+  forbade before. The core thesis is validated end-to-end.
+
+**The real problem exposed (architectural, not budget):** the run drowned in
+~16 comprehension goals (map-repo ×6, deep-dive ×10) for a feature that touches
+only a new isolated file and needs essentially NO comprehension. The coverage
+gate demanded whole-repo maps (architecture, conventions) and deep-dives of
+unrelated regions (`src/engine/engine.ts`, `knowledge-schemas.ts`). This
+violates DESIGN.md's own JIT rule — "a region no goal touches is never mapped;
+no comprehension is ever speculative." Cost ~$0.79, 1.88M prompt tokens, no PR.
+
+This is exactly **ADR-029 Decision 2 + Decision 4** — scoped, split-gate-pulled
+JIT comprehension and the `live-foreign-eyes`/commission rewrite — which were
+NOT in the implemented scope (only the recursion mechanism, Decisions 1+3, was).
+The mechanism recurses correctly; the layer that decides WHAT to comprehend
+over-fires.
+
+**Secondary decision-maker failure modes surfaced (good model, claude-sonnet-4):**
+- `split decision missing children array` — model returned `{kind:"split"}` with
+  no `children`. parseDecision throws → decide-fallback blocks. Candidate: tolerate
+  (a childless split is a satisfy/block, not a hard error).
+- A decide call emitted conversational prose ("Please provide the Codebase Summary
+  Report…") instead of a decision — the comprehension decide prompt under-constrains
+  output; the schema-constraint that fixed deliver-intent decide may not cover the
+  comprehension decide path identically.
+- Deep nesting still floors child attempts to 1 (`Fan-out of 7 > 1`) even at
+  80 root attempts — subdivide's floor compounds with depth. Noted, not chased
+  (budget is off the critical path by direction).
+
+**Status:** ADR-029's recursion MECHANISM is proven working and landed. The next
+real problem is comprehension SCOPING (over-firing / speculative whole-repo
+comprehension), which is the unbuilt half of the ADR (Decisions 2+4) — a real
+design iteration, not a knob.
