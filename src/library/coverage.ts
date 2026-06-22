@@ -37,6 +37,29 @@ export interface CoverageGoal {
    * so the table can decide whether a region dive is needed.
    */
   typeName: string;
+  /**
+   * Per-region existence: does each scope region correspond to EXISTING tracked
+   * code in the repo? Keyed by the normalized region (trailing slash stripped),
+   * exactly as the region-dive loop normalizes scope entries.
+   *
+   * This is the relevance signal (ADR-029 Decision 2): comprehension is "pulled
+   * by the split gate, bounded by the regions the goal touches" — and a region
+   * that does not yet exist has nothing to comprehend. A region absent from this
+   * map defaults to `true` (treat as existing), so callers that do not supply it
+   * — and the existing test corpus — behave exactly as before.
+   *
+   *   - Root split whose scope is non-empty and entirely NEW (every region
+   *     present here is `false`): the whole-repo architecture+stack maps are not
+   *     pulled — there is no existing structure to comprehend to decompose a
+   *     greenfield region. A scope-less root split (whole-repo intent) still
+   *     requires them.
+   *   - Region dives: only EXISTING regions are dived; a region being created
+   *     fresh is never demanded as a deep-dive.
+   *
+   * The engine computes this from the working tree (it has fs access); the check
+   * stays pure by consuming it as data.
+   */
+  existsByRegion?: Record<string, boolean>;
 }
 
 /** The minimal slice of a knowledge artifact the coverage check needs. */
@@ -199,9 +222,28 @@ export function coverageCheck(
 
   let requiredCategories: KnowledgeCategory[];
 
-  if (goal.isRootSplit) {
+  /** Normalize a scope entry to a region key (strip trailing slash). Must match
+   *  the region-dive loop's normalization so `existsByRegion` keys line up. */
+  const regionKey = (scopeEntry: string): string => scopeEntry.replace(/\/$/, '');
+  /** A region exists unless explicitly recorded as `false` in existsByRegion. */
+  const regionExists = (region: string): boolean =>
+    goal.existsByRegion?.[region] !== false;
+
+  // Relevance bound (ADR-029 Decision 2): a root split whose scope is non-empty
+  // and points ENTIRELY at new/untracked regions has no existing structure to
+  // comprehend, so it does not pull whole-repo architecture+stack maps. A
+  // scope-less root split (a genuine whole-repo intent) still requires them.
+  const isGreenfieldRootSplit =
+    goal.isRootSplit &&
+    goal.scope.length > 0 &&
+    goal.scope.every((s) => !regionExists(regionKey(s)));
+
+  if (goal.isRootSplit && !isGreenfieldRootSplit) {
     // Row 2: root split
     requiredCategories = [...COVERAGE_POLICY_TABLE.ROOT_SPLIT_CATEGORIES];
+  } else if (isGreenfieldRootSplit) {
+    // Greenfield root split — no whole-repo comprehension pulled.
+    requiredCategories = [];
   } else if (COVERAGE_POLICY_TABLE.CHARACTERIZE_TYPE_NAMES.includes(goal.typeName)) {
     // Row 4: characterize/test work
     requiredCategories = [...COVERAGE_POLICY_TABLE.CHARACTERIZE_CATEGORIES];
@@ -235,7 +277,10 @@ export function coverageCheck(
     // For simplicity in v1: each scope entry is treated as a potential region.
     for (const scopeEntry of goal.scope) {
       // Normalize: strip trailing slash
-      const region = scopeEntry.replace(/\/$/, '');
+      const region = regionKey(scopeEntry);
+      // Relevance bound (ADR-029 Decision 2): a region being created fresh has
+      // nothing to deep-dive — only existing regions are comprehended.
+      if (!regionExists(region)) continue;
       if (!coveredRegions.has(region)) {
         missing.push({
           category: 'architecture',  // region dives are architecture-class knowledge

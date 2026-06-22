@@ -27,6 +27,8 @@ import {
 } from '../library/script-runner.js';
 import { pushBranchTool, openPrTool, type FetchTransport } from './pr-tools.js';
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join, isAbsolute } from 'node:path';
 import { openTreeWorktree, type TreeWorktree } from './worktree.js';
 import { retrievalTools, type RetrievalDeps } from '../library/retrieval.js';
 import { scanImports } from '../library/imports.js';
@@ -608,6 +610,14 @@ export function assembleKnowledgeWiring(
       defaultMintComprehension(config.repoRoot, missing),
     persist: (goal: Goal, artifact: Artifact): Promise<void> =>
       persistLearnArtifact(store, registry, goal, artifact),
+    regionExists: (repoRoot: string, region: string): boolean => {
+      // ADR-029 Decision 2 relevance signal: a region exists if its path is
+      // present in the working tree. An empty region (whole-repo intent) is the
+      // repo itself; a region resolving outside repoRoot is not part of it.
+      if (region === '') return true;
+      const abs = isAbsolute(region) ? region : join(repoRoot, region);
+      return existsSync(abs);
+    },
   };
 }
 

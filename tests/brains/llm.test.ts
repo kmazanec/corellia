@@ -152,6 +152,28 @@ describe('LlmBrain.decide', () => {
     expect(result.value.kind).toBe('split');
   });
 
+  it('treats a split with no children array as satisfy (not a hard error)', async () => {
+    // Regression (iteration-08 live:self): the model returned `{"kind":"split"}`
+    // with no `children`. parseDecision threw, the decide-fallback then blocked
+    // the whole node. A split that proposes nothing is "I cannot decompose this"
+    // — degrade to satisfy (handle as a leaf), not a block.
+    const { fetch } = stubFetch(
+      chatResponse(JSON.stringify({ kind: 'split' })),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(result.value.kind).toBe('satisfy');
+  });
+
+  it('treats a split with an empty children array as satisfy', async () => {
+    const { fetch } = stubFetch(
+      chatResponse(JSON.stringify({ kind: 'split', children: [] })),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(result.value.kind).toBe('satisfy');
+  });
+
   it('normalizes a split child that omits dependsOn/scope to empty arrays', async () => {
     // Regression: the live model omitted `dependsOn`, and the raw child flowed
     // into the engine's split/integrate machinery where `[...child.dependsOn]`

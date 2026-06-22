@@ -1,5 +1,5 @@
 /**
- * live:foreign-eyes — AC-2 early checkpoint harness (F-67 Chunk 3).
+ * live:foreign-eyes — AC-2 early checkpoint harness (ADR-029 Decision 4).
  *
  * OPERATOR-RUN: this script is NOT CI-gated. Run it with a real OPENROUTER_API_KEY
  * before any deliver spend (live:self or live:foreign). It is the hard gate on
@@ -7,14 +7,25 @@
  *
  * PURPOSE
  * ─────────────────────────────────────────────────────────────────────────────
- * Retests the cats repo under the iteration-06 stack:
- *   - Structured emission (ADR-023 KnowledgeArtifact JSON)
- *   - F-64 economics (provider pinning + duplicate-call guard + cost reporting)
- *   - F-65 read-only root path (learn goals: no worktree write capability)
+ * Tests the design as written (ADR-029 Decision 4): comprehension is JIT, pulled
+ * by the split gate, bounded by the regions the intent touches. This harness
+ * commissions ONE real scoped intent against cats and lets the split gate decide
+ * what to comprehend — instead of speculatively commissioning four whole-repo
+ * map-repo categories (the old behavior, which violated DESIGN's own JIT rule:
+ * "a region no goal touches is never mapped; no comprehension is ever
+ * speculative").
  *
- * Target: 5/5 knowledge categories. cats blocked all five in iteration-04
- * (pre-structured-emission). This checkpoint determines whether the new stack
- * unblocks comprehension before any deliver spend is authorized.
+ * Success is asserted on TWO things, both of which the iteration-08 proof runs
+ * showed the old design failing:
+ *   1. The scoped intent CONVERGES (the commission returns with no blockers).
+ *   2. Comprehension is SCOPED, not speculative — the gate pulls only the
+ *      comprehension the intent needs (map-repo + deep-dive-region goal count is
+ *      bounded, not a whole-repo sweep). The harness reports the count; the
+ *      operator records the honest number either way.
+ *
+ * This is read-only on cats: no prBoundary is configured, so no branch is pushed
+ * and no PR is opened. The checkpoint proves comprehension SCOPING, not delivery
+ * (that is live:foreign / live:self).
  *
  * STRANGE-LOOP HYGIENE (not applicable here — this targets cats, not corellia)
  *   The cats target is a foreign repo; no nested-worktree concern applies.
@@ -28,9 +39,15 @@
  *
  * OPTIONAL OVERRIDES
  * ─────────────────────────────────────────────────────────────────────────────
- *   CORELLIA_MODEL_LOW   — override low-tier model id
- *   CORELLIA_MODEL_MID   — override mid-tier model id
- *   CORELLIA_MODEL_HIGH  — override high-tier model id
+ *   CATS_EYES_FEATURE    — the scoped intent to commission (a real, narrow
+ *                          feature). Default: a small, self-contained addition
+ *                          that touches one existing region.
+ *   CATS_EYES_SCOPE      — comma-separated scope prefixes for the intent.
+ *                          Default: matches the default feature.
+ *   COMPREHENSION_BUDGET — soft ceiling on comprehension goals before the run is
+ *                          flagged as over-firing (default 6). The pre-ADR-029
+ *                          runs minted ~16 for a trivial intent.
+ *   CORELLIA_MODEL_LOW / _MID / _HIGH — model id overrides per tier.
  *
  * USAGE
  * ─────────────────────────────────────────────────────────────────────────────
@@ -39,30 +56,30 @@
  *
  * SAFETY
  * ─────────────────────────────────────────────────────────────────────────────
- * The run is strictly READ-ONLY on the cats repo. learn-kind root goals open
- * no worktree on the target repo (F-65 A12). After the run, the cats checkout
- * is byte-identical (modulo the benign .git/info/exclude line the first
- * openSandboxAssembly call adds — but F-65 means no sandbox worktree is opened).
+ * No prBoundary → push_branch / open_pr are not granted, so the run cannot push
+ * to or open a PR on cats. The factory opens a sandbox worktree under cats'
+ * .corellia/worktrees/ for the deliver run (gitignored); the cats primary
+ * checkout is undisturbed. Verify with `git -C <cats> status` after the run.
  *
  * OUTCOME
  * ─────────────────────────────────────────────────────────────────────────────
- * After the run, record the honest result (pass count + any failures) in:
- *   docs/prototype-build-notes.md  (iteration-06 section, AC-2 evidence)
+ * After the run, record the honest result (convergence + comprehension count) in:
+ *   docs/prototype-build-notes.md  (iteration-09 section, AC-2 evidence)
  *
- * If cats blocks again, root-cause before approving any deliver spend.
+ * If the intent blocks or comprehension over-fires, root-cause before approving
+ * any deliver spend.
  */
 
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { randomBytes } from 'node:crypto';
 
 import { loadDotEnv } from '../src/env.js';
 import { InMemoryEventStore } from '../src/eventlog/memory-store.js';
-import { projectKnowledge, costSummary } from '../src/eventlog/projections.js';
-import type { Goal } from '../src/contract/goal.js';
-import type { KnowledgeCategory } from '../src/contract/knowledge.js';
+import { projectKnowledge, costSummary, renderTree } from '../src/eventlog/projections.js';
 import { buildLiveEngine, assertGitRepo } from '../src/daemon/live-engine.js';
-import { randomBytes } from 'node:crypto';
+import { Listener } from '../src/listener/listener.js';
+import type { CommissionInput } from '../src/contract/brief.js';
 
 // ── Env + Gate ─────────────────────────────────────────────────────────────────
 
@@ -70,7 +87,7 @@ loadDotEnv();
 
 console.log('');
 console.log('╔══════════════════════════════════════════════════════════════════════╗');
-console.log('║     Corellia factory — live:foreign-eyes (AC-2 early checkpoint)     ║');
+console.log('║     Corellia factory — live:foreign-eyes (AC-2 scoped checkpoint)    ║');
 console.log('╚══════════════════════════════════════════════════════════════════════╝');
 console.log('');
 
@@ -97,154 +114,107 @@ const catsRoot = resolve(expanded);
 
 assertGitRepo(catsRoot, 'live:foreign-eyes');
 
+// The scoped intent. A narrow, real feature against ONE region so the split gate
+// has something concrete to pull comprehension for — and a clear chance to NOT
+// pull whole-repo maps. Override via env for a different cats-appropriate intent.
+const FEATURE =
+  process.env['CATS_EYES_FEATURE'] ??
+  'Add a small, self-contained documentation comment block to the top of the main entry-point source file describing what the module does. No behavior change.';
+const SCOPE_RAW = process.env['CATS_EYES_SCOPE'] ?? 'src/';
+const SCOPE = SCOPE_RAW.split(',').map((s) => s.trim()).filter(Boolean);
+const COMPREHENSION_BUDGET = Number(process.env['COMPREHENSION_BUDGET'] ?? '6');
+
 console.log(`Target repo:  ${catsRoot} (cats)`);
-console.log(`Mode:         comprehension-only (read-only; learn goals; no worktree)`);
-console.log(`Economics:    provider-pinned requests (F-64); cache-hit share reported`);
+console.log(`Mode:         scoped intent → JIT comprehension pulled by the split gate (read-only; no PR)`);
+console.log(`Feature:      ${FEATURE}`);
+console.log(`Scope:        ${SCOPE.join(', ')}`);
+console.log(`Over-fire flag if comprehension goals > ${COMPREHENSION_BUDGET}`);
 console.log('');
 
 // ── Store + Engine ─────────────────────────────────────────────────────────────
 
 const store = new InMemoryEventStore();
 const runNonce = randomBytes(4).toString('hex');
+const intentId = `foreign-eyes-${runNonce}`;
 
-// Pick a reasonable dive region.
-function pickDiveRegion(repo: string): string {
-  let best: string | null = null;
-  let bestCount = -1;
-  for (const candidate of ['src', 'app', 'lib', 'pkg']) {
-    const full = join(repo, candidate);
-    if (!existsSync(full)) continue;
-    let count: number;
-    try { count = readdirSync(full).length; } catch { count = 0; }
-    if (count > bestCount) { bestCount = count; best = candidate; }
-  }
-  return best ?? '.';
-}
-
-const diveRegion = pickDiveRegion(catsRoot);
-const CATEGORIES: KnowledgeCategory[] = ['architecture', 'stack', 'conventions', 'test-scaffold'];
-
-// Detect declared test script.
-function detectDeclaredScripts(repo: string): Record<string, string> {
-  try {
-    const pkg = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')) as { scripts?: Record<string, string> };
-    if (pkg.scripts?.['test']) return { test: 'npm-script:test' };
-  } catch { /* no package.json */ }
-  return {};
-}
-
-const declaredScripts = detectDeclaredScripts(catsRoot);
-
+// No prBoundary: this checkpoint is read-only on cats. The factory may open a
+// sandbox worktree but cannot push or open a PR.
 const engine = buildLiveEngine({
   store,
   sandbox: {
     repoRoot: catsRoot,
-    declaredScripts,
+    declaredScripts: {},
     knowledge: true,
   },
   knowledge: true,
   goldenCapture: true,
 });
 
-// ── Commission: one map-repo goal per category ─────────────────────────────────
+const listener = new Listener({ engine, store });
 
-// Budget shape for real-repo comprehension. The toolCalls ceiling is generous:
-// the 2026-06-12 eyes-on-cats checkpoint failed 0/5 because toolCalls: 20
-// exhausted exploration before the model could emit. The engine now treats the
-// toolCalls budget as warn-only by default (the tokens budget and dollar ceiling
-// are the real backstops), so this number is a soft nudge, not a hard wall —
-// raised here so the "remaining" signal stays meaningful rather than punitive.
-const DEFAULT_BUDGET = {
-  attempts: 3,
-  tokens: 2_000_000,
-  toolCalls: 200,
-  wallClockMs: 900_000,
+// ── Commission the scoped intent ─────────────────────────────────────────────────
+
+const commission: CommissionInput = {
+  id: intentId,
+  title: FEATURE,
+  spec: {
+    description: FEATURE,
+    scope: SCOPE,
+    constraints: [
+      'All work must be confined to declared scope.',
+      'Comprehend only what is needed to make this specific change — do not map the whole repo.',
+    ],
+  },
+  scope: SCOPE,
+  budget: {
+    attempts: 5,
+    tokens: 2_000_000,
+    toolCalls: 200,
+    wallClockMs: 1_800_000,
+  },
+  intent: 'production',
 };
 
-function mapGoal(category: KnowledgeCategory): Goal {
-  return {
-    id: `foreign-eyes-${runNonce}-map-${category}`,
-    type: 'map-repo',
-    parentId: null,
-    title: `Map ${category} knowledge — cats`,
-    spec: {
-      repoRoot: catsRoot,
-      category,
-      description: `Map the "${category}" knowledge of the cats repo at ${catsRoot}.`,
-    },
-    intent: 'production',
-    scope: [],
-    budget: DEFAULT_BUDGET,
-    memories: [],
-  };
-}
-
-function diveGoal(): Goal {
-  return {
-    id: `foreign-eyes-${runNonce}-dive-${diveRegion.replace(/[^a-z0-9]/gi, '-')}`,
-    type: 'deep-dive-region',
-    parentId: null,
-    title: `Deep-dive region "${diveRegion}" — cats`,
-    spec: {
-      repoRoot: catsRoot,
-      region: diveRegion,
-      reason: 'Early checkpoint: validate region comprehension before deliver runs.',
-    },
-    intent: 'production',
-    scope: [diveRegion],
-    budget: DEFAULT_BUDGET,
-    memories: [],
-  };
-}
-
-// ── Run ────────────────────────────────────────────────────────────────────────
-
-console.log(`Categories:   ${CATEGORIES.join(', ')}`);
-console.log(`Dive region:  ${diveRegion}`);
-console.log(`Run nonce:    ${runNonce}`);
+console.log('── commissioning scoped intent ───────────────────────────────────────────');
+console.log(`  Intent id:  ${intentId}`);
+console.log(`  Budget:     5 attempts, 2M tokens, 200 tool calls, 30 min`);
 console.log('');
-console.log('Starting comprehension runs. Each category runs sequentially.');
-console.log('This may take several minutes. Costs are real — operator is watching.');
+console.log('Running... (this is a live LLM run; costs are real)');
 console.log('');
 
-const results: Array<{ category: string; ok: boolean; error: string | undefined }> = [];
-
-for (const category of CATEGORIES) {
-  const goal = mapGoal(category);
-  process.stdout.write(`  [map-repo:${category}] ... `);
-  try {
-    const report = await engine.run(goal);
-    const ok = report.blockers.length === 0;
-    results.push({ category, ok, error: ok ? undefined : report.blockers.join('; ') });
-    console.log(ok ? 'PASS' : `FAIL — ${report.blockers.join('; ')}`);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    results.push({ category, ok: false, error: msg });
-    console.log(`ERROR — ${msg}`);
-  }
+let report;
+let runError: string | undefined;
+try {
+  report = await listener.commission(commission);
+} catch (err) {
+  runError = err instanceof Error ? err.message : String(err);
+  console.error('');
+  console.error('═══ LIVE:FOREIGN-EYES RUN FAILED ═══════════════════════════════════════');
+  console.error('Error:', runError);
 }
 
-// Dive region.
-{
-  const goal = diveGoal();
-  process.stdout.write(`  [deep-dive:${diveRegion}] ... `);
-  try {
-    const report = await engine.run(goal);
-    const ok = report.blockers.length === 0;
-    results.push({ category: `dive:${diveRegion}`, ok, error: ok ? undefined : report.blockers.join('; ') });
-    console.log(ok ? 'PASS' : `FAIL — ${report.blockers.join('; ')}`);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    results.push({ category: `dive:${diveRegion}`, ok: false, error: msg });
-    console.log(`ERROR — ${msg}`);
-  }
+// ── Projections: convergence + comprehension scoping ──────────────────────────────
+
+const allEvents = await store.list();
+
+// Count comprehension goals the gate pulled, from goal-received events.
+const COMPREHENSION_TYPES = new Set(['map-repo', 'deep-dive-region']);
+let mapRepoCount = 0;
+let diveCount = 0;
+for (const e of allEvents) {
+  if (e.type !== 'goal-received') continue;
+  const goalType = e.goal.type;
+  if (!COMPREHENSION_TYPES.has(goalType)) continue;
+  if (goalType === 'map-repo') mapRepoCount += 1;
+  else diveCount += 1;
 }
+const comprehensionCount = mapRepoCount + diveCount;
+
+const converged = runError === undefined && report !== undefined && report.blockers.length === 0;
 
 // ── Cost summary ───────────────────────────────────────────────────────────────
 
-const allEvents = await store.list();
 const cost = costSummary(allEvents);
-
 console.log('');
 console.log('── cost summary ─────────────────────────────────────────────────────────');
 console.log(`  prompt tokens:     ${cost.tree.promptTokens}`);
@@ -272,29 +242,37 @@ if (knowledge.artifacts.size === 0) {
 }
 console.log('');
 
+// ── Goal tree ────────────────────────────────────────────────────────────────────
+
+console.log('── goal tree ──────────────────────────────────────────────────────────────');
+console.log(renderTree(allEvents));
+console.log('');
+
 // ── Result summary ─────────────────────────────────────────────────────────────
 
-const passed = results.filter((r) => r.ok).length;
-const total = results.length;
+const scoped = comprehensionCount <= COMPREHENSION_BUDGET;
 
 console.log('── result summary ────────────────────────────────────────────────────────');
-for (const r of results) {
-  const icon = r.ok ? '✓' : '✗';
-  const detail = r.error ? `  — ${r.error}` : '';
-  console.log(`  ${icon} ${r.category}${detail}`);
+console.log(`  convergence:        ${converged ? '✓ intent converged (no blockers)' : '✗ intent did NOT converge'}`);
+if (runError !== undefined) {
+  console.log(`    run error:        ${runError}`);
+} else if (report !== undefined && report.blockers.length > 0) {
+  console.log(`    blockers:         ${report.blockers.join('; ')}`);
 }
-console.log('');
-console.log(`  ${passed}/${total} categories passed`);
+console.log(`  comprehension:      ${mapRepoCount} map-repo + ${diveCount} deep-dive = ${comprehensionCount} goal(s)`);
+console.log(`  scoping:            ${scoped ? `✓ scoped (≤ ${COMPREHENSION_BUDGET})` : `✗ OVER-FIRES (> ${COMPREHENSION_BUDGET} — speculative whole-repo comprehension)`}`);
 console.log('');
 
-if (passed === total) {
-  console.log('AC-2 CHECKPOINT: ALL CATEGORIES PASSED.');
-  console.log('The cats repo is comprehension-ready for deliver runs (live:foreign).');
+const pass = converged && scoped;
+if (pass) {
+  console.log('AC-2 CHECKPOINT: PASSED.');
+  console.log('A scoped intent converged with JIT-scoped comprehension (ADR-029 Decision 4).');
   console.log('Record this result in docs/prototype-build-notes.md and approve deliver spend.');
 } else {
-  console.log('AC-2 CHECKPOINT: SOME CATEGORIES FAILED.');
-  console.log('Root-cause the failures above before approving deliver spend.');
-  console.log('Record the honest result in docs/prototype-build-notes.md.');
+  console.log('AC-2 CHECKPOINT: FAILED.');
+  if (!converged) console.log('  The intent did not converge — root-cause the blockers above.');
+  if (!scoped) console.log('  Comprehension over-fired — the split gate pulled speculative whole-repo maps.');
+  console.log('  Record the honest result in docs/prototype-build-notes.md before any spend.');
 }
 console.log('');
 
@@ -302,22 +280,26 @@ console.log('');
 
 console.log('── evidence template for prototype-build-notes.md ───────────────────────');
 console.log('');
-console.log('<!-- paste into docs/prototype-build-notes.md → iteration-06 section -->');
+console.log('<!-- paste into docs/prototype-build-notes.md → iteration-09 section -->');
 console.log('');
-console.log('### AC-2: live:foreign-eyes early checkpoint result');
+console.log('### AC-2: live:foreign-eyes scoped checkpoint result');
 console.log('');
 console.log(`**Date:** ${new Date().toISOString().split('T')[0]}`);
 console.log(`**Target:** cats (${catsRoot})`);
 console.log(`**Run nonce:** ${runNonce}`);
+console.log(`**Intent:** ${FEATURE}`);
+console.log(`**Scope:** ${SCOPE.join(', ')}`);
 console.log('');
-console.log('| Category | Result |');
+console.log('| Check | Result |');
 console.log('|---|---|');
-for (const r of results) {
-  console.log(`| ${r.category} | ${r.ok ? 'PASS' : `FAIL: ${r.error ?? '?'}`} |`);
-}
+console.log(`| Convergence | ${converged ? 'PASS (no blockers)' : `FAIL${runError ? `: ${runError}` : report ? `: ${report.blockers.join('; ')}` : ''}`} |`);
+console.log(`| Comprehension goals | ${comprehensionCount} (${mapRepoCount} map-repo + ${diveCount} deep-dive) |`);
+console.log(`| Scoping (≤ ${COMPREHENSION_BUDGET}) | ${scoped ? 'PASS' : 'FAIL — over-fires'} |`);
 console.log('');
 console.log(`**Cost:** ${totalCost}`);
 console.log(`**Cache-hit share:** ${cacheHitPct}`);
 console.log('');
-console.log(`**Decision:** ${passed === total ? 'Approve deliver spend.' : 'Root-cause failures before spend.'}`);
+console.log(`**Decision:** ${pass ? 'Approve deliver spend.' : 'Root-cause before spend.'}`);
 console.log('');
+
+process.exit(pass ? 0 : 1);

@@ -513,7 +513,15 @@ function parseDecision(raw: string): Decision {
   }
   if (kind === 'split') {
     const children = obj['children'];
-    if (!Array.isArray(children)) throw new Error('split decision missing children array');
+    // A split with no (or empty) children is not a malformed decision — it is a
+    // node that wanted to decompose but proposed nothing, i.e. "I cannot break
+    // this down further." Treat it as a satisfy (handle as a leaf) rather than
+    // throwing: the throw previously propagated to the decide-fallback and turned
+    // a recoverable terseness into a hard block (surfaced by an iteration-08
+    // live:self run: `{"kind":"split"}` with no children blocked the whole node).
+    if (!Array.isArray(children) || children.length === 0) {
+      return { kind: 'satisfy' };
+    }
     // Normalize each child into a structurally-complete ChildPlan. The model
     // routinely omits the list fields that have a natural empty default
     // (`dependsOn`, `scope`) — left raw, those omissions crash deep in the engine

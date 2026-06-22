@@ -261,6 +261,155 @@ describe('code-emitting leaf (make kind)', () => {
   });
 });
 
+// ── ADR-029 Decision 2: relevance-bounded comprehension ───────────────────────
+
+describe('greenfield root split — no whole-repo comprehension pulled', () => {
+  it('root split over an entirely NEW scope does not demand architecture or stack', () => {
+    const result = coverageCheck(
+      makeGoal({
+        isRootSplit: true,
+        scope: ['src/util/'],
+        existsByRegion: { 'src/util': false },
+      }),
+      makeKnowledge(), // no artifacts at all
+    );
+    expect(result.ok).toBe(true);
+    expect(result.missing).toHaveLength(0);
+  });
+
+  it('root split with a MIX of new and existing scope still demands whole-repo maps', () => {
+    const result = coverageCheck(
+      makeGoal({
+        isRootSplit: true,
+        scope: ['src/util/', 'src/engine/'],
+        existsByRegion: { 'src/util': false, 'src/engine': true },
+      }),
+      makeKnowledge(),
+    );
+    expect(result.ok).toBe(false);
+    const cats = result.missing.map((m) => m.category);
+    expect(cats).toContain('architecture');
+    expect(cats).toContain('stack');
+  });
+
+  it('scope-less root split (whole-repo intent) still demands whole-repo maps', () => {
+    const result = coverageCheck(
+      makeGoal({ isRootSplit: true, scope: [] }),
+      makeKnowledge(),
+    );
+    expect(result.ok).toBe(false);
+    const cats = result.missing.map((m) => m.category);
+    expect(cats).toContain('architecture');
+    expect(cats).toContain('stack');
+  });
+
+  it('existing-scope root split (existsByRegion all true) still demands whole-repo maps', () => {
+    const result = coverageCheck(
+      makeGoal({
+        isRootSplit: true,
+        scope: ['src/engine/'],
+        existsByRegion: { 'src/engine': true },
+      }),
+      makeKnowledge(),
+    );
+    expect(result.ok).toBe(false);
+    const cats = result.missing.map((m) => m.category);
+    expect(cats).toContain('architecture');
+    expect(cats).toContain('stack');
+  });
+});
+
+describe('region dives bounded to existing regions', () => {
+  it('a NEW region in a code-leaf scope is not demanded as a deep-dive', () => {
+    const result = coverageCheck(
+      makeGoal({
+        typeName: 'implement',
+        scope: ['src/util/'],
+        existsByRegion: { 'src/util': false },
+      }),
+      makeKnowledge({
+        artifacts: [
+          { category: 'architecture', generatedAtSha: HEAD, repoRoot: '/repo' },
+          { category: 'conventions', generatedAtSha: HEAD, repoRoot: '/repo' },
+        ],
+        regionFacts: [],
+      }),
+    );
+    expect(result.ok).toBe(true);
+    const regions = result.missing.filter((m) => m.region).map((m) => m.region);
+    expect(regions).not.toContain('src/util');
+  });
+
+  it('an EXISTING uncovered region in a code-leaf scope is still demanded', () => {
+    const result = coverageCheck(
+      makeGoal({
+        typeName: 'implement',
+        scope: ['src/payments/'],
+        existsByRegion: { 'src/payments': true },
+      }),
+      makeKnowledge({
+        artifacts: [
+          { category: 'architecture', generatedAtSha: HEAD, repoRoot: '/repo' },
+          { category: 'conventions', generatedAtSha: HEAD, repoRoot: '/repo' },
+        ],
+        regionFacts: [],
+      }),
+    );
+    expect(result.ok).toBe(false);
+    const regions = result.missing.filter((m) => m.region).map((m) => m.region);
+    expect(regions).toContain('src/payments');
+  });
+
+  it('mixed new + existing scope dives only the existing region', () => {
+    const result = coverageCheck(
+      makeGoal({
+        typeName: 'implement',
+        scope: ['src/util/', 'src/payments/'],
+        existsByRegion: { 'src/util': false, 'src/payments': true },
+      }),
+      makeKnowledge({
+        artifacts: [
+          { category: 'architecture', generatedAtSha: HEAD, repoRoot: '/repo' },
+          { category: 'conventions', generatedAtSha: HEAD, repoRoot: '/repo' },
+        ],
+        regionFacts: [],
+      }),
+    );
+    expect(result.ok).toBe(false);
+    const regions = result.missing.filter((m) => m.region).map((m) => m.region);
+    expect(regions).toContain('src/payments');
+    expect(regions).not.toContain('src/util');
+  });
+});
+
+describe('existsByRegion backward compatibility (absent = treat as existing)', () => {
+  it('omitting existsByRegion preserves the legacy region-dive demand', () => {
+    const without = coverageCheck(
+      makeGoal({ typeName: 'implement', scope: ['src/payments'] }),
+      makeKnowledge({
+        artifacts: [
+          { category: 'architecture', generatedAtSha: HEAD, repoRoot: '/repo' },
+          { category: 'conventions', generatedAtSha: HEAD, repoRoot: '/repo' },
+        ],
+        regionFacts: [],
+      }),
+    );
+    expect(without.ok).toBe(false);
+    expect(without.missing.some((m) => m.region === 'src/payments')).toBe(true);
+  });
+
+  it('omitting existsByRegion preserves the legacy root-split demand', () => {
+    const without = coverageCheck(
+      makeGoal({ isRootSplit: true, scope: ['src/auth'] }),
+      makeKnowledge(),
+    );
+    expect(without.ok).toBe(false);
+    const cats = without.missing.map((m) => m.category);
+    expect(cats).toContain('architecture');
+    expect(cats).toContain('stack');
+  });
+});
+
 // ── characterize/test work row ────────────────────────────────────────────────
 
 describe('characterize/test work', () => {

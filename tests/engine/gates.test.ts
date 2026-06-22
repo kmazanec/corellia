@@ -400,12 +400,20 @@ function emptyKnowledge(): KnowledgeForCoverage {
 function knowledgeWiring(
   knowledge: KnowledgeForCoverage,
   validateResult = true,
+  // Existence of scope regions in the working tree (ADR-029 Decision 2). These
+  // gate tests run against a fake repoRoot ('/repo') that has no real files, so
+  // existence is injected. Default true: the regions these tests scope are
+  // conceptually present (they predate the existence signal and validate the
+  // dive logic itself). A test exercising greenfield/new-scope suppression
+  // passes a predicate that returns false.
+  regionExists: (repoRoot: string, region: string) => boolean = () => true,
 ): NonNullable<ConstructorParameters<typeof Engine>[0]['knowledge']> {
   const mintedChildren: ChildPlan[] = [];
   return {
     async query(_repoRoot: string) { return knowledge; },
     async headSha(_repoRoot: string) { return knowledge.headSha; },
     async validate(_artifact: KnowledgeArtifact) { return validateResult; },
+    regionExists,
     mintComprehension(missing) {
       const children: ChildPlan[] = missing.map((m, i) => ({
         localId: `comprehension-${m.region ?? m.category}-${i}`,

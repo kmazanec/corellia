@@ -14,6 +14,8 @@
  */
 
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { join, isAbsolute } from 'node:path';
 import type { Goal, Tier, MemoryPointer, Budget, Usage } from '../contract/goal.js';
 import type { Decision, ChildPlan } from '../contract/decision.js';
 import type { Artifact, Report } from '../contract/report.js';
@@ -317,6 +319,16 @@ export interface EngineOptions {
      * passing learn leaf emits exactly as before (no knowledge event appended).
      */
     persist?: (goal: Goal, artifact: Artifact) => Promise<void>;
+    /**
+     * Does a scope region correspond to EXISTING code in the working tree?
+     * The coverage gate's relevance signal (ADR-029 Decision 2): a region that
+     * does not yet exist has nothing to comprehend, so it pulls neither a
+     * whole-repo map (greenfield root split) nor a deep-dive (a child creating a
+     * fresh region). Assembly wires the real existsSync-backed check; tests
+     * inject deterministic existence. When absent, the engine falls back to its
+     * own existsSync probe against repoRoot.
+     */
+    regionExists?: (repoRoot: string, region: string) => boolean;
   };
 }
 
@@ -2521,6 +2533,22 @@ export class Engine {
    * describes the intended three-checkpoint design but only the split checkpoint
    * is currently implemented.
    */
+  /**
+   * Does a scope region correspond to existing code in the working tree? Used by
+   * the coverage gate to bound comprehension to regions that actually exist
+   * (ADR-029 Decision 2): a region being created fresh has nothing to comprehend.
+   *
+   * Deterministic and read-only: a plain path-existence check under repoRoot. An
+   * empty region (whole-repo intent) is treated as existing — it is the repo. A
+   * region resolving outside repoRoot is treated as non-existent (it is not part
+   * of this repo's tree).
+   */
+  private regionExistsInTree(repoRoot: string, region: string): boolean {
+    if (region === '') return true;
+    const abs = isAbsolute(region) ? region : join(repoRoot, region);
+    return existsSync(abs);
+  }
+
   private async runCoverageGate(
     goal: Goal,
     kind: 'make' | 'learn' | 'judge' | 'evolve',
@@ -2547,10 +2575,18 @@ export class Engine {
     const { refreshChildren, validatedOk, refreshedCategories } =
       await this.checkpointVerifyArtifacts(goal, knowledgeState, repoRoot, kw);
 
-    // Build a goal model for coverageCheck — use the parent's kind and split status.
-    // For a root split, the check covers architecture + stack.
-    // Additionally, when children are make-kind leaves with scope, check their
-    // regions for deep-dive coverage too (region-dive misses for code leaves).
+    // Build a goal model for coverageCheck — the parent's kind and split status,
+    // plus the scopes its make-leaf children touch (those leaves go straight to
+    // satisfy and never run their own coverage gate, so the parent is the only
+    // place their region dives can be pulled).
+    //
+    // ADR-029 Decision 2 (comprehension is JIT, pulled by the split gate, bounded
+    // by the regions the goal touches): we union proposed child scopes, but
+    // existsByRegion then bounds the demand to regions that ACTUALLY EXIST. A
+    // child creating a brand-new region has nothing to comprehend, so it pulls no
+    // dive — which is precisely the speculative over-firing the iteration-08
+    // proof runs exposed (~10 dives of unrelated/new regions for a trivial
+    // feature). A child touching an EXISTING region still pulls its dive.
     const coverageGoal = {
       kind,
       isRootSplit: !this.registry.get(goal.type).leafOnly,
@@ -2558,8 +2594,8 @@ export class Engine {
       typeName: goal.type,
     };
 
-    // Collect all scopes from proposed make-kind leaf children and add them
-    // to the coverage goal's scope so region dives are checked for children too.
+    // Collect scopes from proposed make-kind leaf children so region dives are
+    // checked for them too (they never reach a gate on their own).
     const childScopeEntries: string[] = [];
     for (const child of children) {
       if (!this.registry.has(child.type)) continue;
@@ -2568,9 +2604,25 @@ export class Engine {
         childScopeEntries.push(...child.scope);
       }
     }
-    const effectiveCoverageGoal = childScopeEntries.length > 0
-      ? { ...coverageGoal, isRootSplit: false, scope: [...goal.scope, ...childScopeEntries] }
-      : coverageGoal;
+    const effectiveScope =
+      childScopeEntries.length > 0
+        ? [...goal.scope, ...childScopeEntries]
+        : goal.scope;
+
+    // existsByRegion is the relevance signal over the full effective scope: a
+    // region absent from the working tree is never comprehended (greenfield root
+    // split → no whole-repo maps; not-yet-created child region → no dive).
+    const regionExists = kw.regionExists ?? ((root, region) => this.regionExistsInTree(root, region));
+    const existsByRegion: Record<string, boolean> = {};
+    for (const scopeEntry of effectiveScope) {
+      const region = scopeEntry.replace(/\/$/, '');
+      existsByRegion[region] = regionExists(repoRoot, region);
+    }
+
+    const effectiveCoverageGoal =
+      childScopeEntries.length > 0
+        ? { ...coverageGoal, isRootSplit: false, scope: effectiveScope, existsByRegion }
+        : { ...coverageGoal, existsByRegion };
 
     const result = coverageCheck(effectiveCoverageGoal, knowledgeState, validatedOk);
 
