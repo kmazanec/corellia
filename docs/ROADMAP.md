@@ -116,7 +116,7 @@ independent structural fix and gates the PRD's whole Desired Outcome.
 conventions and the relevant slice of the host repo's convention file, with host
 overriding global on conflict.
 
-### Iteration 08 — Recursion: comprehension obeys the split law *(next)*
+### Iteration 08 — Recursion: comprehension obeys the split law *(Decisions 1+3 landed on main; recursion proven live)*
 
 Decision locked in ADR-029 (comprehension recursion). The comprehend family
 (`map-repo`, `deep-dive-region`) is the one family hard-coded `leafOnly` — it
@@ -133,12 +133,44 @@ passes the deterministic gate (the engine's generic text-join would emit invalid
 JSON). `live:foreign-eyes` is rewritten to commission a scoped intent pulled by
 the split gate (JIT per DESIGN.md), and AC-2 is re-verified live.
 
-This iteration is being built through the factory's own front door (`live:self`)
-— the strange loop building the very fix that makes the strange loop converge.
+Built through the factory's own front door (`live:self`) — the strange loop. The
+factory could not bootstrap past the very limit it was fixing, so ADR-029
+**Decisions 1+3** (remove `leafOnly`; structured integrate-merge) were
+hand-implemented on main (`92a00b7`) and the recursion mechanism was then proven
+live (a `deep-dive-region` goal passed; a `map-repo` split into a nested
+sub-region child). The self-build attempts also surfaced **7 real brain/engine
+robustness defects**, all fixed on main — see the iteration-08 sections of
+[prototype-build-notes.md](./prototype-build-notes.md).
 
-*Done when:* a comprehension goal whose region exceeds one node splits, integrates
-its children into one gate-passing artifact, and AC-2 is re-run live with the
-honest result recorded.
+*Done (the mechanism):* a comprehension goal whose region exceeds one node splits
+and integrates its children into one gate-passing artifact — proven live and
+green in tests.
+
+*Not done (deferred → iteration 09):* ADR-029 **Decisions 2+4** — scoped,
+split-gate-pulled JIT comprehension and the `live-foreign-eyes`/commission
+rewrite. The AC-2 proof runs showed the recursion mechanism works but
+comprehension **over-fires**: it speculatively maps the whole repo for a feature
+that needs almost none, so AC-2 does not yet pass end-to-end.
+
+### Iteration 09 — Comprehension scoping: pull only what the intent needs *(next)*
+
+The recursion mechanism (iter 08) works, but comprehension is speculative: the
+coverage gate demands whole-repo maps and unrelated deep-dives even for a trivial
+scoped feature, violating DESIGN.md's JIT rule ("a region no goal touches is
+never mapped; no comprehension is ever speculative"). This is ADR-029 Decisions
+2+4, deliberately deferred from iteration 08.
+
+Scope: (1) make the coverage gate / `mintComprehension` mint only the
+comprehension the intent's touched regions require, not speculative whole-repo
+categories; (2) rewrite `examples/live-foreign-eyes.ts` to commission a scoped
+intent pulled by the split gate. Plus two decide-path robustness items the proof
+runs surfaced (childless-split tolerance; comprehension decide-prompt
+constraint). Touch points and evidence: STATUS.md "What's next" + the iteration-08
+sections of the build notes.
+
+*Done when:* a scoped feature commissioned via `live:self` pulls only the
+comprehension its regions need (no speculative whole-repo maps), reaches
+implementation, and AC-2 passes end-to-end with a real corellia PR.
 
 ## Features index — iteration 3
 
