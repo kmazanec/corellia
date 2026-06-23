@@ -76,6 +76,7 @@ import { randomBytes } from 'node:crypto';
 
 import { loadDotEnv } from '../src/env.js';
 import { InMemoryEventStore } from '../src/eventlog/memory-store.js';
+import { JsonlEventStore } from '../src/eventlog/jsonl-store.js';
 import { projectKnowledge, costSummary, renderTree } from '../src/eventlog/projections.js';
 import { buildLiveEngine, assertGitRepo } from '../src/daemon/live-engine.js';
 import { Listener } from '../src/listener/listener.js';
@@ -133,7 +134,12 @@ console.log('');
 
 // ── Store + Engine ─────────────────────────────────────────────────────────────
 
-const store = new InMemoryEventStore();
+// Persist the event log to JSONL when CORELLIA_EVENTS_PATH is set, so a run can
+// be replayed/inspected after it exits (the event log IS the trace — see
+// scripts/trace.ts). Defaults to in-memory (ephemeral) when unset.
+const eventsPath = process.env['CORELLIA_EVENTS_PATH'];
+const store = eventsPath ? new JsonlEventStore(eventsPath) : new InMemoryEventStore();
+if (eventsPath) console.log(`Event log:    ${eventsPath} (persisted — replay with: npx tsx scripts/trace.ts ${eventsPath})`);
 const runNonce = randomBytes(4).toString('hex');
 const intentId = `foreign-eyes-${runNonce}`;
 
