@@ -19,7 +19,7 @@
  *     package.json; no external deps are introduced.
  */
 
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DeterministicCheck, CheckContext } from '../contract/goal-type.js';
 import type { Goal } from '../contract/goal.js';
@@ -423,12 +423,18 @@ export function conventionsCheck(): DeterministicCheck {
       }
 
       const root = ctx?.sandboxRoot ?? ka.repoRoot;
+      // An exemplar pointer is valid if its path EXISTS — a file OR a directory.
+      // A directory exemplar ("src/contract/* demonstrates the type conventions")
+      // is legitimate, so existence (stat), not readability (readFile), is the
+      // right test: readFile threw EISDIR on a directory pointer and the goal was
+      // told "not found" for a path it could see exists, so it could never
+      // self-correct (AC-3 run #2). Only a genuinely-absent path fails.
       const missing: string[] = [];
 
       for (const pointer of ka.pointers) {
         const full = join(root, pointer.path);
         try {
-          await readFile(full);
+          await stat(full);
         } catch {
           missing.push(pointer.path);
         }
@@ -437,7 +443,7 @@ export function conventionsCheck(): DeterministicCheck {
       if (missing.length > 0) {
         return {
           ok: false,
-          detail: `Conventions exemplar pointer(s) not found: ${missing.join(', ')}`,
+          detail: `Conventions exemplar pointer(s) do not exist (path absent at this SHA): ${missing.join(', ')}`,
         };
       }
 

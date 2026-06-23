@@ -458,6 +458,25 @@ describe('conventionsCheck', () => {
     expect(r.detail).toContain('1 exemplar');
   });
 
+  it('passes when an exemplar pointer is a DIRECTORY (not only files)', async () => {
+    // A directory exemplar ("src/contract/* demonstrates the type conventions")
+    // is legitimate. The check tests EXISTENCE (stat), not readability (readFile),
+    // so a directory pointer no longer fails with a misleading "not found"
+    // (AC-3 run #2: the brain pointed at src/contract / src/library/skills/ and
+    // thrashed because readFile threw EISDIR → reported as missing).
+    const repoRoot = makeTmp();
+    mkdirSync(join(repoRoot, 'src', 'contract'), { recursive: true });
+
+    const artifact = knowledgeArtifact({
+      category: 'conventions',
+      repoRoot,
+      pointers: [{ path: 'src/contract', note: 'these files demonstrate the conventions' }],
+    });
+    const ctx: CheckContext = { sandboxRoot: repoRoot };
+    const r = await conventionsCheck().run(baseGoal, textArt(JSON.stringify(artifact)), ctx);
+    expect(r.ok).toBe(true);
+  });
+
   it('fails when an exemplar pointer path does not exist', async () => {
     const repoRoot = makeTmp();
 
