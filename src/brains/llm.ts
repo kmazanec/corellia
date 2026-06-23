@@ -63,21 +63,12 @@ export interface LlmBrainConfig {
    */
   sleepFn?: (ms: number) => Promise<void>;
   /**
-   * Per-request timeout in milliseconds. Each LLM fetch is aborted after this
-   * long, so a hung connection (server accepts but never responds) aborts and
-   * routes through the existing retry/backoff instead of blocking the whole run
-   * forever. Defaults to 120_000 (2 min) — covers a slow-but-real call while
-   * catching a true hang in minutes. Inject a tiny value in tests.
-   *
-   * Surfaced by an AC-2 live run (2026-06-23) that wedged ~37 min on one hung
-   * OpenRouter request: the retry only fired on request FAILURE, and a hang never
-   * fails. The wall-clock budget did not save it (checked between attempts, not
-   * mid-fetch).
+   * Per-request abort timeout (ms). Aborts a hung fetch so it routes through the
+   * retry/backoff instead of blocking forever. Default 120s; inject small in tests.
    */
   requestTimeoutMs?: number;
 }
 
-/** Default per-request abort deadline (ms) — see RequestTimeoutMs docstring. */
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 
 // ---------------------------------------------------------------------------
@@ -656,8 +647,7 @@ export class LlmBrain implements Brain {
             ...this.config.headers,
           },
           body: JSON.stringify(body),
-          // Abort a hung request so it routes through the retry below instead of
-          // blocking forever (a hang never throws on its own).
+          // Abort a hung request → falls into the retry below.
           signal: AbortSignal.timeout(this.config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS),
         });
         if (!response.ok) {
@@ -989,9 +979,7 @@ export class LlmBrain implements Brain {
               ...this.config.headers,
             },
             body: JSON.stringify(requestBody),
-            // Abort a hung request → the catch below treats AbortError as a
-            // retryable timeout (the handling already existed; nothing created
-            // the signal before, so a hang blocked forever).
+            // Abort a hung request → caught as a retryable timeout below.
             signal: AbortSignal.timeout(this.config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS),
           });
         } catch (networkErr) {

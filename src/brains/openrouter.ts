@@ -1,47 +1,17 @@
 /**
- * OpenRouter configuration helper for LlmBrain.
- *
- * Returns an LlmBrainConfig pre-wired to https://openrouter.ai/api/v1 with
- * the Anthropic model family as defaults.
- *
- * Default model IDs were chosen by inspecting the public OpenRouter models
- * endpoint (GET https://openrouter.ai/api/v1/models, no key required) and
- * picking the latest non-deprecated Anthropic model per tier at build time.
- * Re-check that endpoint if you suspect staleness.
- *
- * Environment variable overrides:
- *   OPENROUTER_API_KEY      — required, Bearer token for every request
- *   CORELLIA_MODEL_LOW      — override low-tier model ID
- *   CORELLIA_MODEL_MID      — override mid-tier model ID
- *   CORELLIA_MODEL_HIGH     — override high-tier model ID
+ * OpenRouter config for LlmBrain. Per-tier model comes from the env; a default
+ * is used only with a warning if a var is unset.
+ *   OPENROUTER_API_KEY  — required
+ *   CORELLIA_MODEL_LOW / _MID / _HIGH — model ID per tier
  */
 
 import type { LlmBrainConfig } from './llm.js';
 
-/**
- * Default model IDs sourced from GET https://openrouter.ai/api/v1/models on
- * 2026-06-11, cross-checked against current agentic/coding rankings. The tier
- * Tier names are low/mid/high — cost-optimized, cross-vendor picks: each ranks
- * at or above the Anthropic model it replaces on current agentic boards at
- * roughly an order of magnitude lower cost, and all three support tools +
- * structured outputs. Override per tier via CORELLIA_MODEL_LOW/MID/HIGH.
- */
+/** Fallback model per tier, used only when the matching env var is unset. */
 const DEFAULT_MODELS = {
-  // ~$0.14/$0.28 per M — 1M ctx; V4 family noted for tool-call reliability
-  // and well-formed JSON payloads.
   low: 'deepseek/deepseek-v4-flash',
-  // ~$0.44/$0.87 per M — 1M ctx; frontier-class agentic/coding.
   mid: 'deepseek/deepseek-v4-pro',
-  // judge-grade quality for the decide/judge tiers. NOTE: the prior default
-  // here, `qwen/qwen3-235b-a22b`, was replaced 2026-06-18 after a live:self
-  // probe found it UNRELIABLE on OpenRouter — it intermittently drops the
-  // connection (ECONNRESET) and returns truncated/garbage bodies (a bare `{`),
-  // which surfaced downstream as "Unknown decision kind: undefined" and blocked
-  // every deliver-intent (it decides on the high tier). deepseek v4-flash/pro
-  // (low/mid) and claude-sonnet-4 (high) all returned clean structured output
-  // across repeated probes. Provider diversity is a nice-to-have; a decide tier
-  // that actually returns a parseable decision is not optional.
-  high: 'anthropic/claude-sonnet-4',
+  high: 'z-ai/glm-5.2',
 } as const;
 
 /**
@@ -59,13 +29,22 @@ export function openRouterConfig(env: NodeJS.ProcessEnv = process.env): LlmBrain
     );
   }
 
+  // .env is the source of truth; fall back to a default only with a loud warning.
+  const resolveTier = (tier: 'low' | 'mid' | 'high', envVar: string): string => {
+    const fromEnv = env[envVar];
+    if (fromEnv !== undefined && fromEnv.length > 0) return fromEnv;
+    const fallback = DEFAULT_MODELS[tier];
+    console.warn(`[corellia] ${envVar} unset — using default ${tier} model "${fallback}".`);
+    return fallback;
+  };
+
   return {
     baseUrl: 'https://openrouter.ai/api/v1',
     apiKey,
     modelByTier: {
-      low: env['CORELLIA_MODEL_LOW'] ?? DEFAULT_MODELS.low,
-      mid: env['CORELLIA_MODEL_MID'] ?? DEFAULT_MODELS.mid,
-      high: env['CORELLIA_MODEL_HIGH'] ?? DEFAULT_MODELS.high,
+      low: resolveTier('low', 'CORELLIA_MODEL_LOW'),
+      mid: resolveTier('mid', 'CORELLIA_MODEL_MID'),
+      high: resolveTier('high', 'CORELLIA_MODEL_HIGH'),
     },
     // OpenRouter requires the HTTP-Referer header to attribute traffic; the
     // site-url is optional but recommended for rate-limit visibility.

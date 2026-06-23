@@ -9,7 +9,7 @@
  * Optional model overrides:
  *   export CORELLIA_MODEL_LOW=deepseek/deepseek-v4-flash
  *   export CORELLIA_MODEL_MID=deepseek/deepseek-v4-pro
- *   export CORELLIA_MODEL_HIGH=qwen/qwen3-235b-a22b
+ *   export CORELLIA_MODEL_HIGH=z-ai/glm-5.2
  *
  * Run:
  *   npm run live

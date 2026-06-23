@@ -80,9 +80,7 @@ describe('openRouterConfig', () => {
 
   it('uses default high model when override is absent', () => {
     const cfg = openRouterConfig({ OPENROUTER_API_KEY: 'k' });
-    // Was qwen/qwen3-235b-a22b until 2026-06-18; replaced after a live probe
-    // found it unreliable on OpenRouter (ECONNRESET / truncated bodies).
-    expect(cfg.modelByTier['high']).toBe('anthropic/claude-sonnet-4');
+    expect(cfg.modelByTier['high']).toBe('z-ai/glm-5.2');
   });
 
   it('env override wins for low tier', () => {
