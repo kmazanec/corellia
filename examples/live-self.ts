@@ -179,7 +179,13 @@ const engine = buildLiveEngine({
   store,
   sandbox: {
     repoRoot: corelliaRoot,
-    declaredScripts: {},
+    // corellia building corellia: declare its own verification scripts so a
+    // self-build can run them (the intent asks to keep these green).
+    declaredScripts: {
+      test: 'npm-script:test',
+      typecheck: 'npm-script:typecheck',
+      lint: 'npm-script:lint',
+    },
     // prBoundary: wires push_branch + open_pr for improve-factory goal types.
     // For a deliver-intent root, open_pr is called via the improvement path only
     // if the deliver completes with blockers and the improvement loop routes a fix.

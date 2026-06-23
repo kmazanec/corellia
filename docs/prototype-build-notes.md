@@ -1477,15 +1477,19 @@ asks for verification it doesn't grant the tool for. Fix: declare corellia's own
 scripts (test/typecheck/lint from package.json) in the live:self sandbox so a
 self-build can verify itself.
 
-### FINDING 7 (likely real check bug): files-within-scope rejects the written .ts files
-The terminal deterministic failure was:
-`deterministic: FAIL — files-within-scope: File(s) outside declared scope: ts, ts`
-Scope was `src/util/,tests/util/`; the leaf wrote (e.g.) src/util/format-duration.ts
-and tests/util/format-duration.test.ts — which SHOULD match those prefixes. The
-"ts, ts" rendering suggests the scope check is mis-parsing the paths (truncating to
-the extension?) or the brain wrote to an off-prefix path. Needs investigation in
-`filesWithinScope` (src/library/checks.ts) with the actual emitted paths from the
-event log — could be a prefix-matching / path-normalization bug, not the brain.
+### FINDING 7 — INVESTIGATED, NOT A BUG (corrected). Scope enforcement worked correctly.
+Initially read as a scope/parse bug; the event log disproves it. `isInScope` is
+correct (`src/util/format-duration.ts` ∈ `['src/util/']` → true, unit-confirmed).
+The refused `write_file` to `src/util/format-duration.ts` came from the leaf scoped
+`['tests/util/']` (the "write tests" leaf) — it over-reached and tried to write the
+SOURCE file; the tool correctly refused it as out of scope (that leaf's in-scope
+`tests/util/` writes succeeded; it passed). The "ts, ts" `files-within-scope`
+failure was a DOWNSTREAM symptom: the separate source leaf, unable to self-verify
+(finding 6), thrashed and emitted a malformed final artifact using markdown
+language-tag fences (```ts) which `parseFileBlocks` read as path="ts". No
+scope/parse fix needed — fixing finding 6 (let the leaf verify) removes the thrash
+that produced the malformed artifact. (If language-tag fences recur after that,
+harden parseFileBlocks then — but not before evidence shows it still bites.)
 
 Model note: z-ai/glm-5.2 behaved well on the comprehension + decide paths — no
 block-without-trying recurrence this run. The remaining failures are NOT model
