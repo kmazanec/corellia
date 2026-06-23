@@ -1559,3 +1559,35 @@ positional-arg fixes in this change; watch it but no action taken.
 
 1418 tests green, lint clean. Next: re-run AC-3 — the code already builds + verifies
 green; the artifact should now serialize with correct paths and open the PR.
+
+## AC-3 run #5 — CONVERGED. The strange loop closes: corellia delivers a verified feature to itself. 🎉
+
+Tree — every node green, ZERO blockers:
+```
+✓ deliver-intent
+  ✓ map-repo: architecture
+  ✓ map-repo: conventions
+  ✓ implement: format-duration test-first (src/util/format-duration.ts + tests/util/format-duration.test.ts)
+```
+`Blockers: none`. The factory built formatDuration, wrote its tests, verified them
+green (typecheck/lint/targeted tests), and emitted a CLEAN artifact — the fence fix
+worked, the deliver leaf converged. $0.25, 84% cache. **First end-to-end delivery
+of a feature to corellia's own repo.** Strange-loop hygiene intact: worktree
+COLLECTED + torn down (only happens on success), primary clean (the post-check's
+"NO" is the pre-existing media/video.zip false-positive), branch still main.
+
+This is the seven-run AC-3 arc paying off — each run bought one fix: soft budgets,
+transport timeout, decide-skill, head_sha, sandbox-path truth, block-coercion,
+conventions-pointer, the correct prescribed model (z-ai/glm-5.2 vs the silent
+claude-sonnet-4), declared scripts, fence parsing, targeted tests.
+
+### Remaining gap (NOT a bug): the deliver SUCCESS path doesn't push/open a PR
+`No PR opened` — and the trace shows push_branch / open_pr were NEVER ATTEMPTED
+(not refused). Per live-self.ts's own note, PR-opening is wired to the IMPROVEMENT
+loop (fires on blockers), not the happy-path deliver. A deliver that converges with
+no blockers collects the verified worktree but has no "now ship it" step. So AC-3's
+build half is PROVEN; the literal "opens a PR" half needs the deliver success path
+to push the collected branch + open_pr. Candidate: on a converged deliver with a
+prBoundary configured, push the collected worktree branch and open one PR.
+
+Cumulative AC-3 spend: ~$5.6.
