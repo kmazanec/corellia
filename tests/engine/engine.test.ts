@@ -739,15 +739,13 @@ describe('fix 1 — repair does not consume a second attempt', () => {
   });
 });
 
-// ── Fix 3: all four budget dimensions can terminate the loop ──────────────
+// ── ADR-030: toolCalls exhaustion is warn-only by default ──────────────────
 
-describe('fix 3 — toolCalls budget exhaustion', () => {
-  it('emits budget-exhausted(toolCalls) when toolCalls runs out', async () => {
+describe('ADR-030 — toolCalls exhaustion is warn-only (does not block by default)', () => {
+  it('emits budget-exhausted(toolCalls) but does NOT block when not enforced', async () => {
     const store = new MemoryEventStore();
 
-    const brain = new ScriptedBrain()
-      .queueProduce(textArtifact('a'));
-
+    const brain = new ScriptedBrain().queueProduce(textArtifact('a'));
     const registry = buildRegistry([
       leafTypeDef({
         deterministic: [alwaysPassCheck()],  // 1 toolCall per check
@@ -756,15 +754,36 @@ describe('fix 3 — toolCalls budget exhaustion', () => {
     ]);
 
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
-    // toolCalls: 0 → exhausted after the first deterministic check
+    // toolCalls: 0 → exhausted after the first deterministic check, but warn-only.
+    const goal = makeGoal({ budget: { attempts: 5, tokens: 100000, toolCalls: 0, wallClockMs: 60000 } });
+    const report = await engine.run(goal);
+
+    // The signal still fires...
+    const exhausted = await store.list({ type: 'budget-exhausted' });
+    expect(exhausted.some((e) => (e as { dimension?: string }).dimension === 'toolCalls')).toBe(true);
+    // ...but the goal is NOT blocked on it (warn-only).
+    expect(report.blockers).toHaveLength(0);
+    expect(report.artifact).toEqual(textArtifact('a'));
+  });
+
+  it('still blocks on toolCalls when enforcement is armed (re-arm path works)', async () => {
+    const store = new MemoryEventStore();
+
+    const brain = new ScriptedBrain().queueProduce(textArtifact('a'));
+    const registry = buildRegistry([
+      leafTypeDef({ deterministic: [alwaysPassCheck()], judgeType: null }),
+    ]);
+
+    const engine = new Engine({
+      registry, brain, store, memory: new NoopMemoryView(),
+      enforceToolCallBudget: true,
+    });
     const goal = makeGoal({ budget: { attempts: 5, tokens: 100000, toolCalls: 0, wallClockMs: 60000 } });
     const report = await engine.run(goal);
 
     expect(report.blockers.length).toBeGreaterThan(0);
     const exhausted = await store.list({ type: 'budget-exhausted' });
-    expect(exhausted.length).toBeGreaterThan(0);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((exhausted[0] as any).dimension).toBe('toolCalls');
+    expect(exhausted.some((e) => (e as { dimension?: string }).dimension === 'toolCalls')).toBe(true);
   });
 });
 

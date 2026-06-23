@@ -1368,12 +1368,19 @@ export class Engine {
           }
         }
 
-        // Track tool calls spent
+        // Track tool calls spent. toolCalls exhaustion is WARN-ONLY by default
+        // (ADR-030 / enforceToolCallBudget) — emit the signal but do not block
+        // unless an operator armed enforcement. This site previously blocked
+        // unconditionally, inconsistent with the step loop; a deep comprehension
+        // node (with toolCalls now inherited, not floored) should not be killed
+        // on the count.
         const tcConsumed = consumeN(budget, 'toolCalls', toolCallsUsed);
         budget = tcConsumed.budget;
         if (tcConsumed.exhausted) {
           await this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'toolCalls' });
-          return this.runBlock(goal, exhaustedBrief(goal, 'toolCalls'));
+          if (this.enforceToolCallBudget) {
+            return this.runBlock(goal, exhaustedBrief(goal, 'toolCalls'));
+          }
         }
 
         deterministicVerdict = {

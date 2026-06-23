@@ -48,23 +48,25 @@ Concretely:
    `localId`s, acyclic `dependsOn`, shares — stay; they guard correctness, not
    cost.)
 
-2. **`subdivide` INHERITS `attempts` and `tokens` instead of dividing them by
-   share.** Dividing by share floored a node two levels down toward nothing —
-   attempts to 1 (forbidding any further split/retry), and tokens to a
-   fraction-of-a-fraction (starving deep comprehension before it could emit). Each
-   child inherits the parent's attempts and tokens; toolCalls/wallClock still
-   subdivide proportionally for cost tracking. The real bound on token spend is the
-   dollar ceiling, not an arbitrary count that floors with depth.
+2. **`subdivide` INHERITS `attempts`, `tokens`, and `toolCalls` instead of
+   dividing them by share.** Dividing by share floored a node toward nothing at
+   depth — attempts to 1 (forbidding any further split/retry), tokens to a
+   fraction-of-a-fraction (starving deep comprehension), and toolCalls likewise (a
+   deep map-repo could not afford even a directory listing). These are
+   work-capacity signals, not divisible resources to ration by depth. Each child
+   inherits all three; only `wallClockMs` still subdivides (a real external-time
+   bound). All remain tracked/reported per node; the real bound on spend is the
+   dollar ceiling (and wall-clock), not arbitrary counts that floor with depth.
 
-   *(tokens inheritance added 2026-06-23 after AC-2 run #3: with attempts/fan-out
-   already soft, convergence still failed on `map-repo architecture` and a deep
-   `src/utils` dive exhausting their subdivided token share — the same flooring
-   pathology, and exactly the "re-arm when a real trace shows a bound blocking
-   legitimate work" trigger this ADR names.)*
+   *(Discovered incrementally as each soft-ened dimension revealed the next
+   flooring the same way — attempts (run #1), tokens (run #3), toolCalls (run #4)
+   — each exactly the "re-arm when a real trace shows a bound blocking legitimate
+   work" trigger this ADR names.)*
 
-3. **`toolCalls` stays warn-only** (the existing carve-out, `enforceToolCallBudget`
-   defaults false). Unchanged by this ADR; named here because it is the precedent
-   this ADR generalizes.
+3. **`toolCalls` is warn-only everywhere** (`enforceToolCallBudget` defaults
+   false). The step-loop already honored this; the attempt-loop's `produce` debit
+   site blocked unconditionally (inconsistency, run #4) and is now gated behind the
+   same flag. Exhaustion emits the signal; it blocks only if an operator arms it.
 
 4. **Attempt and token exhaustion remain honest loop terminators — NOT softened
    in this pass.** With `attempts` now inherited (decision 2), a node gets the
@@ -116,8 +118,10 @@ the *arbitrary count-based* enforcement that was standing in for it.
 
 ## Consequences for the build
 
-- `src/engine/budget.ts`: `subdivide` inherits `attempts` AND `tokens` (no longer
-  floors them at depth); toolCalls/wallClock still subdivide for cost tracking.
+- `src/engine/budget.ts`: `subdivide` inherits `attempts`, `tokens`, AND
+  `toolCalls` (no longer floors them at depth); only `wallClockMs` subdivides.
+- `src/engine/engine.ts`: the attempt-loop `produce` toolCalls debit now honors
+  `enforceToolCallBudget` (warn-only) instead of blocking unconditionally.
 - `src/engine/engine.ts`: `validateSplit` drops the fan-out cap (and no longer
   takes a budget). Attempt/token exhaustion are deliberately left as honest loop
   terminators (not softened this pass).

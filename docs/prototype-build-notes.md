@@ -1103,3 +1103,34 @@ ceiling, not a per-node hard wall that floors to nothing at depth. (Decide with
 operator: inherit tokens like attempts, or keep proportional tracking but make
 token exhaustion warn-only / not-blocking.) THEN re-run. Cost so far across 3 AC-2
 runs: ~$0.59 total.
+
+## AC-2 proof run #4 — toolCalls is the last divided dimension; recursion-depth smell appears
+
+Re-ran with attempts+tokens inherited. No hang, no fan-out block, no token
+starvation. Scoping held (6 goals, at the ≤6 boundary). Convergence still failed:
+```
+Goal "Map repository structure" exhausted its toolCalls budget
+Goal "Map repo: conventions" exhausted its toolCalls budget
+"What is the directory and file listing of the src directory? I need ... to plan the mapping."
+```
+
+Two findings:
+
+1. **toolCalls flooring — the same pathology, third dimension.** `subdivide` still
+   divides toolCalls by share, so deep comprehension children starve before they
+   can even run a directory listing (one block is literally the brain asking for
+   an `ls` of src it couldn't afford to run). attempts and tokens are inherited
+   now; toolCalls is the last divided dimension. Fix: inherit toolCalls too (it is
+   already warn-only via enforceToolCallBudget=false in production, but the live
+   harness/sandbox path still hard-floors the subdivided count). Cost $0.09.
+
+2. **Recursion-depth / redundancy smell (flag, don't chase blindly):** the tree is
+   getting DEEPER and more redundant, not converging — a `map-repo` spawned a
+   `deep-dive` that spawned ANOTHER `map-repo` ("Explore repository to discover
+   architecture" → "Map repository structure"). Comprehension is re-deriving
+   comprehension. Once toolCalls stops starving it, watch whether it converges or
+   keeps splitting comprehension-into-comprehension. If the latter, the next real
+   issue is comprehension's decide prompt (when to SATISFY vs keep splitting), not
+   another budget knob.
+
+Cost across 4 AC-2 runs: ~$0.68 total.

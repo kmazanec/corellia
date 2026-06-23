@@ -22,40 +22,39 @@ const base: Budget = {
 };
 
 describe('subdivide', () => {
-  // ADR-030: attempts and tokens are INHERITED, not divided (dividing them
-  // floored a node toward nothing at depth — attempts to 1, tokens to a fraction-
-  // of-a-fraction that starved deep comprehension). toolCalls/wallClock still
-  // subdivide proportionally for cost tracking.
-  it('subdivides toolCalls proportionally', () => {
+  // ADR-030: attempts, tokens, and toolCalls are INHERITED, not divided (dividing
+  // them floored a node toward nothing at depth — attempts to 1, tokens and
+  // toolCalls to a fraction-of-a-fraction that starved deep comprehension). Only
+  // wallClockMs still subdivides proportionally (a real external-time bound).
+  it('subdivides wallClockMs proportionally', () => {
     const [a, b] = subdivide(base, [0.5, 0.5]);
-    expect(a!.toolCalls).toBe(base.toolCalls * 0.5);
-    expect(b!.toolCalls).toBe(base.toolCalls * 0.5);
+    expect(a!.wallClockMs).toBe(base.wallClockMs * 0.5);
+    expect(b!.wallClockMs).toBe(base.wallClockMs * 0.5);
   });
 
-  it('inherits the full attempt count (does not divide attempts)', () => {
+  it('inherits attempts, tokens, and toolCalls (does not divide them)', () => {
     const [a, b] = subdivide(base, [0.5, 0.5]);
-    expect(a!.attempts).toBe(base.attempts);
-    expect(b!.attempts).toBe(base.attempts);
+    for (const child of [a!, b!]) {
+      expect(child.attempts).toBe(base.attempts);
+      expect(child.tokens).toBe(base.tokens);
+      expect(child.toolCalls).toBe(base.toolCalls);
+    }
   });
 
-  it('inherits the full token grant (does not divide tokens)', () => {
-    const [a, b] = subdivide(base, [0.5, 0.5]);
-    expect(a!.tokens).toBe(base.tokens);
-    expect(b!.tokens).toBe(base.tokens);
-  });
-
-  it('does not floor a deep child at a tiny share — it keeps attempts and tokens', () => {
+  it('does not floor a deep child at a tiny share — keeps attempts/tokens/toolCalls', () => {
     // The defect ADR-030 fixes: a tiny share floored attempts to 1 (forbidding
-    // split) and tokens toward nothing (starving deep comprehension). Inheritance
-    // prevents both.
+    // split), and tokens + toolCalls toward nothing (starving deep comprehension
+    // — a deep map-repo could not even afford a directory listing). Inheritance
+    // prevents all three.
     const [a] = subdivide(base, [0.1]);
     expect(a!.attempts).toBe(base.attempts);
     expect(a!.tokens).toBe(base.tokens);
+    expect(a!.toolCalls).toBe(base.toolCalls);
   });
 
-  it('floors fractional toolCall results', () => {
+  it('floors fractional wallClockMs results', () => {
     const [a] = subdivide(base, [0.33]);
-    expect(a!.toolCalls).toBe(Math.floor(base.toolCalls * 0.33));
+    expect(a!.wallClockMs).toBe(Math.floor(base.wallClockMs * 0.33));
   });
 
   it('handles a single child with share 1.0', () => {
@@ -64,11 +63,11 @@ describe('subdivide', () => {
     expect(a!.tokens).toBe(1000);
   });
 
-  it('subdivided toolCalls sum ≤ parent (no share overflow)', () => {
+  it('subdivided wallClockMs sum ≤ parent (no share overflow)', () => {
     const shares = [0.3, 0.3, 0.3];
     const parts = subdivide(base, shares);
-    const totalToolCalls = parts.reduce((s, p) => s + p.toolCalls, 0);
-    expect(totalToolCalls).toBeLessThanOrEqual(base.toolCalls);
+    const totalWall = parts.reduce((s, p) => s + p.wallClockMs, 0);
+    expect(totalWall).toBeLessThanOrEqual(base.wallClockMs);
   });
 });
 

@@ -8,23 +8,22 @@ import type { Budget } from '../contract/goal.js';
 /**
  * Subdivide a budget among children according to their fractional shares.
  *
- * toolCalls / wallClockMs subdivide proportionally so cost tracking stays
- * meaningful (a fan-out's reported spend still ladders down from the root).
- *
- * `attempts` and `tokens` are INHERITED, not divided (ADR-030). Dividing them by
- * share floored a node two levels down toward nothing — attempts to 1 (forbidding
- * any further split/retry) and tokens to a fraction-of-a-fraction (starving deep
- * comprehension before it could emit; observed on the cats AC-2 run #3). attempts
- * is a retry COUNT, not a divisible resource; tokens divided-by-share punished
- * depth on no real evidence. Each child now inherits the parent's attempts and
- * tokens. Both remain tracked/reported per node; the REAL bound on token spend is
- * the per-tree dollar ceiling, not an arbitrary count that floors with depth.
+ * `wallClockMs` subdivides proportionally (a real external-time bound that should
+ * ladder down). `attempts`, `tokens`, and `toolCalls` are INHERITED, not divided
+ * (ADR-030). Dividing them by share floored a node toward nothing at depth —
+ * attempts to 1 (forbidding any further split/retry, run #1), tokens to a
+ * fraction-of-a-fraction (starving deep comprehension, run #3), and toolCalls
+ * likewise (a deep map-repo could not afford even a directory listing, run #4).
+ * These are work-capacity signals, not divisible resources to ration by depth.
+ * Each child inherits the parent's attempts/tokens/toolCalls; all remain
+ * tracked/reported per node. The REAL bound on spend is the per-tree dollar
+ * ceiling (and wall-clock), not arbitrary counts that floor with depth.
  */
 export function subdivide(budget: Budget, shares: number[]): Budget[] {
   return shares.map((share) => ({
     attempts: budget.attempts,
     tokens: budget.tokens,
-    toolCalls: Math.max(1, Math.floor(budget.toolCalls * share)),
+    toolCalls: budget.toolCalls,
     wallClockMs: Math.max(1, Math.floor(budget.wallClockMs * share)),
   }));
 }
