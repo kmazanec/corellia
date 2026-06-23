@@ -1325,3 +1325,62 @@ describe('split/concurrent ceiling — ceiling-reached fires once, post-trip bou
     expect(produceCount).toBeLessThanOrEqual(2);
   }, 10_000);
 });
+
+// ---------------------------------------------------------------------------
+// AC-3 backstop: a comprehend-family block-without-effort is coerced to satisfy
+// ---------------------------------------------------------------------------
+
+describe('comprehend block-without-effort coercion', () => {
+  it('coerces a first-pass comprehend block into satisfy so the goal must try its tools', async () => {
+    const store = new MemoryEventStore();
+
+    // The brain decides `block` at the top-level decide (before any tool runs) —
+    // the AC-3 run-#1 misread ("repo unreachable"). The engine must coerce this to
+    // satisfy and run the produce path, not block the goal.
+    const brain = new ScriptedBrain()
+      .queueDecide({ kind: 'block', brief: {
+        question: 'I attempted to list the repo root but received no output.',
+        options: ['deny'],
+        links: [],
+        deadlineMs: 1000,
+        onTimeout: 'deny',
+      }})
+      .queueProduce(textArtifact('mapped'));
+
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'map-repo', family: 'comprehend' }),
+    ]);
+
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const goal = makeGoal({ type: 'map-repo' });
+    const report = await engine.run(goal);
+
+    // Coerced to satisfy → produced the artifact, did NOT block.
+    expect(report.blockers).toHaveLength(0);
+    expect(report.artifact).toEqual(textArtifact('mapped'));
+  });
+
+  it('does NOT coerce a block for a non-comprehend family (deliver/build blocks stand)', async () => {
+    const store = new MemoryEventStore();
+
+    const brain = new ScriptedBrain()
+      .queueDecide({ kind: 'block', brief: {
+        question: 'genuinely ambiguous requirement',
+        options: ['deny'],
+        links: [],
+        deadlineMs: 1000,
+        onTimeout: 'deny',
+      }});
+
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'deliver-intent', family: 'deliver' }),
+    ]);
+
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const goal = makeGoal({ type: 'deliver-intent' });
+    const report = await engine.run(goal);
+
+    // A deliver block is a real decision-gap — it stands.
+    expect(report.blockers.length).toBeGreaterThan(0);
+  });
+});

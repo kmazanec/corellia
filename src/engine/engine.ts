@@ -708,6 +708,26 @@ export class Engine {
       }
     }
 
+    // Backstop: a comprehend-family goal that DECIDES to block here is blocking
+    // before running a single tool (this top-level decide precedes the attempt
+    // loop) — blocking-without-effort, almost always a misread (e.g. it tried an
+    // absolute path, got refused, and concluded the repo is unreachable; traced on
+    // AC-3 run #1). A comprehension goal cannot legitimately know it is blocked
+    // until it has actually probed the sandbox. Coerce the block into a satisfy so
+    // the goal MUST try its tools; a genuine blocker can still surface from the
+    // attempt loop after real probing. Scoped to the comprehend family (the
+    // discovery family) so deliver/build blocks are untouched.
+    if (decision.kind === 'block' && typeDef.family === 'comprehend') {
+      await this.store.append({
+        type: 'decided',
+        at: t(),
+        goalId: goal.id,
+        decision,
+        ...(decideUsage !== undefined ? { usage: decideUsage } : {}),
+      });
+      decision = { kind: 'satisfy' };
+    }
+
     // The shape is captured for the post-subtree record call.
     const goalShape = typeDef.leafOnly ? null : specShape(goal);
 
@@ -1985,6 +2005,25 @@ export class Engine {
       ? (this.buildPriorEvidenceBlock(priorTranscript) ?? '')
       : '';
 
+    // Sandbox-path truth: the file tools operate on a sandboxed COPY of the repo
+    // (the worktree), and any absolute path — including the spec's `repoRoot` — is
+    // REFUSED as "outside the sandbox root". Without this, the brain reads the
+    // absolute repoRoot from the spec, calls list_dir/read_file on it, gets
+    // refused, and (weak-judgment path) concludes the repo is unreachable and
+    // BLOCKS with a fabricated "received no output" (traced on AC-3 run #1). State
+    // the contract plainly so the brain uses relative paths from the start.
+    const sandboxPathsBlock =
+      this._activeAssembly !== undefined
+        ? `\n\nSANDBOX PATHS (important): your file tools (list_dir, read_file, ` +
+          `search, write_file) operate on a sandboxed copy of the repo, mounted at ` +
+          `the sandbox root. Use RELATIVE paths only — e.g. list_dir("."), ` +
+          `read_file("src/index.ts"). The absolute repoRoot shown in the spec is for ` +
+          `reference (it labels the artifact); it is NOT directly readable by your ` +
+          `tools — an absolute path will be refused as "outside the sandbox root". ` +
+          `Start by listing "." — do not conclude the repo is missing if an ` +
+          `absolute path is refused; switch to a relative path.`
+        : '';
+
     transcript.push({
       role: 'context',
       content:
@@ -1992,6 +2031,7 @@ export class Engine {
         `Work the goal with the granted tools. When the work is complete, reply with the final ` +
         `artifact as your message content with no tool calls (for artifact-emitting goals, the ` +
         `content must be exactly the artifact — no preamble, no commentary).` +
+        sandboxPathsBlock +
         skillBlock +
         memoryLines +
         conventionsBlock +

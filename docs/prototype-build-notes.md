@@ -1352,3 +1352,47 @@ remaining failures are non-deterministic LLM behavior, not deterministic bugs.
 The levers are tier + (optional) engine-side block-without-effort rejection.
 
 Cumulative live spend this session (8 AC-2 + 1 AC-3): ~$3.98.
+
+### ROOT CAUSE FOUND (not tier — operator was right to push): sandbox path contradiction
+
+Traced via the persisted log (compared the PASSED conventions goal vs the BLOCKED
+architecture goal — SAME repo, SAME run, SAME tier, so tier is definitively not
+the differentiator). The conventions goal's first tool call:
+```
+tool-call: list_dir → ran
+tool-call: list_dir → refused — list_dir: path "/Users/keith/dev/gauntlet/corellia" is outside the sandbox root
+```
+The brain's instinct is to list the `repoRoot` it was handed in the spec
+(`/Users/keith/dev/gauntlet/corellia`) — but the file tools are bound to the
+WORKTREE sandbox, which REFUSES that absolute path as "outside the sandbox root".
+conventions happened to also issue a relative `list_dir` and recovered;
+architecture tried the absolute path, got refused, and (weak-judgment path)
+concluded "repo unreachable" and blocked with a fabricated "received no output".
+
+So the "block-without-trying" was NOT model weakness — it was the engine handing
+the brain an absolute repoRoot its own sandboxed tools forbid. A tier bump would
+only improve the odds of the lucky relative-path guess; it would not remove the
+contradiction. (This retro-explains the cats variance too: smaller repo, fewer
+chances to fixate on the absolute path.)
+
+**Fixes (both landed, 1411 green):**
+1. (cause) Step harness now states the sandbox-path contract for in-sandbox goals:
+   "your file tools operate on a sandboxed copy mounted at the sandbox root — use
+   RELATIVE paths; the absolute repoRoot in the spec is reference-only and is NOT
+   tool-readable; do not conclude the repo is missing if an absolute path is
+   refused." (src/engine/engine.ts step harness.)
+2. (backstop) A comprehend-family `block` at the top-level decide (before any tool
+   runs) is coerced to `satisfy` — a comprehension goal cannot legitimately know
+   it is blocked before probing the sandbox. Real blockers still surface from the
+   attempt loop after actual tool use. Non-comprehend (deliver/build) blocks are
+   untouched.
+
+### FINDING 4 (tooling, low-sev): orphaned worktree from a blocked run pollutes vitest
+The blocked AC-3 run left .corellia/worktrees/live-self-…/ uncollected (expected —
+collection is keyed off a verified-shipped list). But vitest globbed its copy of
+the test files and ran them twice. Torn down manually here. Fix later: either
+collect/prune worktrees on a blocked run too, or add .corellia/worktrees to the
+vitest exclude so leftover trees never pollute a local test run.
+
+FINDING 1 (false-positive hygiene check) and the tier question remain open but
+de-prioritized: tier was a red herring; the path contract was the real cause.
