@@ -469,6 +469,54 @@ describe('step transport retries', () => {
     expect(result.kind).toBe('artifact');
     expect(calls).toHaveLength(2);
   });
+
+  it('aborts a hung request via requestTimeoutMs and retries (does not block forever)', async () => {
+    // Regression (AC-2 live run 2026-06-23): a hung connection blocked the whole
+    // run ~37 min because nothing created an AbortSignal — the retry only fired on
+    // request FAILURE, and a hang never fails. The per-request timeout must abort a
+    // hang so it routes through the existing retry.
+    const fakeSleep = async (_ms: number) => {};
+    let callCount = 0;
+    const fetch = vi.fn((_url: string | URL | Request, options?: RequestInit) => {
+      callCount++;
+      const signal = options?.signal;
+      if (callCount === 1) {
+        // First call hangs: never resolves on its own; only the AbortSignal ends it.
+        return new Promise<Response>((_resolve, reject) => {
+          if (signal) {
+            signal.addEventListener('abort', () => {
+              const e = new Error('The operation timed out');
+              e.name = 'TimeoutError';
+              reject(e);
+            });
+          }
+        });
+      }
+      // Retry succeeds.
+      return Promise.resolve(
+        new Response(JSON.stringify(contentResponse('done')), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    }) as unknown as typeof fetch;
+
+    const brain = new LlmBrain({
+      baseUrl: BASE,
+      apiKey: KEY,
+      modelByTier,
+      fetchImpl: fetch,
+      sleepFn: fakeSleep,
+      requestTimeoutMs: 30, // tiny so the hang aborts immediately in-test
+    });
+    const result = await brain.step(baseGoal, [{ role: 'context', content: 'sys' }], tools, ctx);
+
+    // The hang aborted, retried, and the second call succeeded — no infinite block.
+    expect(result.kind).toBe('artifact');
+    expect(callCount).toBe(2);
+    expect(result.incidents).toHaveLength(1);
+    expect(result.incidents![0]!.detail).toContain('timeout');
+  });
 });
 
 // ---------------------------------------------------------------------------

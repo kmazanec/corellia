@@ -62,7 +62,23 @@ export interface LlmBrainConfig {
    * so retry backoff does not spend real wall-clock time.
    */
   sleepFn?: (ms: number) => Promise<void>;
+  /**
+   * Per-request timeout in milliseconds. Each LLM fetch is aborted after this
+   * long, so a hung connection (server accepts but never responds) aborts and
+   * routes through the existing retry/backoff instead of blocking the whole run
+   * forever. Defaults to 120_000 (2 min) — covers a slow-but-real call while
+   * catching a true hang in minutes. Inject a tiny value in tests.
+   *
+   * Surfaced by an AC-2 live run (2026-06-23) that wedged ~37 min on one hung
+   * OpenRouter request: the retry only fired on request FAILURE, and a hang never
+   * fails. The wall-clock budget did not save it (checked between attempts, not
+   * mid-fetch).
+   */
+  requestTimeoutMs?: number;
 }
+
+/** Default per-request abort deadline (ms) — see RequestTimeoutMs docstring. */
+const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 
 // ---------------------------------------------------------------------------
 // Internal types for the OpenAI-compatible shape
@@ -640,6 +656,9 @@ export class LlmBrain implements Brain {
             ...this.config.headers,
           },
           body: JSON.stringify(body),
+          // Abort a hung request so it routes through the retry below instead of
+          // blocking forever (a hang never throws on its own).
+          signal: AbortSignal.timeout(this.config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS),
         });
         if (!response.ok) {
           const text = await response.text();
@@ -966,11 +985,17 @@ export class LlmBrain implements Brain {
               ...this.config.headers,
             },
             body: JSON.stringify(requestBody),
+            // Abort a hung request → the catch below treats AbortError as a
+            // retryable timeout (the handling already existed; nothing created
+            // the signal before, so a hang blocked forever).
+            signal: AbortSignal.timeout(this.config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS),
           });
         } catch (networkErr) {
           const isTimeout =
             networkErr instanceof Error &&
-            (networkErr.name === 'AbortError' || networkErr.message.includes('timeout'));
+            (networkErr.name === 'AbortError' ||
+              networkErr.name === 'TimeoutError' ||
+              networkErr.message.includes('timeout'));
           if (attempt < MAX_RETRIES) {
             const delay = Math.pow(2, attempt) * 200 + Math.random() * 100;
             transportIncidents.push({

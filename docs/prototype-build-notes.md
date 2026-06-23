@@ -1042,3 +1042,29 @@ single source). 1403 green, lint clean.
 
 **Next:** re-run `live:foreign-eyes` — the fan-out/floor blocker is gone, so the
 scoped intent should now converge. Then `live:self` for the AC-3 PR proof.
+
+## AC-2 proof run #2 (post-ADR-030) — WEDGED on an LLM transport hang (not a budget issue)
+
+Re-ran `live:foreign-eyes` on cats after ADR-030 to retest convergence. The run
+did NOT complete: it hung for ~37 minutes with **0% CPU, state sleeping, one
+ESTABLISHED TCP socket to OpenRouter (:443 via Cloudflare), zero flushed output**.
+Killed it (spending nothing, unrecoverable; in-memory event log died with it).
+
+**Diagnosis (transport, NOT ADR-030):** `LlmBrain`'s fetch calls
+(`src/brains/llm.ts:635` and `:961`) pass no `AbortController`/`signal` — there is
+**no client-side request timeout.** The retry/backoff logic (incl. the explicit
+`AbortError`/'timeout' handling at ~973) only fires when a request *fails*; a
+request that *hangs* (server accepts the connection but never responds — exactly
+what we saw) never throws, so it never retries. It waits forever. ADR-030's
+wall-clock backstop didn't bite because the deadline is checked BETWEEN attempts,
+not mid-`fetch` — the process was blocked inside one fetch that never returned.
+
+This is consistent with the standing debug lesson (transport issues masquerade as
+logic bugs; probe the wire). The budget softening is fine — this run never got far
+enough to test convergence; it wedged on the network.
+
+**Next hand-build (before any more live spend):** add a per-request timeout to
+`LlmBrain` — wrap each fetch in an `AbortController` with a sane deadline
+(injectable, like `sleepFn`), so a hung request aborts and routes through the
+existing retry/backoff instead of blocking the whole run. THEN re-run
+`live:foreign-eyes`. `live:self` stays deferred until AC-2 actually converges.
