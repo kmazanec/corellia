@@ -1234,3 +1234,33 @@ of the SHA thrash, but the economy bound isn't being honored. Lower priority tha
 the SHA gap.
 
 Cost run #6: $1.41 (the thrash is expensive). Cumulative across 6 runs: ~$2.78.
+
+## AC-2 run #7 — head_sha works; remaining failures are BEHAVIORAL (over-explore / block-without-trying)
+
+head_sha fixed the SHA thrash: `map-repo: architecture` PASSED with a real SHA
+(9ed64ff7), and the dive called `head_sha → ran` cleanly — no more `.git`
+flailing. That structural gap is closed. Cost $0.44.
+
+But two NEW failure modes, both behavioral (the brain not following the skill),
+surfaced via the trace:
+
+1. **`map-repo: conventions` decided `block` immediately** — zero tool calls. It
+   emitted a brief: "Cannot access the repo at <cats>. Please provide the root
+   listing + package.json + a source file + a test file." The repo IS accessible
+   (architecture mapped it fine in the same run). The brain gave up at the decide
+   step and asked the HUMAN for files instead of using list_dir/read_file. This is
+   the "comprehension decide emits a please-provide-files block instead of doing
+   the work" mode (related to what iteration-08 notes flagged; the decide-skill
+   injection did not prevent it here).
+
+2. **`deep-dive-region src` exhausted wallClockMs** (a REAL backstop, not an
+   arbitrary count) — it over-explored: dozens of read_file/list_dir on cats (a
+   Python repo, src/cats/main.py), well past the skill's "4-6 representative
+   reads, depth over breadth." Same over-exploration the run-#6 architecture map
+   showed, now hitting wall-clock instead of (inherited) tokens.
+
+These are NOT structural/budget/transport gaps — they're the comprehension brain
+not honoring its own craft (use tools; bound exploration; don't block-and-ask).
+Inflection point: the next lever is prompt/behavior discipline (and possibly
+model tier), not another engine knob. Worth a step-back with the operator before
+more spend. Cumulative across 7 runs: ~$3.22.
