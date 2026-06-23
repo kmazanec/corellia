@@ -8,9 +8,9 @@ import { createRegistry } from '../../src/library/registry.js';
 import { lintLibrary } from '../../src/library/constitution.js';
 
 describe('starterTypes', () => {
-  it('returns the complete nineteen-type GOAL-TYPES library', () => {
+  it('returns the complete twenty-type GOAL-TYPES library', () => {
     const types = starterTypes();
-    expect(types.length).toBe(19);
+    expect(types.length).toBe(20);
   });
 
   it('all types are loadable into a registry without error', () => {
@@ -39,6 +39,7 @@ describe('starterTypes', () => {
       'consolidate-memory',
       'propose-pattern',
       'improve-factory',
+      'open-pr',
     ];
     for (const name of expectedNames) {
       expect(() => reg.get(name)).not.toThrow();
@@ -67,6 +68,22 @@ describe('starterTypes', () => {
     it('has no code-write grants', () => {
       const reg = createRegistry(starterTypes());
       const grants = reg.get('deliver-intent').grants;
+      expect(grants).not.toContain('fs.write');
+    });
+  });
+
+  describe('open-pr (the ship step)', () => {
+    it('is a make leaf in the deliver family', () => {
+      const def = createRegistry(starterTypes()).get('open-pr');
+      expect(def.kind).toBe('make');
+      expect(def.leafOnly).toBe(true);
+      expect(def.family).toBe('deliver');
+    });
+
+    it('holds the PR-boundary grants (repo.branch + repo.pr) and no code-write', () => {
+      const grants = createRegistry(starterTypes()).get('open-pr').grants;
+      expect(grants).toContain('repo.branch');
+      expect(grants).toContain('repo.pr');
       expect(grants).not.toContain('fs.write');
     });
   });
@@ -583,7 +600,7 @@ describe('starterTypes', () => {
   });
 
   describe('constitution compliance — the full library', () => {
-    it('lintLibrary passes with all nineteen types registered', () => {
+    it('lintLibrary passes with all twenty types registered', () => {
       expect(lintLibrary(starterTypes())).toHaveLength(0);
     });
   });

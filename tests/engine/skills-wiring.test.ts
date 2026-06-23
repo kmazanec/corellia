@@ -283,9 +283,9 @@ describe('skills-wiring sweep — judge rubric carries each judge family skill',
 
 // ── Full-registry wiring sanity: 19 types, lint-clean families, all reachable ─
 
-describe('full 19-type registry wiring', () => {
-  it('starterTypes() exposes the full 19-type set across all 10 families', () => {
-    expect(ALL_TYPES).toHaveLength(19);
+describe('full 20-type registry wiring', () => {
+  it('starterTypes() exposes the full 20-type set across all 10 families', () => {
+    expect(ALL_TYPES).toHaveLength(20);
     const families = new Set(ALL_TYPES.map((d) => d.family));
     expect([...families].sort()).toEqual(
       ['arbiter', 'author', 'build', 'comprehend', 'critique', 'curate', 'deliver', 'diagnose', 'improve', 'research'].sort(),

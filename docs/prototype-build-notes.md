@@ -1591,3 +1591,35 @@ to push the collected branch + open_pr. Candidate: on a converged deliver with a
 prBoundary configured, push the collected worktree branch and open one PR.
 
 Cumulative AC-3 spend: ~$5.6.
+
+## NEXT (recorded for a future iteration): multi-branch / multi-tree PARALLEL build + aggregation
+
+Today the engine uses ONE shared worktree per tree (ADR-016): every leaf writes to
+the same branch tree/<id>, collected together at root success → one branch → one
+PR. Serial aggregation is trivially handled.
+
+NOT yet built — genuinely-concurrent leaves in SEPARATE worktrees, folded back to a
+single base branch the PR opens from (the kmaz-build-iteration pattern: concurrent
+features each get a worktree, cherry-picked back onto the trunk). This needs real
+engine concurrency: per-leaf worktrees, a cherry-pick/merge aggregation edge before
+emit, and conflict handling. The split mechanism + dependency scheduler already
+model "independent children run in parallel" (DESIGN.md), so the gap is the
+execution substrate (one worktree → many) + the fold-back edge, not the planning.
+This is the next major iteration after AC-3's ship step.
+
+## AC-3 ship step — `open-pr` leaf (brain-driven, per operator choice)
+
+deliver-intent is a non-leaf splitter with no code/PR grants, so shipping is its
+own step. Added an `open-pr` leaf type (kind make, leafOnly, family deliver,
+grants repo.branch + repo.pr). The deliver root spawns it LAST, dependsOn every
+build child; its job is push_branch → open_pr (one PR, left open — the factory
+never merges), recorded in deliver.md. Brain-orchestrated (keeps the tool model),
+not an engine side-effect.
+
+Aggregation today is trivial: ONE shared worktree per tree (ADR-016), so all
+children land on one branch and open-pr pushes that single branch. (Multi-tree
+parallel build + fold-back is the recorded next iteration.)
+
+Tests: open-pr contract (make/leaf/deliver, repo.branch+repo.pr, no fs.write);
+type count 19→20 across starter-types + skills-wiring. 1418+ green, lint clean.
+Next: re-run live:self — expect the brain to spawn open-pr and actually open a PR.

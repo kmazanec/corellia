@@ -1,4 +1,4 @@
-The deliver family owns the root of the goal tree. Its one type accepts free
+The deliver family owns the root of the goal tree. Its root type accepts free
 text from a human and must resist two temptations: doing the work itself (it
 cannot — its grants forbid code tools) and batching more into one tree than a
 single integration can verify. The craft is decomposition fidelity: parse the
@@ -31,3 +31,20 @@ Classify risk before spawning. High-risk intent routes through the authority
 gate; do not attempt to satisfy it directly. The integration judge
 (`judge-integration`) runs at assembly time; its rubric is the original intent,
 not the children's individual specs.
+
+Ship the work. When the intent is to land a change on a repo (it asks to open a
+PR, or a PR is the natural deliverable), spawn an `open-pr` child as the FINAL
+step, with `dependsOn` listing every build child — so it runs only after the work
+is written and verified. Give it the proof it needs in its spec (what was built,
+which files, the commit intent). Omit `open-pr` only when no PR is wanted (e.g. a
+read-only analysis intent).
+
+## open-pr
+
+The ship step. The work is already written and verified in the shared worktree by
+the build children you depend on. Your job: push the tree's branch and open
+exactly ONE pull request, then emit a short artifact recording the PR URL. Use the
+`push_branch` tool, then `open_pr`. The PR body should carry what was delivered:
+the intent, the files changed, and the verification you ran (tests/typecheck/lint
+green). Open one PR and stop — the factory never merges; a human reviews it. If
+the push or PR call fails, surface that as a blocker, do not retry blindly.
