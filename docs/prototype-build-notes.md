@@ -1166,3 +1166,35 @@ comprehend special-case):
 
 Now every family decides WITH its craft guidance, not blind. Tests: decide
 injects ctx.skill / omits when absent; 1407 green, lint clean. Ready for run #5.
+
+## AC-2 proof run #5 — BREAKTHROUGH: comprehension fully converges; only the implement leaf fails
+
+The decide-skill fix worked. Tree:
+```
+✗ deliver-intent
+  ✓ map-repo: architecture           ← PASSED
+  ✓ map-repo: conventions            ← PASSED
+  ✓ deep-dive-region: src            ← PASSED (the run-#4 nested map→dive→map cascade is GONE)
+  ✓ map-repo: Identify the main entry-point file in src/   ← PASSED
+  ✗ implement: Add doc comment block to entry-point file   ← the ONLY failure
+```
+
+**The entire comprehension layer converged** — 4 scoped goals, all passed, 3
+knowledge artifacts written. No over-firing, no over-splitting, no starvation, no
+hang. This is the comprehension half of the factory (everything iteration 09 was
+about) working END-TO-END on a real foreign repo for the first time. We went from
+"can't comprehend anything / drowns in 16 speculative goals" to "comprehends a
+real repo cleanly in 4 scoped goals."
+
+**Remaining failure (isolated, downstream of comprehension):** the `implement`
+leaf explored but did not actually write the doc comment, so the integration eval
+correctly failed ("No documentation comment block added to main entry-point
+file") and the leaf burned its attempts. This is NOT comprehension, budget, or
+transport — it's the deliver/implement leaf either (a) not making the edit, (b)
+writing it outside declared scope / where the gate can't see it, or (c) emitting
+without writing. Cost $0.69 (comprehension did real work this time).
+
+**Next:** root-cause the implement leaf — read the deliver/implement harness +
+the integration eval to see whether the brain wrote nothing, wrote out of scope,
+or emitted-without-writing. This is the last gap between AC-2 and convergence.
+Cost across 5 AC-2 runs: ~$1.37 total.
