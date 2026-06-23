@@ -5,16 +5,27 @@
 ## Now
 
 Iteration 09 (Comprehension scoping — ADR-029 Decisions 2+4) **built on main,
-unit-proven, NOT YET PROVEN LIVE.** The coverage policy table is now
-relevance-bounded: a greenfield root split (scope entirely new/untracked) no
-longer pulls whole-repo `architecture`+`stack`, and region dives fire only for
-EXISTING regions — the child-scope union is kept but bounded by an injectable
-`regionExists` existence signal. `parseDecision` tolerates a childless split as
-satisfy; `live:foreign-eyes` is rewritten to commission one scoped intent and
-assert JIT-scoped comprehension. **1403 tests green, lint clean.** The AC-2
-re-proof (`live:self` on the trivial util → expect a PR with near-zero
-comprehension goals, was ~16) is OPERATOR-RUN and still pending — see the
-iteration-09 section of [prototype-build-notes.md](./prototype-build-notes.md).
+unit-proven, scoping PROVEN LIVE; convergence re-proof pending.** The coverage
+policy table is now relevance-bounded: a greenfield root split (scope entirely
+new/untracked) no longer pulls whole-repo `architecture`+`stack`, and region
+dives fire only for EXISTING regions, via an injectable `regionExists` signal.
+`parseDecision` tolerates a childless split; `live:foreign-eyes` is rewritten to
+a scoped intent.
+
+**Live AC-2 proof run #1 (cats, $0.22): scoping WORKS** — comprehension dropped
+~16 → 3 goals (`✓ scoped`). But convergence still failed on a pre-existing budget
+defect the deeper tree exposed: `subdivide` floored child attempts to 1, and a
+`children.length > attempts` fan-out cap then forbade any split at depth.
+
+**ADR-030 (soft budgets until proven):** budgets are now tracked + reported but
+do not BLOCK work on arbitrary counts. The fan-out cap is removed; `subdivide`
+inherits `attempts` instead of flooring it to 1; the dollar ceiling + wall-clock
+remain the only hard backstops. This generalizes the existing `toolCalls`
+warn-only carve-out — we have not proven the factory builds anything yet, so
+arbitrary caps that prevent that proof are premature. **1403 tests green, lint
+clean.** Next: re-run `live:foreign-eyes` (expect convergence now), then
+`live:self`. See the iteration-09 section of
+[prototype-build-notes.md](./prototype-build-notes.md).
 
 Iteration 08 (Recursion — ADR-029) **landed on main**: `leafOnly` is removed
 from the comprehend family and a structured integrate-merge composes child

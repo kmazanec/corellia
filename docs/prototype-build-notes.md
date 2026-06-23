@@ -1009,3 +1009,36 @@ hand-build.
 (Note: the harness reported exit 0 though the script prints FAILED and calls
 `process.exit(1)` — the buffered stdout head was also lost. Cosmetic; the
 substance above is from the script's own result summary.)
+
+## Budget softening — ADR-030 (soft budgets until proven)
+
+Operator directive after AC-2 proof run #1: *stop being hard with budgets and
+bounds — they aren't based on anything real yet, and they're blocking the one
+thing we need to prove (that the factory can build).* This is the same call the
+codebase already made for `toolCalls` (warn-only since 2026-06-12), now
+generalized.
+
+ADR-030 changes (hand-built on main, the fixes that actually unblocked the live
+run):
+1. **Fan-out cap removed** — `validateSplit` no longer rejects `children.length
+   > attempts` (and no longer takes a budget param). Width was keyed to the
+   scarcest, fastest-flooring dimension; it forbade legal decomposition at depth.
+2. **`subdivide` inherits `attempts`** instead of flooring to `max(1, floor(×
+   share))` — each child keeps the full retry count at any depth.
+   tokens/toolCalls/wallClock still subdivide for cost tracking.
+3. **Kept hard:** dollar ceiling + wall-clock (real cost). **Kept as honest loop
+   terminators (NOT softened this pass):** attempt/token exhaustion — a goal that
+   burns its retries genuinely didn't converge → blocks → routes to the listener,
+   which is real signal. Re-arm any of these the first time a trace shows it
+   blocking legitimate work.
+
+Tests: budget.test + gates.test block-behavior assertions REWRITTEN to the new
+contract (wide splits accepted; deep nodes keep attempts; injection past the old
+cap proceeds) rather than kept opt-in — per the operator's "delete the
+block-behavior assertions, we don't believe in these bounds yet" call. Removed
+dead code from the earlier existence-signal iteration (the engine's duplicate
+`regionExistsInTree` + its fs imports; the wiring's `regionExists` hook is the
+single source). 1403 green, lint clean.
+
+**Next:** re-run `live:foreign-eyes` — the fan-out/floor blocker is gone, so the
+scoped intent should now converge. Then `live:self` for the AC-3 PR proof.

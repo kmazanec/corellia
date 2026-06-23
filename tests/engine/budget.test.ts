@@ -22,24 +22,31 @@ const base: Budget = {
 };
 
 describe('subdivide', () => {
-  it('returns proportional budgets', () => {
+  // ADR-030: attempts is a RETRY count, not a divisible resource — it is INHERITED
+  // (each child gets the parent's full attempt count, so a deep node can still
+  // split and retry). tokens/toolCalls/wallClock still subdivide proportionally.
+  it('subdivides tokens/toolCalls proportionally', () => {
     const [a, b] = subdivide(base, [0.5, 0.5]);
-    expect(a!.attempts).toBe(5);
-    expect(b!.attempts).toBe(5);
     expect(a!.tokens).toBe(500);
     expect(b!.tokens).toBe(500);
   });
 
-  it('floors fractional results', () => {
-    const [a] = subdivide(base, [0.33]);
-    expect(a!.attempts).toBe(3); // floor(10 * 0.33) = 3
+  it('inherits the full attempt count (does not divide attempts)', () => {
+    const [a, b] = subdivide(base, [0.5, 0.5]);
+    expect(a!.attempts).toBe(base.attempts);
+    expect(b!.attempts).toBe(base.attempts);
   });
 
-  it('guarantees at least 1 attempt per child', () => {
-    const tiny: Budget = { attempts: 1, tokens: 1, toolCalls: 1, wallClockMs: 1 };
-    const [a, b] = subdivide(tiny, [0.1, 0.1]);
-    expect(a!.attempts).toBeGreaterThanOrEqual(1);
-    expect(b!.attempts).toBeGreaterThanOrEqual(1);
+  it('does not floor a deep child to 1 attempt — it keeps the parent count', () => {
+    // The defect ADR-030 fixes: a tiny share used to floor attempts to 1, then
+    // the fan-out guard forbade the node from splitting. Inheritance prevents it.
+    const [a] = subdivide(base, [0.1]);
+    expect(a!.attempts).toBe(base.attempts);
+  });
+
+  it('floors fractional token results', () => {
+    const [a] = subdivide(base, [0.33]);
+    expect(a!.tokens).toBe(330); // floor(1000 * 0.33) = 330
   });
 
   it('handles a single child with share 1.0', () => {
@@ -48,11 +55,11 @@ describe('subdivide', () => {
     expect(a!.tokens).toBe(1000);
   });
 
-  it('sums ≤ parent (no share overflow)', () => {
+  it('subdivided tokens sum ≤ parent (no share overflow)', () => {
     const shares = [0.3, 0.3, 0.3];
     const parts = subdivide(base, shares);
-    const totalAttempts = parts.reduce((s, p) => s + p.attempts, 0);
-    expect(totalAttempts).toBeLessThanOrEqual(base.attempts);
+    const totalTokens = parts.reduce((s, p) => s + p.tokens, 0);
+    expect(totalTokens).toBeLessThanOrEqual(base.tokens);
   });
 });
 
@@ -86,17 +93,19 @@ describe('consume', () => {
   });
 });
 
-// ── Fix 2: validateSplit fan-out guard ────────────────────────────────────
+// ── ADR-030: no fan-out cap — width is not bounded by attempts ──────────────
 
-describe('fix 2 — validateSplit fan-out guard via engine', () => {
-  it('rejects a split when children.length > budget.attempts', async () => {
+describe('ADR-030 — wide splits are accepted (no fan-out-vs-attempts cap)', () => {
+  it('accepts a split with far more children than the attempt budget', async () => {
     const store = new MemoryEventStore();
     const registry = buildRegistry([
       nonLeafTypeDef({ name: 'splitter' }),
       leafTypeDef({ name: 'leaf' }),
     ]);
 
-    // 20 children, each with budgetShare 0.01
+    // 20 children under attempts: 5 — the old guard rejected this; ADR-030 allows
+    // it. Each child satisfies immediately (leaf). The split must proceed and the
+    // goal must NOT block on a fan-out-structural error.
     const twentyChildren: ChildPlan[] = Array.from({ length: 20 }, (_, i) => ({
       localId: `c${i}`,
       type: 'leaf',
@@ -107,35 +116,20 @@ describe('fix 2 — validateSplit fan-out guard via engine', () => {
       budgetShare: 0.01,
     }));
 
-    const brain = new ScriptedBrain()
-      .queueDecide({ kind: 'split', children: twentyChildren })
-      // After re-decide on structural failure, block
-      .queueDecide({ kind: 'block', brief: {
-        question: 'cannot split',
-        options: ['deny'],
-        links: [],
-        deadlineMs: 1000,
-        onTimeout: 'deny',
-      }});
+    const brain = new ScriptedBrain().queueDecide({ kind: 'split', children: twentyChildren });
 
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
-    // attempts: 10 < 20 children → fan-out rejected
     const goal = makeGoal({
       type: 'splitter',
-      budget: { attempts: 10, tokens: 1000, toolCalls: 50, wallClockMs: 60000 },
+      budget: { attempts: 5, tokens: 1000, toolCalls: 50, wallClockMs: 60000 },
     });
     const report = await engine.run(goal);
 
-    expect(report.blockers.length).toBeGreaterThan(0);
-  });
-
-  it('accepts a split when children.length ≤ budget.attempts and summed child attempts ≤ parent', () => {
-    const parentBudget: Budget = { attempts: 10, tokens: 1000, toolCalls: 100, wallClockMs: 60000 };
-    const shares = [0.3, 0.3, 0.3];
-    const childBudgets = subdivide(parentBudget, shares);
-    const totalAttempts = childBudgets.reduce((s, b) => s + b.attempts, 0);
-    expect(childBudgets.length).toBeLessThanOrEqual(parentBudget.attempts);
-    expect(totalAttempts).toBeLessThanOrEqual(parentBudget.attempts);
+    // No fan-out-structural blocker.
+    expect(report.blockers.join(' ')).not.toMatch(/fan-out/i);
+    // The split actually fanned out to all 20 children.
+    const spawned = await store.list({ type: 'child-spawned' });
+    expect(spawned.length).toBe(20);
   });
 });
 

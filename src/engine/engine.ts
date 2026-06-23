@@ -14,8 +14,6 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { join, isAbsolute } from 'node:path';
 import type { Goal, Tier, MemoryPointer, Budget, Usage } from '../contract/goal.js';
 import type { Decision, ChildPlan } from '../contract/decision.js';
 import type { Artifact, Report } from '../contract/report.js';
@@ -325,8 +323,8 @@ export interface EngineOptions {
      * does not yet exist has nothing to comprehend, so it pulls neither a
      * whole-repo map (greenfield root split) nor a deep-dive (a child creating a
      * fresh region). Assembly wires the real existsSync-backed check; tests
-     * inject deterministic existence. When absent, the engine falls back to its
-     * own existsSync probe against repoRoot.
+     * inject deterministic existence. When absent, the gate treats every region
+     * as existing (the legacy pre-existence-signal behavior).
      */
     regionExists?: (repoRoot: string, region: string) => boolean;
   };
@@ -734,7 +732,7 @@ export class Engine {
       let splitAttempts = 0;
 
       while (true) {
-        const structErr = validateSplit(decision.children, budget);
+        const structErr = validateSplit(decision.children);
         if (structErr) {
           // Structural violation of the split → fail verdict, re-decide with
           // priorAttempt carrying the rejection
@@ -2533,22 +2531,6 @@ export class Engine {
    * describes the intended three-checkpoint design but only the split checkpoint
    * is currently implemented.
    */
-  /**
-   * Does a scope region correspond to existing code in the working tree? Used by
-   * the coverage gate to bound comprehension to regions that actually exist
-   * (ADR-029 Decision 2): a region being created fresh has nothing to comprehend.
-   *
-   * Deterministic and read-only: a plain path-existence check under repoRoot. An
-   * empty region (whole-repo intent) is treated as existing — it is the repo. A
-   * region resolving outside repoRoot is treated as non-existent (it is not part
-   * of this repo's tree).
-   */
-  private regionExistsInTree(repoRoot: string, region: string): boolean {
-    if (region === '') return true;
-    const abs = isAbsolute(region) ? region : join(repoRoot, region);
-    return existsSync(abs);
-  }
-
   private async runCoverageGate(
     goal: Goal,
     kind: 'make' | 'learn' | 'judge' | 'evolve',
@@ -2612,7 +2594,10 @@ export class Engine {
     // existsByRegion is the relevance signal over the full effective scope: a
     // region absent from the working tree is never comprehended (greenfield root
     // split → no whole-repo maps; not-yet-created child region → no dive).
-    const regionExists = kw.regionExists ?? ((root, region) => this.regionExistsInTree(root, region));
+    // Region existence is supplied by the knowledge wiring (real existsSync-backed
+    // impl in assembly; deterministic injection in tests). When absent, default to
+    // treat-as-existing — the legacy pre-existence-signal behavior.
+    const regionExists = kw.regionExists ?? (() => true);
     const existsByRegion: Record<string, boolean> = {};
     for (const scopeEntry of effectiveScope) {
       const region = scopeEntry.replace(/\/$/, '');
@@ -2699,7 +2684,7 @@ export class Engine {
     // count past the attempt budget) is a genuine structural error — throw so
     // the caller routes it through the structural-error block path rather than
     // silently proceeding with an invalid fan-out.
-    const augmentedErr = validateSplit(augmentedChildren, goal.budget);
+    const augmentedErr = validateSplit(augmentedChildren);
     if (augmentedErr) {
       throw new Error(`coverage-gate-invalid-split:${augmentedErr}`);
     }
@@ -3258,14 +3243,14 @@ function renormalizeShares(children: ChildPlan[]): ChildPlan[] {
  * Validate structural constraints on a proposed split.
  * Returns an error message if invalid, or null if valid.
  */
-function validateSplit(children: ChildPlan[], budget: Budget): string | null {
+function validateSplit(children: ChildPlan[]): string | null {
   if (children.length === 0) return 'Split must have at least one child';
 
-  // Fan-out guard: child count must not exceed the parent attempt budget
-  if (children.length > budget.attempts) {
-    return `Fan-out of ${children.length} children exceeds parent attempt budget of ${budget.attempts}`;
-  }
-
+  // No fan-out cap (ADR-030): a node may decompose into as many children as the
+  // brain proposes. Width was keyed to `attempts` (the scarcest, fastest-flooring
+  // dimension), which forbade legal decomposition at depth on no real evidence.
+  // The remaining checks guard correctness (cycles, duplicate ids, shares), not
+  // cost; cost is bounded by the dollar ceiling and wall-clock.
   const localIds = new Set(children.map((c) => c.localId));
 
   // localIds must be unique

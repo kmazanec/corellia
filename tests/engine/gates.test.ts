@@ -884,14 +884,15 @@ describe('coverage gate — knowledge-absent regression guard', () => {
   });
 });
 
-// ── 14. injection-blows-validateSplit → blocked, not silently over-subdivided
+// ── 14. ADR-030: injection past the old attempt cap now PROCEEDS (no fan-out cap)
 
-describe('coverage gate — injection that exceeds attempt budget is blocked', () => {
-  it('blocks when minted children push fan-out over attempt budget ()', async () => {
+describe('coverage gate — injection past the old attempt cap now proceeds', () => {
+  it('does not block when minted children push the child count over attempts', async () => {
     const store = new MemoryEventStore();
 
-    // Brain proposes 2 children with budgetShare ~0.5 each; budget.attempts = 3
-    // Minting 2 comprehension children will push total to 4, exceeding attempts=3
+    // 2 original children + 2 minted comprehension (architecture + stack) = 4
+    // children under attempts=3. The old fan-out cap (children.length > attempts)
+    // blocked this; ADR-030 removed the cap, so the split proceeds and all run.
     const splitDecision = {
       kind: 'split' as const,
       children: [
@@ -900,7 +901,12 @@ describe('coverage gate — injection that exceeds attempt budget is blocked', (
       ],
     };
 
-    const brain = new ScriptedBrain().queueDecide(splitDecision);
+    const brain = new ScriptedBrain()
+      .queueDecide(splitDecision)
+      .queueProduce(textArtifact('map-arch'))
+      .queueProduce(textArtifact('map-stack'))
+      .queueProduce(textArtifact('A'))
+      .queueProduce(textArtifact('B'));
 
     const registry = buildRegistry([
       nonLeafTypeDef({ name: 'splitter' }),
@@ -908,8 +914,6 @@ describe('coverage gate — injection that exceeds attempt budget is blocked', (
       leafTypeDef({ name: 'map-repo' }),
     ]);
 
-    // Empty knowledge → 2 comprehension children will be minted (architecture + stack)
-    // 2 original + 2 minted = 4 children > attempts=3 → structural error
     const engine = new Engine({
       registry,
       brain,
@@ -925,9 +929,12 @@ describe('coverage gate — injection that exceeds attempt budget is blocked', (
     });
     const report = await engine.run(goal);
 
-    // Must block — not silently proceed with over-budget fan-out
-    expect(report.blockers.length).toBeGreaterThan(0);
-    expect(report.blockers[0]).toMatch(/coverage.*(injection|invalid|structural)/i);
+    // No fan-out-structural block — the 4-child split (> attempts=3) proceeds.
+    expect(report.blockers.join(' ')).not.toMatch(/fan-out|coverage-gate-invalid/i);
+    const spawnEvents = await store.list({ type: 'child-spawned' });
+    const childTypes = spawnEvents.map((e) => (e as { childType: string }).childType);
+    expect(childTypes).toContain('map-repo');
+    expect(spawnEvents.length).toBe(4);
   });
 });
 
