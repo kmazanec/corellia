@@ -1297,3 +1297,58 @@ real fix (see the run-by-run sections above).
 
 **Next:** AC-2 being green, `live:self` (AC-3: factory delivers to its OWN repo,
 opens a real PR) is now approved to attempt.
+
+# AC-3 (live:self — corellia delivers to its OWN repo) — first attempts
+
+## AC-3 run #1 — did NOT converge; block-without-trying recurred on the bigger repo
+
+Commissioned the greenfield `formatDuration` util (src/util/, tests/util/) so
+comprehension would be near-zero and the deliver+PR path was isolated. Result:
+no PR; blocked. $0.17. Findings (saved for later — several are reusable beyond AC-3):
+
+### FINDING 1 (safety, low-sev): strange-loop hygiene check has a FALSE POSITIVE
+live:self printed "Primary clean after run: NO — investigate!" but the primary
+checkout was CLEAN of factory changes — the only `git status` output was the
+pre-existing untracked `media/video.zip` (present since session start). The
+script's check treats ANY `git status` output (incl. pre-existing untracked
+files) as "dirty". Risk: alarm fatigue masks a REAL disturbance. Fix later: the
+check should compare against a baseline (pre-run `git status`) or ignore
+untracked paths it didn't create, so "NO" means a genuine factory-caused change.
+Branch stayed `main`; worktree was left uncollected (expected for a blocked, not
+shipped, run — isolated under gitignored .corellia/worktrees/).
+
+### FINDING 2 (behavioral, the real blocker): block-without-trying RECURRED at mid tier
+`map-repo: architecture` `decided: block` with ZERO tool calls (trace confirms no
+tool-call events), fabricating a justification: "I attempted to list the repo
+root but received no output. Is the repo mounted?" It did NOT attempt list_dir —
+it blocked at the decide step and invented a reason. This is the SAME mode the
+run-#7 conventions failure showed and that comprehend.md hardening fixed on cats
+(run #8). It recurred here on corellia — a LARGER, denser repo. So:
+  - The prompt hardening reduced but did not ELIMINATE block-without-trying; it
+    is model-judgment variance at `mid` tier, worse on a harder repo.
+  - This is now real evidence for the deferred TIER BUMP: comprehension is the
+    load-bearing family and blocks-without-trying under load. Candidate: default
+    map-repo/deep-dive-region to `high` (was deferred in favor of testing the
+    prompt alone — the prompt alone is insufficient on a dense repo).
+  - Possible engine-side hardening: a comprehension goal that emits a `block`
+    brief WITHOUT having made a single tool call is almost always
+    block-without-effort — the engine could reject such a block (treat as "must
+    try first") rather than letting it bounce. Worth considering vs. prompt-only.
+
+### FINDING 3 (eval, medium): integration judged a comprehension artifact as the deliverable
+Second blocker: "artifact contains only project conventions metadata instead of
+deliverable code." With the architecture map blocked, the deliver leaf's
+dependency failed; the integration eval still ran and judged a CONVENTIONS
+artifact where the formatDuration module was expected. Two sub-issues to probe
+later: (a) why did integration run / judge at all when a child dependency
+blocked? (b) the merged/eval artifact was a knowledge artifact, not code — the
+deliver assembly may be picking up the wrong child artifact when the code leaf
+never produced one.
+
+### Variance note
+Run #8 (cats): all comprehension passed. AC-3 #1 (corellia): architecture
+blocked. Same code, different repo + a fresh roll → different outcome. The
+remaining failures are non-deterministic LLM behavior, not deterministic bugs.
+The levers are tier + (optional) engine-side block-without-effort rejection.
+
+Cumulative live spend this session (8 AC-2 + 1 AC-3): ~$3.98.
