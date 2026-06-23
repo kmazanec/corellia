@@ -4,28 +4,37 @@
 
 ## Now
 
-Iteration 09 (Comprehension scoping — ADR-029 Decisions 2+4) **built on main,
-unit-proven, scoping PROVEN LIVE; convergence re-proof pending.** The coverage
-policy table is now relevance-bounded: a greenfield root split (scope entirely
-new/untracked) no longer pulls whole-repo `architecture`+`stack`, and region
-dives fire only for EXISTING regions, via an injectable `regionExists` signal.
-`parseDecision` tolerates a childless split; `live:foreign-eyes` is rewritten to
-a scoped intent.
+Iteration 09 (Comprehension scoping — ADR-029 Decisions 2+4) **PROVEN LIVE — AC-2
+PASSED.** On 2026-06-23 a scoped intent converged END-TO-END on a real foreign
+repo (cats): all 4 scoped comprehension goals passed (3 artifacts written) and
+the `implement` leaf delivered the change — `AC-2 CHECKPOINT: PASSED`, $0.59.
+This unblocks AC-3/AC-4 (deliver-to-self / deliver-to-foreign).
 
-**Live AC-2 proof run #1 (cats, $0.22): scoping WORKS** — comprehension dropped
-~16 → 3 goals (`✓ scoped`). But convergence still failed on a pre-existing budget
-defect the deeper tree exposed: `subdivide` floored child attempts to 1, and a
-`children.length > attempts` fan-out cap then forbade any split at depth.
+Getting there took 8 live runs this session, each buying one real fix (full
+run-by-run record in [prototype-build-notes.md](./prototype-build-notes.md)):
+- **Iteration 09 scoping** (ADR-029 Dec 2+4): relevance-bounded coverage table —
+  greenfield root splits pull no whole-repo maps; region dives only for EXISTING
+  regions (injectable `regionExists`); child-scope union existence-filtered.
+  Comprehension dropped from ~16 speculative goals to 3–4 scoped ones.
+- **ADR-030 (soft budgets until proven):** the fan-out cap is removed and
+  `subdivide` INHERITS attempts/tokens/toolCalls instead of flooring them at
+  depth (each was discovered starving deep comprehension on a successive run);
+  only wall-clock subdivides; dollar ceiling + wall-clock are the only hard
+  backstops. Generalizes the prior `toolCalls` warn-only carve-out.
+- **Transport timeout:** a per-request AbortSignal so a hung LLM call aborts and
+  retries instead of wedging the run forever.
+- **Decide-path skill injection:** the brain now decides satisfy-vs-split WITH
+  the family skill (it was deciding blind → comprehension over-split).
+- **`head_sha` tool:** comprehension can read the HEAD SHA without thrashing
+  against the worktree `.git` indirection.
+- **comprehend.md hardening:** never block to ask a human for files it can read;
+  hard 6–8 read ceiling then emit (fixed block-without-trying + over-explore).
+- **Native tracing:** `live:foreign-eyes` persists the event log
+  (`CORELLIA_EVENTS_PATH`) and `scripts/trace.ts` replays it — this is how the
+  load-bearing failures were root-caused.
 
-**ADR-030 (soft budgets until proven):** budgets are now tracked + reported but
-do not BLOCK work on arbitrary counts. The fan-out cap is removed; `subdivide`
-inherits `attempts` instead of flooring it to 1; the dollar ceiling + wall-clock
-remain the only hard backstops. This generalizes the existing `toolCalls`
-warn-only carve-out — we have not proven the factory builds anything yet, so
-arbitrary caps that prevent that proof are premature. **1403 tests green, lint
-clean.** Next: re-run `live:foreign-eyes` (expect convergence now), then
-`live:self`. See the iteration-09 section of
-[prototype-build-notes.md](./prototype-build-notes.md).
+**1409 tests green, lint clean.** Next: `live:self` (AC-3 — the factory delivers
+to its own repo and opens a real PR), now approved by the AC-2 pass.
 
 Iteration 08 (Recursion — ADR-029) **landed on main**: `leafOnly` is removed
 from the comprehend family and a structured integrate-merge composes child
@@ -54,7 +63,7 @@ catch — see the iteration-08 sections of
 | 06 | Self-hosting | Shipped | — | 1345 tests; loop closes; AC-2 1/5 (comprehension can't recurse → iter 08) |
 | 07 | Conventions | Shipped | — | 1335 tests; F-68/F-69 layered conventions (ADR-028) |
 | 08 | Recursion | Landed on main; recursion proven; scoping is next | — | ADR-029 Dec 1+3 built (leafOnly off + structured merge); Dec 2+4 (scoped JIT comprehension) deferred → iteration 09 |
-| 09 | Comprehension scoping | Built on main; unit-proven; live re-proof pending | — | ADR-029 Dec 2+4: relevance-bounded coverage (greenfield root split + existence-filtered dives), childless-split tolerance, live-foreign-eyes scoped rewrite; 1403 tests green; AC-2 re-proof operator-run |
+| 09 | Comprehension scoping | **Shipped — AC-2 PROVEN LIVE** | — | ADR-029 Dec 2+4 (relevance-bounded coverage) + ADR-030 (soft budgets) + transport timeout + decide-skill injection + head_sha tool + comprehend hardening + native tracing; scoped intent converged end-to-end on cats ($0.59); 1409 tests green; unblocks AC-3/AC-4 |
 
 ## What's next — iteration 09: comprehension scoping (ADR-029 Decisions 2 + 4)
 

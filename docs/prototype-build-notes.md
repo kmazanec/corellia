@@ -1264,3 +1264,36 @@ not honoring its own craft (use tools; bound exploration; don't block-and-ask).
 Inflection point: the next lever is prompt/behavior discipline (and possibly
 model tier), not another engine knob. Worth a step-back with the operator before
 more spend. Cumulative across 7 runs: ~$3.22.
+
+## AC-2 run #8 — PASSED. Full convergence on a real foreign repo. 🎉
+
+The skill hardening worked, AT MID TIER (no model bump). Tree — every goal green:
+```
+✓ deliver-intent
+  ✓ map-repo: architecture
+  ✓ map-repo: conventions            ← used tools (no more block-and-ask)
+  ✓ deep-dive-region: src            ← stayed under the read ceiling (no wall-clock death)
+  ✓ map-repo: Identify the entry-point file
+  ✓ implement: Add documentation comment block   ← THE IMPLEMENT LEAF RAN AND WROTE IT
+```
+
+`convergence: ✓ (no blockers)` · `AC-2 CHECKPOINT: PASSED` · $0.59 · 80% cache.
+
+A scoped intent went END-TO-END on a real foreign repo for the first time:
+comprehend (4 scoped goals, all passed, 3 artifacts written with real SHAs) →
+identify target file → implement → integration eval passed. The implement leaf —
+which had never succeeded — delivered once comprehension stopped starving it and
+the behavioral fixes landed.
+
+**AC-2 is PROVEN.** Iteration 09 (comprehension scoping, ADR-029 Dec 2+4) +
+ADR-030 (soft budgets) + the transport timeout + decide-skill injection +
+head_sha tool + comprehend behavior hardening together took the factory from
+"drowns in 16 speculative comprehension goals, never converges" to "converges a
+real scoped intent on a foreign repo." AC-2 was the blocker on AC-3/AC-4
+(deliver-to-self / deliver-to-foreign); those are now unblocked.
+
+Total live spend across 8 AC-2 runs this session: ~$3.81. Every run bought a
+real fix (see the run-by-run sections above).
+
+**Next:** AC-2 being green, `live:self` (AC-3: factory delivers to its OWN repo,
+opens a real PR) is now approved to attempt.
