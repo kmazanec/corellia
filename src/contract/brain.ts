@@ -49,6 +49,16 @@ export interface BrainContext {
    * exploratory step and on types without an `outputSchema`.
    */
   outputSchema?: Record<string, unknown>;
+  /**
+   * The family skill guidance for this goal's type, injected so the brain
+   * reasons with the same craft at DECIDE time that it already gets at produce
+   * and judge time. For a comprehend goal this carries the satisfy-vs-split
+   * criterion; without it the brain decides blind and over-splits (observed: a
+   * map-repo splitting into a deep-dive that split into another map-repo on a
+   * repo where no split was warranted). Optional: absent → the brain decides on
+   * the goal context alone, exactly as before.
+   */
+  skill?: string;
 }
 
 /**

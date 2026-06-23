@@ -1134,3 +1134,35 @@ Two findings:
    another budget knob.
 
 Cost across 4 AC-2 runs: ~$0.68 total.
+
+## Investigation between runs #4 and #5 — the decide path was deciding BLIND
+
+Per operator direction, investigated the run-#4 recursion smell (a `map-repo`
+splitting into a `deep-dive` that split into another `map-repo`) before spending
+on run #5. Root cause found, and it is NOT a budget issue:
+
+**The decide path injected no family skill and no split criterion.** When the
+brain decides satisfy-vs-split, it received only a generic "you are a
+decision-maker" system prompt + goal context + memories + the type catalog. The
+"split only when the region is too large; partition into same-category
+sub-regions" guidance lived ONLY in a code comment in `comprehend.ts` — never
+sent to the model. And `loadFamilySkill` was wired into the produce (step-loop)
+and judge paths but NOT the decide path. So the brain over-split comprehension
+because nothing told it not to — the same disease as the original over-firing,
+one layer in (we fixed how many comprehension goals get MINTED; this is how
+readily each one SPLITS).
+
+Fix (skill injection into decide, for ALL families — the principled seam, not a
+comprehend special-case):
+- `BrainContext.skill?` (contract) — optional family-skill guidance for the
+  decide call.
+- Engine `decideSkillBlock(goalType)` builds preamble+section (same shape the
+  step path uses) and populates `baseCtx.skill` before `brain.decide`.
+- `LlmBrain.decide` injects a `FAMILY SKILL` block into the decide message.
+- `comprehend.md` gains explicit satisfy-vs-split guidance: DEFAULT TO SATISFY;
+  split only a genuinely too-large region; children must be the SAME
+  comprehension type, disjoint, covering the parent. (This preamble is what the
+  decide call now sees.)
+
+Now every family decides WITH its craft guidance, not blind. Tests: decide
+injects ctx.skill / omits when absent; 1407 green, lint clean. Ready for run #5.

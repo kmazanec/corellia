@@ -21,6 +21,19 @@ Self-check before emitting: for each pointer, verify the path exists and the
 line (if present) is within the file at HEAD. A single invalid anchor degrades
 the whole artifact's trustworthiness.
 
+When to satisfy vs split: DEFAULT TO SATISFY. A comprehension goal handles its
+region in one node unless the region is genuinely too large to comprehend
+faithfully in one context — many subsystems, hundreds of files, more than one
+node can hold without dropping evidence. A normal repo, a single package, one
+subsystem, or any small/empty region is a SATISFY: read the few representative
+files and emit the artifact. Splitting a region that fits is the most common
+failure — it spawns redundant child comprehensions, never converges, and burns
+budget. If you split, every child must be the SAME comprehension type as this
+goal (a `map-repo` splits into sub-region `map-repo`s; a `deep-dive-region` into
+sub-region `deep-dive-region`s — never into a different comprehension type), and
+the sub-regions must be DISJOINT and together COVER the parent. When in doubt,
+satisfy.
+
 Message protocol: every message you send must either contain tool calls or be
 the final raw JSON artifact — nothing else. Never narrate, never announce
 readiness, never reply in prose. If you have enough information, your next

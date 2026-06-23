@@ -666,10 +666,15 @@ export class Engine {
         decision = memo.decision;
       } else {
         // Build the base BrainContext, carrying the provisional memo as a hint
-        // when one exists (the brain weighs it, never obeys it).
+        // when one exists (the brain weighs it, never obeys it). Inject the family
+        // skill so the brain decides satisfy-vs-split WITH the craft guidance it
+        // already gets at produce/judge time — without it the decide call is blind
+        // (e.g. comprehension over-splits: a map-repo splitting needlessly).
+        const decideSkill = this.decideSkillBlock(goal.type);
         const baseCtx: BrainContext = {
           tier: currentTier,
           memories: goal.memories,
+          ...(decideSkill ? { skill: decideSkill } : {}),
           ...(memoStatus === 'provisional' && memo !== null
             ? { patternHint: memo }
             : {}),
@@ -2538,6 +2543,24 @@ export class Engine {
    * describes the intended three-checkpoint design but only the split checkpoint
    * is currently implemented.
    */
+  /**
+   * The family skill block for a goal type, for injection into the DECIDE call —
+   * the preamble plus the type's section, the same shape the step-loop harness
+   * uses. Carries the satisfy-vs-split criterion so the brain decides with craft,
+   * not blind. Returns undefined when the family has no loadable skill.
+   */
+  private decideSkillBlock(goalType: string): string | undefined {
+    if (!this.registry.has(goalType)) return undefined;
+    const familySkill = loadFamilySkill(this.registry.get(goalType).family);
+    if (!familySkill) return undefined;
+    const section = familySkill.sectionFor(goalType);
+    const preamble = familySkill.full.split(/\n## /)[0]!.trim();
+    const parts: string[] = [];
+    if (preamble) parts.push(preamble);
+    if (section) parts.push(section.trim());
+    return parts.length > 0 ? parts.join('\n\n') : undefined;
+  }
+
   private async runCoverageGate(
     goal: Goal,
     kind: 'make' | 'learn' | 'judge' | 'evolve',

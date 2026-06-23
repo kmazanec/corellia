@@ -248,6 +248,29 @@ describe('LlmBrain.decide', () => {
     expect(userMsg).toContain('evidence');
   });
 
+  it('injects ctx.skill (the family satisfy-vs-split guidance) into the decide message', async () => {
+    const { fetch, calls } = stubFetch(chatResponse(JSON.stringify({ kind: 'satisfy' })));
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    await brain.decide(baseGoal, {
+      tier: 'mid',
+      memories: [],
+      skill: 'DEFAULT TO SATISFY. Split only a genuinely too-large region.',
+    });
+    const body = JSON.parse(calls[0]?.options.body as string);
+    const userMsg: string = body.messages.find((m: { role: string }) => m.role === 'user').content;
+    expect(userMsg).toContain('FAMILY SKILL');
+    expect(userMsg).toContain('DEFAULT TO SATISFY');
+  });
+
+  it('omits the skill block when ctx.skill is absent', async () => {
+    const { fetch, calls } = stubFetch(chatResponse(JSON.stringify({ kind: 'satisfy' })));
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    await brain.decide(baseGoal, { tier: 'mid', memories: [] });
+    const body = JSON.parse(calls[0]?.options.body as string);
+    const userMsg: string = body.messages.find((m: { role: string }) => m.role === 'user').content;
+    expect(userMsg).not.toContain('FAMILY SKILL');
+  });
+
   it('includes prior attempt verdict in the user message when present', async () => {
     const { fetch, calls } = stubFetch(chatResponse(JSON.stringify({ kind: 'satisfy' })));
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
