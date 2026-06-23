@@ -28,7 +28,9 @@ import { renderTree } from '../src/eventlog/projections.js';
 const args = process.argv.slice(2);
 const goalFilterIdx = args.indexOf('--goal');
 const goalFilter = goalFilterIdx >= 0 ? args[goalFilterIdx + 1] : undefined;
-const pathArg = args.find((a, i) => !a.startsWith('--') && i !== goalFilterIdx + 1);
+// The path is the first positional arg that is neither a flag nor a flag's value.
+const flagValueIdx = goalFilterIdx >= 0 ? goalFilterIdx + 1 : -1;
+const pathArg = args.find((a, i) => !a.startsWith('--') && i !== goalFilterIdx && i !== flagValueIdx);
 const eventsPath = pathArg ?? join(process.cwd(), 'out', 'events.jsonl');
 
 let raw: string;
