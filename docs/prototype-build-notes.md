@@ -1448,3 +1448,45 @@ dependency blocked, and is it picking up the wrong child artifact?
 Hygiene false-positive (FINDING 1) recurred (media/video.zip); primary actually
 clean, branch main. Worktree live-self-3fa1e189 left uncollected (blocked run).
 Cost run #2: $0.61. Cumulative this session: ~$5.20.
+
+## AC-3 run #3 (correct model z-ai/glm-5.2 + engine fixes) — deepest yet: tests PASS, source leaf fails on scope gate + no declared scripts
+
+With the model wiring fixed (high tier = z-ai/glm-5.2, not the silently-wrong
+claude-sonnet-4) and the sandbox-path/block-coercion/conventions-pointer fixes in,
+this is the furthest AC-3 has reached. Tree:
+```
+◌ deliver-intent (attempt 1)
+  ✓ map-repo: architecture
+  ✓ map-repo: conventions
+  ✓ implement: Write comprehensive tests for formatDuration   ← a TEST leaf PASSED
+  ◌ implement: Implement formatDuration utility function
+✗ deliver-intent (retry)
+  ✗ implement: ...test-first... exhausted attempts
+```
+Comprehension converged cleanly (no block-without-trying, no SHA thrash) and an
+implement leaf delivered passing tests. Cost $2.13. No PR. Two gaps, both from the
+trace:
+
+### FINDING 6 (env gap): live:self declares NO scripts, so the brain can't self-verify
+The intent says "keep typecheck, lint, and the full test suite green", and the
+implement leaf correctly tried to run them — but live-self.ts passes
+`declaredScripts: {}`, so every `run_script test|typecheck|lint` is REFUSED ("not
+in the declared set"). The brain can't confirm its work is green, so it re-reads /
+re-searches / retries to exhaustion. Same class as the head_sha gap: the factory
+asks for verification it doesn't grant the tool for. Fix: declare corellia's own
+scripts (test/typecheck/lint from package.json) in the live:self sandbox so a
+self-build can verify itself.
+
+### FINDING 7 (likely real check bug): files-within-scope rejects the written .ts files
+The terminal deterministic failure was:
+`deterministic: FAIL — files-within-scope: File(s) outside declared scope: ts, ts`
+Scope was `src/util/,tests/util/`; the leaf wrote (e.g.) src/util/format-duration.ts
+and tests/util/format-duration.test.ts — which SHOULD match those prefixes. The
+"ts, ts" rendering suggests the scope check is mis-parsing the paths (truncating to
+the extension?) or the brain wrote to an off-prefix path. Needs investigation in
+`filesWithinScope` (src/library/checks.ts) with the actual emitted paths from the
+event log — could be a prefix-matching / path-normalization bug, not the brain.
+
+Model note: z-ai/glm-5.2 behaved well on the comprehension + decide paths — no
+block-without-trying recurrence this run. The remaining failures are NOT model
+quality; they're the two gaps above. Cumulative AC-3 spend: ~$5.0.
