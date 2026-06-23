@@ -1396,3 +1396,55 @@ vitest exclude so leftover trees never pollute a local test run.
 
 FINDING 1 (false-positive hygiene check) and the tier question remain open but
 de-prioritized: tier was a red herring; the path contract was the real cause.
+
+## AC-3 run #2 — sandbox-path fix WORKED; next layer is a conventions-pointer contract mismatch
+
+The sandbox-path fix landed cleanly. Trace of `map-repo: conventions` (the goal
+that blocked-without-trying in run #1) shows the fix working:
+- ZERO "outside the sandbox root" refusals — every list_dir/read_file `→ ran`.
+- `decided: satisfy` and actually probed the repo with relative paths.
+- The fabricated "repo unreachable" block is GONE.
+
+It now fails for a real, different reason — the deterministic gate:
+```
+deterministic: FAIL — knowledge:map-repo: Conventions exemplar pointer(s) not found: src/library/skills/
+tier: mid → high
+deterministic: FAIL — knowledge:map-repo: Conventions exemplar pointer(s) not found: src/contract
+(exhausted attempts)
+```
+
+### FINDING 5 (contract mismatch + misleading error): conventions pointers at DIRECTORIES
+`conventionsCheck` (knowledge-checks.ts:428-435) validates each exemplar pointer
+with `readFile(join(root, pointer.path))` — i.e. it requires a readable FILE. The
+brain pointed at DIRECTORIES (`src/library/skills/`, `src/contract`) — reasonable
+"these dirs exemplify our conventions" pointers. `readFile` on a dir throws EISDIR
+→ caught → reported as "not found". TWO problems:
+  1. The error message is MISLEADING: the path is NOT missing, it's a directory.
+     This is why the brain couldn't self-correct across mid→high attempts — it was
+     told "not found" for a path it could see exists, so it thrashed and exhausted.
+  2. Contract ambiguity: comprehend.md says "point at exemplar FILES", but the
+     brain naturally points at dirs, and the gate only accepts files.
+
+Design choice (for the operator) — which side is wrong?:
+  (a) Gate too strict: accept a pointer whose path EXISTS (file OR directory) —
+      use stat() not readFile(); a directory exemplar ("see src/contract/* for the
+      type-definition conventions") is legitimate. Also fix the misleading message
+      (distinguish missing vs directory). Most forgiving; matches what the brain
+      produces.
+  (b) Brain wrong: harden comprehend.md to point ONLY at specific files (e.g.
+      src/contract/goal.ts:1), never directories — keep the gate file-strict but
+      fix the message so a dir pointer says "must be a file, not a directory" so
+      the brain can self-correct.
+  (c) Both: accept existing paths (file or dir) AND fix the message AND nudge the
+      skill toward files. Belt-and-suspenders.
+
+### FINDING 3 recurs: integration eval judged the comprehension artifact as the deliverable
+Same as run #1: "Artifact is architectural overview, not the requested utility
+module." With conventions blocked, the deliver leaf's dependency failed, yet the
+integration eval still ran and judged a knowledge artifact where code was
+expected. Still worth probing: why does integration judge at all when a child
+dependency blocked, and is it picking up the wrong child artifact?
+
+Hygiene false-positive (FINDING 1) recurred (media/video.zip); primary actually
+clean, branch main. Worktree live-self-3fa1e189 left uncollected (blocked run).
+Cost run #2: $0.61. Cumulative this session: ~$5.20.
