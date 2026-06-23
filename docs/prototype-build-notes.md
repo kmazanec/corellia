@@ -941,3 +941,71 @@ real spend, cannot run from the dev harness):
 
 Record the honest result here when run. Tune the `live:self` proving budget down
 (currently 80/5M/600) once scoping is proven to reduce the goal count.
+
+## AC-2 proof run #1 — live:foreign-eyes on cats (2026-06-23)
+
+**SCOPING FIXED — but a budget/fan-out bug now blocks convergence.** This is the
+bootstrap loop working: the factory got further (over-firing gone), then stalled
+on the next limit down.
+
+| Check | Result |
+|---|---|
+| Comprehension goals | **3** (2 map-repo + 1 deep-dive) — was ~16 |
+| Scoping (≤ 6) | **PASS** ✓ |
+| Convergence | **FAIL** — split structural validation |
+
+Run nonce 551fd00a · cost $0.2212 · 92.8% cache-hit · intent = "add a doc comment
+to the main entry-point file", scope `src/`.
+
+**Why 3 and not ~0:** the intent scope `src/` EXISTS in cats and the feature
+touches existing code, so the gate correctly pulls architecture + conventions
+maps + one `src` dive. That is correct JIT comprehension, not over-firing — the
+relevance bound is doing exactly its job. (The near-zero case is the
+`formatDuration`-in-new-`src/util/` feature, where the scope is greenfield.)
+
+**The new blocker (NOT a scoping bug — a pre-existing budget defect my fix
+exposed by getting deeper into the tree):**
+
+```
+Split structural validation failed: Fan-out of 4 children exceeds parent
+attempt budget of 1
+Goal "Deep-dive region src" exhausted its toolCalls budget
+Isomorphic failure detected (signature: step-loop:failed) — escalating to block
+```
+
+Root cause traced to its floor (not the gate, as first theorized):
+`subdivide()` floors every child's attempts to `max(1, floor(parent.attempts ×
+share))` (`budget.ts:15`). The root commissions `attempts: 5`; one level down a
+~0.1–0.4 share floors attempts to **1**; from then on `validateSplit`'s fan-out
+guard `children.length > budget.attempts` (`engine.ts:3265`) rejects ANY split
+of ≥2 children at that depth. The failing "Fan-out of 4 > 1" is a FLOORED node
+(the conventions-map's nested `characterize`, or a re-decided sub-node), not the
+root. This is exactly the iteration-08 deferred defect ("subdivide floors child
+attempts to 1 under depth", build-notes ~L845) — my scoping fix didn't cause it,
+it REVEALED it by letting the tree recurse deeper than the over-firing runs ever
+got.
+
+This is an **ADR-007 issue.** ADR-007 chose `children.length ≤ attempts` as the
+fan-out guard, but its real purpose was floor-affordability (don't let many
+tiny-share children sum past the parent via the `Math.max(1,…)` floor), NOT
+"decomposition is thrashing." `attempts` is the scarcest, fastest-flooring
+dimension, so gating split WIDTH on it forbids legal decomposition at depth.
+Each child runs on its OWN subdivided budget (`engine.ts:2819,2838`) — a parent
+does not spend N attempts to fan out N children — so the coupling is wrong.
+Fix (next hand-build): decouple the fan-out width guard from `attempts`; gate
+width on floor-affordability in a dimension that funds work, preserving ADR-007's
+"a fan-out cannot multiply costs past its root grant." Recorded as an ADR-007
+amendment.
+
+**A secondary real find:** the `deep-dive-region src` child exhausted its
+toolCalls budget at depth — the same subdivide-floor family. Lower priority than
+the fan-out guard.
+
+**Decision:** AC-2 still RED on convergence (scoping PROVEN). Fix the
+fan-out-vs-attempts coupling (ADR-007 amendment) before any deliver spend
+(live:self). Scoping half of iteration 09 is proven; the budget half is the next
+hand-build.
+
+(Note: the harness reported exit 0 though the script prints FAILED and calls
+`process.exit(1)` — the buffered stdout head was also lost. Cosmetic; the
+substance above is from the script's own result summary.)
