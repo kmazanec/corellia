@@ -114,6 +114,7 @@ export const GRANT_TOOL_MAP = {
   read_file: ['fs.read'],
   list_dir: ['fs.read'],
   search: ['fs.read'],
+  head_sha: ['fs.read'],
   write_file: ['fs.write'],
   run_script: ['test.run_scoped', 'test.run_impacted'],
   find_symbol: ['retrieval.api', 'fs.read'],

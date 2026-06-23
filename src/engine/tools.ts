@@ -9,6 +9,7 @@
 
 import { normalize, isAbsolute, join, relative, dirname } from 'node:path';
 import { readFile, readdir, stat, writeFile as fsWriteFile, mkdir } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import type { Goal } from '../contract/goal.js';
 import type { ToolImpl } from '../contract/tool.js';
 // isInScope lives in library/checks.ts (single canonical definition).
@@ -56,6 +57,7 @@ export function createFileTools(root: string): {
   writeFile: ToolImpl;
   listDir: ToolImpl;
   search: ToolImpl;
+  headSha: ToolImpl;
 } {
   // ── read_file ─────────────────────────────────────────────────────────────
 
@@ -272,11 +274,45 @@ export function createFileTools(root: string): {
     },
   };
 
+  // ── head_sha ───────────────────────────────────────────────────────────────
+  // The sanctioned way to obtain the sandbox's current HEAD SHA. Comprehension
+  // artifacts REQUIRE `generatedAtSha` = current HEAD, but a worktree's `.git` is
+  // a file-indirection and the real gitdir is outside the sandbox, so direct
+  // `.git/HEAD` reads fail and `git rev-parse` is not a declared script — the
+  // brain used to thrash to token death trying (AC-2 run #6 trace). This tool
+  // runs `git rev-parse HEAD` with cwd at the sandbox root (git resolves the
+  // worktree indirection itself) and returns the SHA. Read-only: gated by
+  // `fs.read`, which every comprehension goal already holds.
+  const headShaImpl: ToolImpl = {
+    def: {
+      name: 'head_sha',
+      description:
+        'Return the current git HEAD SHA of the sandbox. Use its output verbatim ' +
+        'for an artifact\'s generatedAtSha — do NOT run git yourself or read .git.',
+      parameters: { type: 'object', properties: {} },
+    },
+
+    async execute(_goal: Goal, _args: Record<string, unknown>): Promise<{ ok: boolean; output: string }> {
+      try {
+        const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: root,
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        }).trim();
+        return { ok: true, output: sha };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { ok: false, output: `head_sha: ${message}` };
+      }
+    },
+  };
+
   return {
     readFile: readFileImpl,
     writeFile: writeFileImpl,
     listDir: listDirImpl,
     search: searchImpl,
+    headSha: headShaImpl,
   };
 }
 

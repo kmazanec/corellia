@@ -272,6 +272,7 @@ export async function openSandboxAssembly(
       fileTools.writeFile,
       fileTools.listDir,
       fileTools.search,
+      fileTools.headSha,
       runScriptImpl,
       ...knowledgeTools,
       ...prTools,

@@ -16,6 +16,11 @@ itself — the consumer can read the file; what they cannot do is find the
 relevant lines without guidance. A pointer without a line number is acceptable
 for a file-level claim; a pointer to a specific fact must carry the line.
 
+The `generatedAtSha` field is the current HEAD SHA: get it from the `head_sha`
+tool and use its output verbatim. Do NOT run git yourself, and do NOT read
+`.git/HEAD` or any `.git` path — the sandbox is a worktree (its `.git` is a file
+indirection) and those reads will fail. One `head_sha` call gives you the value.
+
 Every anchor must be valid at the SHA the artifact was generated against.
 Self-check before emitting: for each pointer, verify the path exists and the
 line (if present) is within the file at HEAD. A single invalid anchor degrades

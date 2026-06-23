@@ -362,3 +362,36 @@ describe('search', () => {
     expect(result.ok).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// head_sha
+// ---------------------------------------------------------------------------
+
+describe('head_sha', () => {
+  it('returns the current HEAD SHA of the sandbox git repo', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const opts = { cwd: sandboxRoot, stdio: 'ignore' as const };
+    execFileSync('git', ['init', '-q'], opts);
+    execFileSync('git', ['config', 'user.email', 't@t.t'], opts);
+    execFileSync('git', ['config', 'user.name', 'T'], opts);
+    execFileSync('git', ['add', '-A'], opts);
+    execFileSync('git', ['commit', '-q', '-m', 'init'], opts);
+    const expected = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: sandboxRoot, encoding: 'utf-8',
+    }).trim();
+
+    const { headSha } = createFileTools(sandboxRoot);
+    const result = await headSha.execute(makeGoal(), {});
+    expect(result.ok).toBe(true);
+    expect(result.output).toBe(expected);
+    expect(result.output).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it('returns ok:false when the sandbox is not a git repo', async () => {
+    // sandboxRoot is a bare temp dir (no git init) in this test.
+    const { headSha } = createFileTools(sandboxRoot);
+    const result = await headSha.execute(makeGoal(), {});
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('head_sha');
+  });
+});

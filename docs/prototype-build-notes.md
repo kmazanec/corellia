@@ -1198,3 +1198,39 @@ without writing. Cost $0.69 (comprehension did real work this time).
 the integration eval to see whether the brain wrote nothing, wrote out of scope,
 or emitted-without-writing. This is the last gap between AC-2 and convergence.
 Cost across 5 AC-2 runs: ~$1.37 total.
+
+## AC-2 run #6 — TRACE PAID OFF: map-repo can't obtain the HEAD SHA, thrashes to token death
+
+Persisted the event log (CORELLIA_EVENTS_PATH) + replayed via scripts/trace.ts.
+The trace made the root cause unmistakable. `map-repo: architecture` spent **45
+steps** almost entirely failing to obtain the HEAD SHA its artifact requires
+(`generatedAtSha`):
+
+- `run_script "git rev-parse HEAD"` → REFUSED (not in the declared script set).
+- `read_file .git/HEAD` → ENOTDIR (the sandbox is a WORKTREE; `.git` is a FILE
+  pointing to the real gitdir, not a directory).
+- `.git/refs/heads/main`, `.git/worktrees`, the real gitdir → REFUSED (outside
+  the sandbox root) or ENOTDIR.
+- Dozens of duplicate-read refusals (F-64) as it retried the same dead paths.
+
+It burned the full (now-inherited) 2M token budget thrashing against the sandbox
+boundary, then emitted and hit `budget-exhausted: tokens`. (Run #5's architecture
+map happened to succeed — this SHA-fetch is UNRELIABLE; sometimes the model gives
+up and emits with a placeholder SHA, sometimes it thrashes to death. Run #5 even
+showed `generatedAtSha=worktree`/`unknown` — placeholder SHAs, a related symptom.)
+
+**Root cause (engine/tooling gap, NOT prompt):** the factory REQUIRES comprehension
+artifacts to carry the current HEAD SHA, but gives the comprehension leaf NO
+reliable, sanctioned way to read it — `git rev-parse` isn't declared, and the
+worktree's `.git` indirection + sandbox scoping block every direct read. The
+engine ALREADY computes `gitHeadSha(repoRoot)` for the coverage gate; it should
+hand that SHA to the comprehension leaf (inject into goal spec/context) so the
+brain never fetches it. Candidate: populate `spec.generatedAtSha` (or a context
+field) for map-repo / deep-dive-region goals from the engine's gitHeadSha.
+
+Also confirmed by trace: comprehension OVER-EXPLORES (45 steps, dozens of
+list_dir/read_file) vs the skill's "4-6 representative reads" — partly downstream
+of the SHA thrash, but the economy bound isn't being honored. Lower priority than
+the SHA gap.
+
+Cost run #6: $1.41 (the thrash is expensive). Cumulative across 6 runs: ~$2.78.
