@@ -28,10 +28,33 @@ export type DeclaredScripts = Record<string, string>;
  * wall-clock ceiling is per-call.
  */
 export interface ScriptRunner {
-  run(name: string, timeLimitMs?: number): Promise<ScriptResult>;
+  /**
+   * Run a declared script by name. An optional `target` (a path or test pattern)
+   * is validated and appended to the declared command's args, so the factory can
+   * run a targeted subset (e.g. one test file) instead of the whole suite —
+   * without a freeform-shell hole. The operator-declared command fixes the runner
+   * (any language/paradigm); only the target is the model's input.
+   */
+  run(name: string, target?: string, timeLimitMs?: number): Promise<ScriptResult>;
 }
 
 const DEFAULT_TIME_LIMIT_MS = 30_000;
+
+/**
+ * Validate a model-supplied script target. Allowed: a relative, in-repo path or
+ * test pattern — letters, digits, and `._-/*` only. Rejected: absolute paths,
+ * `..` traversal, and any shell metacharacter — so a target can never become a
+ * second command. Returns the trimmed target, or null if invalid.
+ */
+export function validateScriptTarget(raw: string): string | null {
+  const target = raw.trim();
+  if (target.length === 0 || target.length > 512) return null;
+  if (target.startsWith('/') || target.startsWith('~')) return null;
+  if (target.split('/').includes('..')) return null;
+  // Safe character class only: no spaces, quotes, $, ;, |, &, <, >, backticks, etc.
+  if (!/^[A-Za-z0-9._/*-]+$/.test(target)) return null;
+  return target;
+}
 
 /**
  * Build a ScriptRunner bound to a specific repo root and declared-scripts map.
@@ -54,7 +77,11 @@ export function createScriptRunner(
   env?: NodeJS.ProcessEnv,
 ): ScriptRunner {
   return {
-    async run(name: string, timeLimitMs = DEFAULT_TIME_LIMIT_MS): Promise<ScriptResult> {
+    async run(
+      name: string,
+      target?: string,
+      timeLimitMs = DEFAULT_TIME_LIMIT_MS,
+    ): Promise<ScriptResult> {
       const entryPoint = declaredScripts[name];
       if (entryPoint === undefined) {
         return Object.freeze({
@@ -67,6 +94,19 @@ export function createScriptRunner(
         });
       }
 
+      // A target (path/pattern to scope the run) is validated, never shelled.
+      let safeTarget: string | undefined;
+      if (target !== undefined && target.length > 0) {
+        const validated = validateScriptTarget(target);
+        if (validated === null) {
+          const msg = `Invalid script target "${target}": must be a relative in-repo path/pattern (no shell metacharacters, no "..").`;
+          return Object.freeze({
+            ok: false, exitStatus: null, output: msg, fullOutput: msg, durationMs: 0, timedOut: false,
+          });
+        }
+        safeTarget = validated;
+      }
+
       // Two declared-entry forms, both name-based and shell-free:
       //   "npm-script:<name>"  -> execute via the package manager (npm run <name>),
       //                           the form package.json scripts actually require;
@@ -75,7 +115,14 @@ export function createScriptRunner(
         ? entryPoint.slice('npm-script:'.length)
         : null;
       const command = npmScript !== null ? 'npm' : process.execPath;
-      const args = npmScript !== null ? ['run', npmScript] : [join(repoRoot, entryPoint)];
+      // npm needs `--` to forward the target as an arg to the underlying runner.
+      const baseArgs = npmScript !== null ? ['run', npmScript] : [join(repoRoot, entryPoint)];
+      const args =
+        safeTarget === undefined
+          ? baseArgs
+          : npmScript !== null
+            ? [...baseArgs, '--', safeTarget]
+            : [...baseArgs, safeTarget];
       const started = Date.now();
 
       return new Promise<ScriptResult>((resolve) => {
@@ -181,7 +228,7 @@ export function runScriptTool(runner: ScriptRunner): {
     def: {
       name: 'run_script',
       description:
-        'Run a repo-declared script by name in the sandbox worktree. The name must be in the declared entry-point set; shell text is not accepted.',
+        'Run a repo-declared script by name in the sandbox worktree. The name must be in the declared entry-point set; shell text is not accepted. Pass an optional "target" (a relative path or test pattern) to scope the run to a subset, e.g. run the test script against one file instead of the whole suite.',
       parameters: {
         type: 'object',
         properties: {
@@ -189,21 +236,27 @@ export function runScriptTool(runner: ScriptRunner): {
             type: 'string',
             description: 'The name of the declared script to run.',
           },
+          target: {
+            type: 'string',
+            description: 'Optional relative path/pattern to scope the run (e.g. tests/util/x.test.ts). Validated as an in-repo path; no shell metacharacters.',
+          },
         },
         required: ['script'],
       },
     },
     async execute(_goal, args) {
       const name = String(args['script'] ?? '');
-      const result = await runner.run(name);
+      const target = args['target'] !== undefined ? String(args['target']) : undefined;
+      const result = await runner.run(name, target);
       const statusLine = result.timedOut
         ? 'timed out'
         : result.exitStatus === null
           ? 'error'
           : `exit ${result.exitStatus}`;
+      const label = target ? `${name} ${target}` : name;
       return {
         ok: result.ok,
-        output: `[run_script: ${name}] ${statusLine}\n${result.output}`,
+        output: `[run_script: ${label}] ${statusLine}\n${result.output}`,
       };
     },
   };
@@ -242,14 +295,15 @@ export function loggingScriptRunner(
   now: () => number = () => Date.now(),
 ): ScriptRunner {
   return {
-    async run(name: string, timeLimitMs?: number): Promise<ScriptResult> {
-      const result = await runner.run(name, timeLimitMs);
-      const outputRef = `${goalId}:${name}:${now()}`;
+    async run(name: string, target?: string, timeLimitMs?: number): Promise<ScriptResult> {
+      const result = await runner.run(name, target, timeLimitMs);
+      const label = target ? `${name} ${target}` : name;
+      const outputRef = `${goalId}:${label}:${now()}`;
       const event: FactoryEvent = {
         type: 'script-ran',
         at: now(),
         goalId,
-        command: name,
+        command: label,
         exitStatus: result.exitStatus,
         durationMs: result.durationMs,
         outputRef,

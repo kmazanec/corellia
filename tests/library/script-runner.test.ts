@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   createScriptRunner,
+  validateScriptTarget,
   verifyEntryPoints,
   runScriptTool,
   loggingScriptRunner,
@@ -73,11 +74,46 @@ describe('npm-script declared entries', () => {
       scripts: { ok: 'node -e "process.exit(0)"', bad: 'node -e "process.exit(3)"' },
     }));
     const runner = createScriptRunner(repo, { ok: 'npm-script:ok', bad: 'npm-script:bad' });
-    const green = await runner.run('ok', 60_000);
+    const green = await runner.run('ok', undefined, 60_000);
     expect(green.exitStatus).toBe(0);
-    const red = await runner.run('bad', 60_000);
+    const red = await runner.run('bad', undefined, 60_000);
     expect(red.exitStatus).toBe(3);
     rmSync(repo, { recursive: true, force: true });
+  });
+
+  it('appends a validated target to the args (echoed back by the script)', async () => {
+    const repoRoot = makeTmp();
+    // Script echoes its argv tail so we can confirm the target was forwarded.
+    const rel = writeScript(repoRoot, 'echo', `process.stdout.write(process.argv.slice(2).join(' '));`);
+    const runner = createScriptRunner(repoRoot, { echo: rel });
+    const result = await runner.run('echo', 'tests/util/x.test.ts');
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain('tests/util/x.test.ts');
+  });
+
+  it('refuses an invalid target (shell metacharacters / traversal) with no spawn', async () => {
+    const repoRoot = makeTmp();
+    const rel = writeScript(repoRoot, 'echo', `process.stdout.write('ran');`);
+    const runner = createScriptRunner(repoRoot, { echo: rel });
+    for (const bad of ['../etc/passwd', 'a; rm -rf /', '/abs/path', '$(whoami)', 'a && b']) {
+      const result = await runner.run('echo', bad);
+      expect(result.ok).toBe(false);
+      expect(result.exitStatus).toBeNull();
+      expect(result.output).toContain('Invalid script target');
+    }
+  });
+});
+
+describe('validateScriptTarget', () => {
+  it('accepts relative in-repo paths and patterns', () => {
+    for (const ok of ['tests/util/x.test.ts', 'src/a.py', 'tests/**/*.spec.js', 'a_b-c.test.ts']) {
+      expect(validateScriptTarget(ok)).toBe(ok);
+    }
+  });
+  it('rejects absolute, traversal, and shell-metachar targets', () => {
+    for (const bad of ['/abs', '~/x', '../up', 'a/../b', 'a b', 'a;b', 'a|b', 'a$(x)', 'a`b`', '']) {
+      expect(validateScriptTarget(bad)).toBeNull();
+    }
   });
 });
 
@@ -168,7 +204,7 @@ describe('createScriptRunner — wall-clock timeout', () => {
     const rel = writeScript(repoRoot, 'hang', code);
     const runner = createScriptRunner(repoRoot, { hang: rel });
 
-    const result = await runner.run('hang', 300);
+    const result = await runner.run('hang', undefined, 300);
 
     expect(result.ok).toBe(false);
     expect(result.timedOut).toBe(true);
@@ -278,7 +314,7 @@ describe('loggingScriptRunner — event emission', () => {
     const store = new InMemoryEventStore();
 
     const logged = loggingScriptRunner(store, runner, 'goal-2');
-    await logged.run('hang', 150);
+    await logged.run('hang', undefined, 150);
 
     const events = await store.list({ type: 'script-ran' });
     expect(events).toHaveLength(1);

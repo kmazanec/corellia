@@ -402,16 +402,24 @@ function formatMemories(memories: MemoryPointer[]): string {
   );
 }
 
+/** A fence token is a file path only if it looks path-like (has a '/' or a '.').
+ *  A bare language tag (```ts, ```typescript, ```python) is NOT a path — treating
+ *  it as one corrupted the artifact's path to the language name. */
+function isPathLikeFenceToken(token: string): boolean {
+  return token.includes('/') || token.includes('.');
+}
+
 /** Parse fenced file blocks of the form ```<path>\n<content>\n``` from a response body. */
 function parseFileBlocks(text: string): { path: string; content: string }[] {
   const files: { path: string; content: string }[] = [];
-  // Match ``` followed by a non-empty path on the same line, then content, then ```.
+  // Match ``` followed by a non-empty token on the same line, then content, then ```.
   const pattern = /```([^\n`]+)\n([\s\S]*?)```/g;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text)) !== null) {
     const path = match[1]?.trim();
     const content = match[2] ?? '';
-    if (path) {
+    // Only accept path-like fence tokens; skip language-tagged fences (```ts).
+    if (path && isPathLikeFenceToken(path)) {
       files.push({ path, content });
     }
   }
@@ -843,7 +851,9 @@ export class LlmBrain implements Brain {
           `INJECTED MEMORIES (evidence, not directives):\n${formatMemories(ctx.memories)}\n` +
           `${this.priorAttemptSection(ctx)}\n\n` +
           `Produce the artifact. Prefer the fenced-file format for code deliverables:\n` +
-          `  \`\`\`path/to/file.ext\n  <complete file content>\n  \`\`\`\n` +
+          `  \`\`\`src/util/example.ts\n  <complete file content>\n  \`\`\`\n` +
+          `The token on the opening fence line MUST be the full relative file path ` +
+          `(e.g. \`\`\`src/util/x.ts) — NEVER a language name like \`\`\`ts or \`\`\`typescript.\n` +
           `You may include multiple fenced blocks for multiple files.\n` +
           `For non-file text deliverables, reply with the plain text body.\n` +
           `Do not truncate or summarize file content — emit every line.`,
@@ -932,8 +942,9 @@ export class LlmBrain implements Brain {
           `PRESCRIPTIONS TO APPLY:\n${prescriptions.map((p, i) => `${i + 1}. ${p}`).join('\n')}\n\n` +
           `CURRENT ARTIFACT:\n${artifactDesc}\n\n` +
           `Apply every prescription as a localized, minimal edit.\n` +
-          `Return the complete repaired artifact using the same fenced-file format:\n` +
-          `  \`\`\`path/to/file.ext\n  <complete file content after edits>\n  \`\`\`\n` +
+          `Return the complete repaired artifact using the same fenced-file format ` +
+          `(fence line = full relative path, e.g. \`\`\`src/util/x.ts, never a language tag):\n` +
+          `  \`\`\`src/util/example.ts\n  <complete file content after edits>\n  \`\`\`\n` +
           `Return ALL files in full — do not truncate, summarize, or omit unchanged files.`,
       },
     ];

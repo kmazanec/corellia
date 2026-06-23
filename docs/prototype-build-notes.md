@@ -1494,3 +1494,68 @@ harden parseFileBlocks then — but not before evidence shows it still bites.)
 Model note: z-ai/glm-5.2 behaved well on the comprehension + decide paths — no
 block-without-trying recurrence this run. The remaining failures are NOT model
 quality; they're the two gaps above. Cumulative AC-3 spend: ~$5.0.
+
+## AC-3 run #4 (declared scripts) — finding 6 FIXED; finding 7 is REAL after all (fence parser)
+
+The declared-scripts fix worked: the implement leaf wrote the files AND verified
+them — `run_script typecheck → exit 0`, `run_script lint → exit 0` (both green).
+The code is correct. But at emit it STILL failed:
+```
+step 6: typecheck → 0
+step 7: lint → 0          ← code written + verified green
+step 8: artifact
+deterministic: FAIL — files-within-scope: File(s) outside declared scope: typescript, typescript
+```
+
+So finding 7 IS a real, recurring bug (my run-#3 "not a bug" call was wrong — that
+run's thrash masked it). The leaf emits its final artifact as markdown fences
+tagged with the LANGUAGE (```ts last run, ```typescript this run), and
+`parseFileBlocks` (llm.ts) reads the fence-line token as the file PATH → path
+becomes "typescript"/"ts" → files-within-scope rejects it. It bites every time the
+leaf emits fenced code with a language tag. The work is done and green; only the
+artifact SERIALIZATION corrupts the path.
+
+Fix: parseFileBlocks must not treat a bare language tag as a path (a path has a
+'/' or a '.'); + the produce prompt should say the fence line is the full relative
+path, never a language like ```ts. (This is the fix proposed at run #3 and
+deferred — the evidence now justifies it.)
+
+Incidental: this run's `npm test` output showed a PRE-EXISTING flaky test —
+`tests/library/script-runner.test.ts > runs an npm-script:<name> entry` timed out
+at 5s (the self-build ran the full suite as part of verifying). Separate finding;
+not caused by this work. Bump its timeout or make it deterministic.
+
+Cost $0.34. Cumulative AC-3 ~$5.3.
+
+## Fixes for AC-3 run #4 findings (fence parsing + targeted test execution)
+
+**Fence parsing (the real blocker — confirmed recurring).** The brain emits its
+final artifact as language-tagged markdown fences (```ts, ```typescript); the
+parser read that token as the file PATH. Fixed both sides:
+- parseFileBlocks now only accepts a path-like fence token (has a '/' or '.'); a
+  bare language tag is ignored, so a slip can't corrupt the artifact's path.
+- The produce + repair prompts now state the fence line MUST be the full relative
+  path, with a concrete example, never a language tag.
+- Tests: language-tag fence → not a files artifact; path-like fence parsed even
+  when a language-tag fence precedes it.
+
+**Targeted test execution (operator directive: don't force the whole suite).**
+run_script now takes an optional validated `target`:
+- ScriptRunner.run(name, target?, timeLimitMs?) — the target is validated
+  (relative in-repo path/pattern; no abs, no '..', no shell metacharacters) and
+  appended to the operator-declared command (npm gets `-- <target>`), so the
+  factory runs a subset in the project's OWN runner without any freeform-shell
+  hole. The declared command fixes the runner (any language/paradigm); only the
+  target is the model's input.
+- run_script tool + loggingScriptRunner thread `target` through; build.md tells
+  the brain to use run_script(test, target=...) for targeted runs and reserve the
+  full `test` for final confirmation.
+- Tests: validated target forwarded + echoed; invalid targets refused with no
+  spawn; validateScriptTarget unit cases.
+
+Note: the run-#4 trace also showed a pre-existing flaky test (script-runner
+npm-script entry, 5s timeout) — it passed comfortably (511ms) after the
+positional-arg fixes in this change; watch it but no action taken.
+
+1418 tests green, lint clean. Next: re-run AC-3 — the code already builds + verifies
+green; the artifact should now serialize with correct paths and open the PR.

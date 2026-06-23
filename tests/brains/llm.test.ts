@@ -401,6 +401,28 @@ describe('LlmBrain.produce', () => {
     expect(result.value.files).toHaveLength(2);
   });
 
+  it('does NOT treat a language-tag fence (```typescript) as a file path', async () => {
+    // Regression (AC-3 run #4): a language-tagged fence made path="typescript",
+    // which the scope gate rejected. A bare language tag is not a path-like token.
+    const rawContent = '```typescript\nexport const x = 1;\n```';
+    const { fetch } = stubFetch(chatResponse(rawContent));
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.produce(baseGoal, ctxSonnet);
+    expect(result.value.kind).toBe('text'); // no path-like fence → not a files artifact
+    expect(result.value.files).toBeUndefined();
+  });
+
+  it('parses path-like fences while ignoring a language-tag fence in the same response', async () => {
+    const rawContent =
+      '```ts\nconsole.log("preamble");\n```\n```src/util/x.ts\nexport const x = 1;\n```';
+    const { fetch } = stubFetch(chatResponse(rawContent));
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.produce(baseGoal, ctxSonnet);
+    expect(result.value.kind).toBe('files');
+    expect(result.value.files).toHaveLength(1);
+    expect(result.value.files?.[0]?.path).toBe('src/util/x.ts');
+  });
+
   it('uses json_object=false for produce (plain text mode)', async () => {
     const { fetch, calls } = stubFetch(chatResponse('plain'));
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });

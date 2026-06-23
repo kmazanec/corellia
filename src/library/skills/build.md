@@ -5,6 +5,14 @@ batched rhythm is: write → run once → fix all failures → run once. Aim for
 roughly one to two test runs per chunk and one commit per chunk. Do not run the
 suite after every individual edit; fix everything you know is broken, then run.
 
+Run TARGETED tests, not the whole suite. The `run_script` tool takes an optional
+`target` (a relative path or test pattern): `run_script(script="test",
+target="tests/util/x.test.ts")` runs only that file in the project's own test
+runner. Run the full `test` (no target) only as a final confirmation, not on
+every iteration — the whole suite is slow in a large repo. Only declared script
+names run; freeform shell commands (e.g. a bare `npx ...`) are refused — pass the
+file via `target` instead.
+
 Contract drift is a report, never a fork. When the artifact diverges from a
 shared contract, surface the divergence as a blocker finding — do not silently
 widen the contract to accommodate the implementation. The contract is the
