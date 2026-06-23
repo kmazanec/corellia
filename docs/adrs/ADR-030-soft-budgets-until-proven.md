@@ -48,11 +48,19 @@ Concretely:
    `localId`s, acyclic `dependsOn`, shares — stay; they guard correctness, not
    cost.)
 
-2. **`subdivide` no longer collapses `attempts` (and the other retry-shaped
-   dimensions) to 1 at depth.** A child keeps enough budget to itself split and
-   retry. Subdivision still apportions tokens/toolCalls proportionally (so cost
-   tracking stays meaningful), but does not floor a node into being unable to do
-   its job.
+2. **`subdivide` INHERITS `attempts` and `tokens` instead of dividing them by
+   share.** Dividing by share floored a node two levels down toward nothing —
+   attempts to 1 (forbidding any further split/retry), and tokens to a
+   fraction-of-a-fraction (starving deep comprehension before it could emit). Each
+   child inherits the parent's attempts and tokens; toolCalls/wallClock still
+   subdivide proportionally for cost tracking. The real bound on token spend is the
+   dollar ceiling, not an arbitrary count that floors with depth.
+
+   *(tokens inheritance added 2026-06-23 after AC-2 run #3: with attempts/fan-out
+   already soft, convergence still failed on `map-repo architecture` and a deep
+   `src/utils` dive exhausting their subdivided token share — the same flooring
+   pathology, and exactly the "re-arm when a real trace shows a bound blocking
+   legitimate work" trigger this ADR names.)*
 
 3. **`toolCalls` stays warn-only** (the existing carve-out, `enforceToolCallBudget`
    defaults false). Unchanged by this ADR; named here because it is the precedent
@@ -108,8 +116,8 @@ the *arbitrary count-based* enforcement that was standing in for it.
 
 ## Consequences for the build
 
-- `src/engine/budget.ts`: `subdivide` inherits `attempts` (no longer floors it to
-  1 at depth); tokens/toolCalls/wallClock still subdivide for cost tracking.
+- `src/engine/budget.ts`: `subdivide` inherits `attempts` AND `tokens` (no longer
+  floors them at depth); toolCalls/wallClock still subdivide for cost tracking.
 - `src/engine/engine.ts`: `validateSplit` drops the fan-out cap (and no longer
   takes a budget). Attempt/token exhaustion are deliberately left as honest loop
   terminators (not softened this pass).

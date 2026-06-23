@@ -1068,3 +1068,38 @@ enough to test convergence; it wedged on the network.
 (injectable, like `sleepFn`), so a hung request aborts and routes through the
 existing retry/backoff instead of blocking the whole run. THEN re-run
 `live:foreign-eyes`. `live:self` stays deferred until AC-2 actually converges.
+
+## AC-2 proof run #3 (post timeout fix) — no hang, recursion deeper than ever, now token-starved
+
+Re-ran `live:foreign-eyes` on cats with BOTH ADR-030 (soft fan-out/attempts) and
+the per-request timeout. Result: **the fixes worked, and the next bound bit.**
+
+What worked (real progress):
+- **No hang** — completed in minutes, $0.15 (timeout fix held).
+- **Recursion went DEEPER than any prior run:** `deep-dive-region src` split into a
+  nested `deep-dive-region src/utils`; `map-repo conventions` PASSED (✓) and spawned
+  a `propose-pattern` child that also passed. ADR-029 recursion firing as designed.
+- **Scoping held:** 4 comprehension goals (`✓ scoped ≤ 6`). No fan-out blocker.
+
+The new blocker (the honest one we predicted):
+```
+Goal "Map repo: architecture" exhausted its tokens budget
+Goal "Walking skeleton deep-dive on src/utils" exhausted its tokens budget
+```
+Convergence failed because two comprehension goals ran out of **tokens** — the
+dimension ADR-030 deliberately LEFT as a hard block ("honest loop terminator").
+Now a real trace shows it blocking LEGITIMATE work, which is ADR-030's own
+re-arm/loosen trigger.
+
+Root cause is the SAME flooring pathology we fixed for attempts, still present for
+tokens: `subdivide` divides `tokens` by share, so a comprehension child gets a
+FRACTION of the root grant, and a deeper child (`src/utils`) gets a
+fraction-of-a-fraction → starves at depth. The root commissioned 2M tokens but
+`map-repo architecture` only saw its share.
+
+**Next hand-build:** stop subdividing tokens the way we stopped subdividing
+attempts — tokens should be a tracked/reported soft signal bounded by the real $
+ceiling, not a per-node hard wall that floors to nothing at depth. (Decide with
+operator: inherit tokens like attempts, or keep proportional tracking but make
+token exhaustion warn-only / not-blocking.) THEN re-run. Cost so far across 3 AC-2
+runs: ~$0.59 total.

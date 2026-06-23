@@ -8,20 +8,22 @@ import type { Budget } from '../contract/goal.js';
 /**
  * Subdivide a budget among children according to their fractional shares.
  *
- * tokens / toolCalls / wallClockMs subdivide proportionally so cost tracking
- * stays meaningful (a fan-out's reported spend still ladders down from the root).
+ * toolCalls / wallClockMs subdivide proportionally so cost tracking stays
+ * meaningful (a fan-out's reported spend still ladders down from the root).
  *
- * `attempts` is a RETRY count, not a divisible resource (ADR-030). Dividing it by
- * share floored a node two levels down to 1 attempt — which then forbade it from
- * splitting or retrying at all. So `attempts` is INHERITED, not divided: each
- * child gets the parent's attempt count. attempts no longer caps anything (the
- * fan-out guard that keyed on it is gone); it is a soft retry signal bounded in
- * reality by wall-clock and the dollar ceiling.
+ * `attempts` and `tokens` are INHERITED, not divided (ADR-030). Dividing them by
+ * share floored a node two levels down toward nothing — attempts to 1 (forbidding
+ * any further split/retry) and tokens to a fraction-of-a-fraction (starving deep
+ * comprehension before it could emit; observed on the cats AC-2 run #3). attempts
+ * is a retry COUNT, not a divisible resource; tokens divided-by-share punished
+ * depth on no real evidence. Each child now inherits the parent's attempts and
+ * tokens. Both remain tracked/reported per node; the REAL bound on token spend is
+ * the per-tree dollar ceiling, not an arbitrary count that floors with depth.
  */
 export function subdivide(budget: Budget, shares: number[]): Budget[] {
   return shares.map((share) => ({
     attempts: budget.attempts,
-    tokens: Math.max(1, Math.floor(budget.tokens * share)),
+    tokens: budget.tokens,
     toolCalls: Math.max(1, Math.floor(budget.toolCalls * share)),
     wallClockMs: Math.max(1, Math.floor(budget.wallClockMs * share)),
   }));

@@ -22,13 +22,14 @@ const base: Budget = {
 };
 
 describe('subdivide', () => {
-  // ADR-030: attempts is a RETRY count, not a divisible resource — it is INHERITED
-  // (each child gets the parent's full attempt count, so a deep node can still
-  // split and retry). tokens/toolCalls/wallClock still subdivide proportionally.
-  it('subdivides tokens/toolCalls proportionally', () => {
+  // ADR-030: attempts and tokens are INHERITED, not divided (dividing them
+  // floored a node toward nothing at depth — attempts to 1, tokens to a fraction-
+  // of-a-fraction that starved deep comprehension). toolCalls/wallClock still
+  // subdivide proportionally for cost tracking.
+  it('subdivides toolCalls proportionally', () => {
     const [a, b] = subdivide(base, [0.5, 0.5]);
-    expect(a!.tokens).toBe(500);
-    expect(b!.tokens).toBe(500);
+    expect(a!.toolCalls).toBe(base.toolCalls * 0.5);
+    expect(b!.toolCalls).toBe(base.toolCalls * 0.5);
   });
 
   it('inherits the full attempt count (does not divide attempts)', () => {
@@ -37,16 +38,24 @@ describe('subdivide', () => {
     expect(b!.attempts).toBe(base.attempts);
   });
 
-  it('does not floor a deep child to 1 attempt — it keeps the parent count', () => {
-    // The defect ADR-030 fixes: a tiny share used to floor attempts to 1, then
-    // the fan-out guard forbade the node from splitting. Inheritance prevents it.
-    const [a] = subdivide(base, [0.1]);
-    expect(a!.attempts).toBe(base.attempts);
+  it('inherits the full token grant (does not divide tokens)', () => {
+    const [a, b] = subdivide(base, [0.5, 0.5]);
+    expect(a!.tokens).toBe(base.tokens);
+    expect(b!.tokens).toBe(base.tokens);
   });
 
-  it('floors fractional token results', () => {
+  it('does not floor a deep child at a tiny share — it keeps attempts and tokens', () => {
+    // The defect ADR-030 fixes: a tiny share floored attempts to 1 (forbidding
+    // split) and tokens toward nothing (starving deep comprehension). Inheritance
+    // prevents both.
+    const [a] = subdivide(base, [0.1]);
+    expect(a!.attempts).toBe(base.attempts);
+    expect(a!.tokens).toBe(base.tokens);
+  });
+
+  it('floors fractional toolCall results', () => {
     const [a] = subdivide(base, [0.33]);
-    expect(a!.tokens).toBe(330); // floor(1000 * 0.33) = 330
+    expect(a!.toolCalls).toBe(Math.floor(base.toolCalls * 0.33));
   });
 
   it('handles a single child with share 1.0', () => {
@@ -55,11 +64,11 @@ describe('subdivide', () => {
     expect(a!.tokens).toBe(1000);
   });
 
-  it('subdivided tokens sum ≤ parent (no share overflow)', () => {
+  it('subdivided toolCalls sum ≤ parent (no share overflow)', () => {
     const shares = [0.3, 0.3, 0.3];
     const parts = subdivide(base, shares);
-    const totalTokens = parts.reduce((s, p) => s + p.tokens, 0);
-    expect(totalTokens).toBeLessThanOrEqual(base.tokens);
+    const totalToolCalls = parts.reduce((s, p) => s + p.toolCalls, 0);
+    expect(totalToolCalls).toBeLessThanOrEqual(base.toolCalls);
   });
 });
 
