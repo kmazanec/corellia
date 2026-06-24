@@ -3399,10 +3399,10 @@ export class Engine {
    * `ceilingReport`, the comprehend merge, the lesson/memory promotion edge,
    * `commitRound`/`diffBodiesWithinScope`.
    *
-   * Step 5 ships this with the loop OFF: exactly one round (round 0) + criteria
-   * check + judge-acceptance + emit — a safe superset of a single split plus a
-   * criteria assessment. Step 6 turns on the re-decide while-loop and the
-   * four-guard halt.
+   * The loop (step 6): round 0 mints + freezes the criteria; round N>0 re-decides
+   * against what is still unmet, threading round N-1's diff bodies + the unmet
+   * findings + judge findings into the decide. The four-guard halt
+   * (first-to-fire-wins; §4.3) ends the loop and names which guard fired.
    */
   private async runMilestone(
     goal: Goal,
@@ -3415,69 +3415,233 @@ export class Engine {
     const iterative = typeDef.iterative!; // dispatch guard guarantees presence
     const effectiveMaxRounds = goal.maxRounds ?? iterative.maxRounds;
 
-    // ── ROUND 0 ─────────────────────────────────────────────────────────────
-    // checkCeiling at the very top (the per-round top gate the tradeoff requires).
-    if (await this.checkCeiling(goal, treeState)) {
-      return this.ceilingReport(goal, treeState);
+    // The frozen done-condition (minted round 0, never re-authored) and the loop
+    // carry-state across rounds.
+    let criteriaArtifact: Artifact | null = null;
+    let roundReport: Report = blockedReport('milestone loop produced no round');
+    let lastAssessment: Awaited<ReturnType<Engine['assessRound']>> | null = null;
+    let priorPassingCount = -1; // -1 so round 0 is always a "strict increase" baseline
+    let flatRounds = 0;
+    let priorRoundRef: string | null = null;
+    let roundChildren = children;
+
+    let roundIndex = 0;
+    let outcome: 'done' | 'continue' | 'halt-no-progress' | 'halt-max-rounds' | 'halt-ceiling' =
+      'continue';
+
+    while (true) {
+      // (a) GUARD 4 (CEILING) at the TOP of every round — the per-round top gate
+      // the termination tradeoff requires; the bound spend cannot exceed.
+      if (await this.checkCeiling(goal, treeState)) {
+        if (lastAssessment === null) {
+          // Tripped before any round ran — a plain ceiling block, no partial yet.
+          return this.ceilingReport(goal, treeState);
+        }
+        // A round already produced a partial — record the ceiling halt honestly:
+        // the once-per-tree ceiling-reached event + a round-assessed naming the
+        // guard, then break to emit the cumulative partial.
+        await this.ceilingReachedOnce(goal, treeState);
+        outcome = 'halt-ceiling';
+        await this.store.append({
+          type: 'round-assessed',
+          at: t(),
+          goalId: goal.id,
+          round: roundIndex,
+          passingCount: lastAssessment.passingCount,
+          criteriaTotal: lastAssessment.criteriaTotal,
+          judgeVerdict: lastAssessment.judgeVerdict,
+          outcome,
+          diffDigest: lastAssessment.diffDigest,
+        });
+        break;
+      }
+
+      await this.store.append({
+        type: 'round-started',
+        at: t(),
+        goalId: goal.id,
+        round: roundIndex,
+        spentUsd: treeState.spentUsd,
+        roundWallClockMs: goal.budget.wallClockMs,
+      });
+
+      // (b) DECIDE — round 0 uses the dispatch's already-validated split; round
+      // N>0 re-decides against the unmet criteria, the judge findings, and the
+      // prior round's diff bodies (quoted DATA, weighed not obeyed).
+      if (roundIndex > 0) {
+        const reDecided = await this.reDecideRound(
+          goal,
+          treeState,
+          lastAssessment!,
+          priorRoundRef,
+        );
+        if ('halt' in reDecided) {
+          // Re-decide could not produce a runnable split — halt with the partial
+          // we have rather than looping blind.
+          outcome = 'continue';
+          break;
+        }
+        roundChildren = reDecided.children;
+      }
+
+      // (c) runRound — the existing single-pass body (build child map → integrate).
+      const round = await this.runRound(goal, roundChildren, [], treeState);
+      roundReport = round.report;
+
+      // Round 0 freezes the criteria; later rounds keep the frozen one.
+      if (roundIndex === 0) {
+        criteriaArtifact = this.extractCriteriaArtifact(round.childOutcomes);
+        if (criteriaArtifact !== null) {
+          await this.persistLeafKnowledge(goal, criteriaArtifact);
+        }
+      }
+
+      // (d) commitRound advancing HEAD (so verify-on-read + diffBodies are real).
+      const committedRef = this.commitRoundIfWorktree(roundIndex, goal.title);
+
+      // (e) assess → passingCount + judge-acceptance; emit round-assessed.
+      const assessment = await this.assessRound(
+        goal,
+        criteriaArtifact,
+        round.mergedArtifact,
+        treeState,
+      );
+      lastAssessment = assessment;
+
+      // (f) THE FOUR-GUARD HALT (first-to-fire-wins, §4.3). CEILING (guard 4) is
+      // gated at the TOP of the loop; here we evaluate DONE → NO-PROGRESS →
+      // MAX-ROUNDS in order, the first that fires winning.
+      const strictIncrease = assessment.passingCount > priorPassingCount;
+      // Update the no-progress grace counter on this round's deterministic result:
+      // a strict increase resets it; a non-increase consumes the one grace round.
+      if (strictIncrease) {
+        flatRounds = 0;
+      } else {
+        flatRounds += 1;
+      }
+      const done =
+        assessment.criteriaTotal > 0 &&
+        assessment.passingCount === assessment.criteriaTotal &&
+        assessment.judgeVerdict.pass;
+
+      if (done) {
+        outcome = 'done'; // GUARD 1 — scripts AND judge (decision 1)
+      } else if (flatRounds >= 2) {
+        // GUARD 2 — NO-PROGRESS: passingCount failed to strictly increase for a
+        // SECOND consecutive round (one grace round tolerated, decision 4).
+        // Judge-independent — the one near-deterministic guard.
+        outcome = 'halt-no-progress';
+      } else if (roundIndex + 1 >= effectiveMaxRounds) {
+        // GUARD 3 — MAX-ROUNDS runaway-backstop (decision 4).
+        outcome = 'halt-max-rounds';
+      } else {
+        outcome = 'continue';
+      }
+
+      await this.store.append({
+        type: 'round-assessed',
+        at: t(),
+        goalId: goal.id,
+        round: roundIndex,
+        passingCount: assessment.passingCount,
+        criteriaTotal: assessment.criteriaTotal,
+        judgeVerdict: assessment.judgeVerdict,
+        outcome,
+        diffDigest: assessment.diffDigest,
+      });
+
+      if (outcome !== 'continue') break;
+
+      // Advance loop state for the next round.
+      priorPassingCount = assessment.passingCount;
+      priorRoundRef = committedRef ?? priorRoundRef;
+      roundIndex += 1;
     }
 
-    const roundIndex = 0;
-    const roundStartedAt = t();
-    await this.store.append({
-      type: 'round-started',
-      at: roundStartedAt,
-      goalId: goal.id,
-      round: roundIndex,
-      spentUsd: treeState.spentUsd,
-      roundWallClockMs: goal.budget.wallClockMs,
-    });
-
-    const { report: roundReport, mergedArtifact, childOutcomes } = await this.runRound(
-      goal,
-      children,
-      [],
-      treeState,
-    );
-
-    // Locate + persist the frozen criteria artifact (round 0's mandatory child).
-    const criteriaArtifact = this.extractCriteriaArtifact(childOutcomes);
-    if (criteriaArtifact !== null) {
-      await this.persistLeafKnowledge(goal, criteriaArtifact);
-    }
-
-    // commitRound — HEAD advances so verify-on-read is real across rounds.
-    this.commitRoundIfWorktree(roundIndex, goal.title);
-
-    // Assess: run the frozen criteria → passingCount, run judge-acceptance.
-    const assessment = await this.assessRound(goal, criteriaArtifact, mergedArtifact, treeState);
-
-    // The four-guard halt's DONE check (decision 1: scripts AND judge). Step 5
-    // runs a SINGLE round, so any non-DONE outcome breaks with a partial; the
-    // loop's re-decide is turned on in step 6.
-    const done =
-      assessment.criteriaTotal > 0 &&
-      assessment.passingCount === assessment.criteriaTotal &&
-      assessment.judgeVerdict.pass;
-
-    await this.store.append({
-      type: 'round-assessed',
-      at: t(),
-      goalId: goal.id,
-      round: roundIndex,
-      passingCount: assessment.passingCount,
-      criteriaTotal: assessment.criteriaTotal,
-      judgeVerdict: assessment.judgeVerdict,
-      outcome: done ? 'done' : 'continue',
-      diffDigest: assessment.diffDigest,
-    });
-
-    // Emit the cumulative report. A non-DONE single round emits the cumulative
-    // green artifact with the unmet criteria as blockers (gap A5, honest partial).
-    const finalReport = done
-      ? roundReport
-      : this.withUnmetBlockers(roundReport, assessment);
+    // ── After break: emit ONE final report. DONE → the cumulative green report;
+    // any non-DONE halt → the cumulative green artifact with the unmet criteria
+    // and the judge's gating verdict as blockers (gap A5, honest partial). The
+    // last round's integrate (judge-integration inside runRound) already ran —
+    // we do NOT double-run it.
+    const finalReport =
+      outcome === 'done' || lastAssessment === null
+        ? roundReport
+        : this.withUnmetBlockers(roundReport, lastAssessment);
     await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report: finalReport });
     return finalReport;
+  }
+
+  /**
+   * Re-decide a round N>0: ask the brain for a fresh split, informed by the prior
+   * round's assessment (unmet criteria + judge findings) and a digest of the
+   * bodies the prior round changed (ADR-032 §6 — quoted DATA, weighed not obeyed).
+   * Returns the validated children, or `{ halt: true }` when no runnable split
+   * could be produced (the loop then halts with the partial it has).
+   */
+  private async reDecideRound(
+    goal: Goal,
+    treeState: TreeState,
+    priorAssessment: Awaited<ReturnType<Engine['assessRound']>>,
+    priorRoundRef: string | null,
+  ): Promise<{ children: ChildPlan[] } | { halt: true }> {
+    const t = this.now;
+
+    // Build the diff-bodies digest of what the prior round changed (in-scope).
+    let diffBodies = '';
+    const worktree = this._activeAssembly?.worktree;
+    if (worktree !== undefined && priorRoundRef !== null) {
+      const bodies = diffBodiesWithinScope(worktree.root, goal.scope, priorRoundRef);
+      diffBodies = bodies
+        .map((b) => `--- ${b.path}${b.truncated ? ' (truncated)' : ''} ---\n${b.body}`)
+        .join('\n\n');
+    }
+
+    // The unmet criteria + judge findings as a priorAttempt verdict the brain
+    // weighs. This is the re-decide hint: target the next round at the gap.
+    const unmetFindings: Finding[] = priorAssessment.checkResults
+      .filter((r) => !r.ok)
+      .map((r) => ({
+        title: `Unmet criterion ${r.id}`,
+        dimension: 'spec' as const,
+        severity: 'high' as const,
+        gating: true,
+        prescription: r.detail,
+      }));
+    const reDecideVerdict: Verdict = {
+      pass: false,
+      findings: [...unmetFindings, ...priorAssessment.judgeVerdict.findings],
+    };
+
+    const decideSkill = this.decideSkillBlock(goal.type);
+    const ctx: BrainContext = {
+      tier: this.registry.get(goal.type).tier.default,
+      memories: goal.memories,
+      ...(decideSkill ? { skill: decideSkill } : {}),
+      priorAttempt: {
+        artifact: diffBodies.length > 0 ? { kind: 'text', text: diffBodies } : null,
+        verdict: reDecideVerdict,
+      },
+    };
+
+    const decideResult = await this.brain.decide(goal, ctx);
+    this.debitTreeState(treeState, decideResult.usage);
+    await this.store.append({
+      type: 'decided',
+      at: t(),
+      goalId: goal.id,
+      decision: decideResult.value,
+      usage: decideResult.usage,
+    });
+
+    const decision = decideResult.value;
+    if (decision.kind !== 'split') {
+      return { halt: true };
+    }
+    const structErr = validateSplit(decision.children);
+    if (structErr !== null) {
+      return { halt: true };
+    }
+    return { children: decision.children };
   }
 
   /**
@@ -3656,20 +3820,30 @@ export class Engine {
     return treeState.spentUsd >= treeState.ceilingUsd;
   }
 
-  private async ceilingReport(goal: Goal, treeState: TreeState): Promise<Report> {
-    const t = this.now;
-    // Emit 'ceiling-reached' exactly once per tree. Concurrent branches all see
-    // the ceiling tripped but only the first one fires the event (ADR-017 guard).
+  /**
+   * Emit the 'ceiling-reached' event exactly once per tree (ADR-017 guard:
+   * concurrent branches all see the ceiling tripped but only the first fires it).
+   * Factored out of {@link ceilingReport} so the milestone loop can record a
+   * ceiling halt without also emitting a block brief (it emits a partial instead).
+   */
+  private async ceilingReachedOnce(goal: Goal, treeState: TreeState): Promise<void> {
     if (!treeState.ceilingEmitted) {
       treeState.ceilingEmitted = true;
       await this.store.append({
         type: 'ceiling-reached',
-        at: t(),
+        at: this.now(),
         goalId: goal.id,
         spentUsd: treeState.spentUsd,
         ceilingUsd: treeState.ceilingUsd,
       });
     }
+  }
+
+  private async ceilingReport(goal: Goal, treeState: TreeState): Promise<Report> {
+    const t = this.now;
+    // Emit 'ceiling-reached' exactly once per tree. Concurrent branches all see
+    // the ceiling tripped but only the first one fires the event (ADR-017 guard).
+    await this.ceilingReachedOnce(goal, treeState);
     const brief: import('../contract/decision.js').DecisionBrief = {
       question: `Tree spend ceiling of $${treeState.ceilingUsd.toFixed(2)} reached (spent $${treeState.spentUsd.toFixed(4)}). Tree halted.`,
       options: ['deny', 'park', 'bounce'],

@@ -94,7 +94,7 @@ function round0Children(): ChildPlan[] {
 
 // ── Step 5: single round, DONE ──────────────────────────────────────────────
 
-describe('runMilestone — single round (loop OFF)', () => {
+describe('runMilestone — single-round assessment', () => {
   it('runs ONE round, mints criteria, and is DONE when scripts AND judge pass', async () => {
     const store = new MemoryEventStore();
     const brain = new ScriptedBrain()
@@ -136,7 +136,9 @@ describe('runMilestone — single round (loop OFF)', () => {
       .queueJudge(passVerdict()) // judge-integration
       .queueJudge(passVerdict()); // judge-acceptance (irrelevant: scripts already failed)
 
-    const registry = milestoneRegistry();
+    // maxRounds = 1 pins this to a single round so it exercises the assessment +
+    // partial path without looping into a re-decide.
+    const registry = milestoneRegistry(1);
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
     const report = await engine.run(makeGoal({ type: 'deliver-intent', scope: ['src/'] }));
 
@@ -146,7 +148,7 @@ describe('runMilestone — single round (loop OFF)', () => {
     >[];
     expect(assessed).toHaveLength(1);
     expect(assessed[0]!.passingCount).toBe(0);
-    expect(assessed[0]!.outcome).toBe('continue'); // not DONE (single round → emits partial)
+    expect(assessed[0]!.outcome).toBe('halt-max-rounds'); // single round capped → partial
 
     // Honest partial: the cumulative green artifact is emitted, unmet criteria as blockers.
     expect(report.artifact?.kind).toBe('files');
@@ -162,7 +164,9 @@ describe('runMilestone — single round (loop OFF)', () => {
       .queueJudge(passVerdict()) // judge-integration
       .queueJudge(failVerdict('shoddy', 'tighten it')); // judge-acceptance refuses
 
-    const registry = milestoneRegistry();
+    // maxRounds = 1 pins this to a single round: scripts pass but the judge gate
+    // blocks DONE, so it halts-max-rounds with a partial (decision 1).
+    const registry = milestoneRegistry(1);
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
     const report = await engine.run(makeGoal({ type: 'deliver-intent', scope: ['src/'] }));
 
@@ -172,7 +176,7 @@ describe('runMilestone — single round (loop OFF)', () => {
     >[];
     expect(assessed[0]!.passingCount).toBe(1); // scripts green
     expect(assessed[0]!.judgeVerdict.pass).toBe(false); // judge refused
-    expect(assessed[0]!.outcome).toBe('continue'); // NOT done
+    expect(assessed[0]!.outcome).toBe('halt-max-rounds'); // NOT done (judge gate)
     expect(report.blockers.some((b) => /judge-acceptance did not pass/i.test(b))).toBe(true);
   });
 
@@ -189,5 +193,119 @@ describe('runMilestone — single round (loop OFF)', () => {
     expect(report.blockers.some((b) => /maxRounds must be an integer >= 1/i.test(b))).toBe(true);
     // No round ran.
     expect(await store.list({ type: 'round-started' })).toHaveLength(0);
+  });
+});
+
+// ── Step 6: the four-guard halt — converge + stuck ──────────────────────────
+
+/** Round N>0's split: a single fix child (criteria are frozen, not re-authored). */
+function fixChildren(): ChildPlan[] {
+  return [
+    {
+      localId: 'fix',
+      type: 'build',
+      title: 'fix the gap',
+      spec: {},
+      dependsOn: [],
+      scope: [],
+      budgetShare: 0.5,
+    },
+  ];
+}
+
+describe('runMilestone — four-guard halt (loop ON)', () => {
+  it('a 2-round goal converges: round 0 partial, round 1 re-decides and is DONE', async () => {
+    const store = new MemoryEventStore();
+    const brain = new ScriptedBrain()
+      // ROUND 0
+      .queueDecide({ kind: 'split', children: round0Children() })
+      .queueProduce(criteriaArtifact('DONE')) // crit
+      .queueProduce(filesArtifact([{ path: 'src/x.ts', content: '// WIP\n' }])) // build: no anchor
+      .queueJudge(passVerdict()) // judge-integration r0
+      .queueJudge(failVerdict('not yet', 'add DONE')) // judge-acceptance r0 (scripts also red)
+      // ROUND 1 — re-decide → fix
+      .queueDecide({ kind: 'split', children: fixChildren() })
+      .queueProduce(filesArtifact([{ path: 'src/x.ts', content: '// DONE\n' }])) // fix: anchor present
+      .queueJudge(passVerdict()) // judge-integration r1
+      .queueJudge(passVerdict()); // judge-acceptance r1 → DONE
+
+    const registry = milestoneRegistry();
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const report = await engine.run(makeGoal({ type: 'deliver-intent', scope: ['src/'] }));
+
+    const assessed = (await store.list({ type: 'round-assessed' })) as Extract<
+      FactoryEvent,
+      { type: 'round-assessed' }
+    >[];
+    expect(assessed.map((a) => a.round)).toEqual([0, 1]);
+    expect(assessed[0]!.outcome).toBe('continue');
+    expect(assessed[0]!.passingCount).toBe(0);
+    expect(assessed[1]!.outcome).toBe('done');
+    expect(assessed[1]!.passingCount).toBe(1);
+
+    // Two rounds ran; the converged report is clean.
+    expect(await store.list({ type: 'round-started' })).toHaveLength(2);
+    expect(report.blockers).toHaveLength(0);
+  });
+
+  it('a stuck goal halts partial on the no-progress guard (one grace round, then halt)', async () => {
+    const store = new MemoryEventStore();
+    const brain = new ScriptedBrain()
+      // ROUND 0
+      .queueDecide({ kind: 'split', children: round0Children() })
+      .queueProduce(criteriaArtifact('DONE'))
+      .queueProduce(filesArtifact([{ path: 'src/x.ts', content: '// stuck\n' }]))
+      .queueJudge(passVerdict()) // integration r0
+      .queueJudge(failVerdict('no')) // acceptance r0
+      // ROUND 1 — grace round, still no progress
+      .queueDecide({ kind: 'split', children: fixChildren() })
+      .queueProduce(filesArtifact([{ path: 'src/x.ts', content: '// still stuck\n' }]))
+      .queueJudge(passVerdict())
+      .queueJudge(failVerdict('no'))
+      // ROUND 2 — second consecutive flat → halt-no-progress
+      .queueDecide({ kind: 'split', children: fixChildren() })
+      .queueProduce(filesArtifact([{ path: 'src/x.ts', content: '// STILL stuck\n' }]))
+      .queueJudge(passVerdict())
+      .queueJudge(failVerdict('no'));
+
+    const registry = milestoneRegistry();
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const report = await engine.run(makeGoal({ type: 'deliver-intent', scope: ['src/'] }));
+
+    const assessed = (await store.list({ type: 'round-assessed' })) as Extract<
+      FactoryEvent,
+      { type: 'round-assessed' }
+    >[];
+    // Round 0 (0 > -1 baseline) continue; round 1 flat→grace continue; round 2 flat→halt.
+    expect(assessed.map((a) => a.outcome)).toEqual(['continue', 'continue', 'halt-no-progress']);
+    expect(assessed.every((a) => a.passingCount === 0)).toBe(true);
+
+    // Honest partial: cumulative artifact + unmet criteria as blockers.
+    expect(report.artifact?.kind).toBe('files');
+    expect(report.blockers.some((b) => /not yet met/i.test(b))).toBe(true);
+  });
+
+  it('halts on the max-rounds backstop when progress keeps increasing but the cap is hit', async () => {
+    // maxRounds override = 1: round 0 makes progress (0→but not done) and the cap
+    // forbids a round 1, so it halts-max-rounds with a partial.
+    const store = new MemoryEventStore();
+    const brain = new ScriptedBrain()
+      .queueDecide({ kind: 'split', children: round0Children() })
+      .queueProduce(criteriaArtifact('DONE'))
+      .queueProduce(filesArtifact([{ path: 'src/x.ts', content: '// WIP no anchor\n' }]))
+      .queueJudge(passVerdict())
+      .queueJudge(failVerdict('no'));
+
+    const registry = milestoneRegistry(1); // maxRounds = 1
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const report = await engine.run(makeGoal({ type: 'deliver-intent', scope: ['src/'] }));
+
+    const assessed = (await store.list({ type: 'round-assessed' })) as Extract<
+      FactoryEvent,
+      { type: 'round-assessed' }
+    >[];
+    expect(assessed).toHaveLength(1);
+    expect(assessed[0]!.outcome).toBe('halt-max-rounds');
+    expect(report.blockers.some((b) => /not yet met/i.test(b))).toBe(true);
   });
 });
