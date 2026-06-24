@@ -3013,12 +3013,23 @@ export class Engine {
   }
 
   // ── SPLIT PATH ────────────────────────────────────────────────────────────
-  private async runSplit(
+  /**
+   * One split pass, made re-enterable (ADR-031 decision 3). Does everything
+   * `runSplit` did between subdivide and the final emit — build child goals,
+   * run them, the comprehend structured merge, the `judge-integration` integrate
+   * gate, the lesson/memory promotion — but does NOT emit the `emitted` event and
+   * does NOT promote-as-final. Returns the round's report, its merged artifact,
+   * and the deterministic `passingCount` (0 for a non-iterative caller, which
+   * ignores it). `runMilestone` calls this once per round; `runSplit` calls it
+   * once and appends the emit tail. Behavior-preserving: every existing split
+   * path stays byte-identical (the safety net for the milestone loop).
+   */
+  private async runRound(
     goal: Goal,
     children: ChildPlan[],
     extraFindings: string[] = [],
     treeState: TreeState = { spentUsd: 0, ceilingUsd: DEFAULT_SPEND_CEILING_USD },
-  ): Promise<Report> {
+  ): Promise<{ report: Report; mergedArtifact: Artifact | null; passingCount: number }> {
     const t = this.now;
 
     // Subdivide the budget by each child's share
@@ -3327,7 +3338,19 @@ export class Engine {
       learned: uniqueLearnedLines.join('\n'),
     };
 
-    await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
+    // `passingCount` is computed by the iterative caller (runMilestone) against
+    // the round's worktree; a non-iterative split ignores it (0).
+    return { report, mergedArtifact, passingCount: 0 };
+  }
+
+  private async runSplit(
+    goal: Goal,
+    children: ChildPlan[],
+    extraFindings: string[] = [],
+    treeState: TreeState = { spentUsd: 0, ceilingUsd: DEFAULT_SPEND_CEILING_USD },
+  ): Promise<Report> {
+    const { report } = await this.runRound(goal, children, extraFindings, treeState);
+    await this.store.append({ type: 'emitted', at: this.now(), goalId: goal.id, report });
     return report;
   }
 
