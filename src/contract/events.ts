@@ -96,7 +96,22 @@ export type FactoryEvent =
   /** A granted leaf opened exactly one PR for its tree's branch; carries the URL (ADR-025). */
   | { type: 'pr-opened'; at: number; goalId: string; treeId: string; branch: string; url: string }
   /** A completed run's blocker was routed to an improve-factory commission (ADR-027). */
-  | { type: 'blocker-routed'; at: number; goalId: string; blocker: string; commissionId: string };
+  | { type: 'blocker-routed'; at: number; goalId: string; blocker: string; commissionId: string }
+  /**
+   * A milestone round began (ADR-031): which round, the tree spend so far, and
+   * the round's wall-clock slice. The honest per-round log of the iterating loop.
+   */
+  | { type: 'round-started'; at: number; goalId: string; round: number; spentUsd: number; roundWallClockMs: number }
+  /**
+   * A milestone round was assessed against the frozen acceptance criteria
+   * (ADR-031/032). Carries the deterministic `passingCount` / `criteriaTotal`,
+   * the `judge-acceptance` verdict, the halt decision, and a diff DIGEST
+   * (pointers, not bodies — MemoryView-consistent, memory.ts:15-22).
+   */
+  | { type: 'round-assessed'; at: number; goalId: string; round: number;
+      passingCount: number; criteriaTotal: number; judgeVerdict: Verdict;
+      outcome: 'done' | 'continue' | 'halt-no-progress' | 'halt-max-rounds' | 'halt-ceiling';
+      diffDigest: string[] };
 
 /**
  * The append-only event store. The append is the serialization point — the

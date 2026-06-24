@@ -93,6 +93,36 @@ export function lintLibrary(defs: GoalTypeDef[], opts: LintOptions = {}): string
       }
     }
 
+    // iterative-trait invariants (ADR-031): an iterating type must be a make
+    // type, must declare a positive round backstop, and must route its per-round
+    // assessment through a registered judge. This forbids a judge/learn/evolve
+    // kind from iterating (no recursing judge) and forbids an unbounded loop (the
+    // maxRounds floor). The deterministic floor on criteria — every criterion
+    // names a runnable, non-judge check — is enforced by criteriaWellFormed at
+    // runtime, not here.
+    if (def.iterative !== undefined) {
+      if (def.kind !== 'make') {
+        violations.push(
+          `Type "${def.name}" is iterative but kind is "${def.kind}" (must be "make")`,
+        );
+      }
+      if (!Number.isInteger(def.iterative.maxRounds) || def.iterative.maxRounds < 1) {
+        violations.push(
+          `Type "${def.name}" iterative.maxRounds must be an integer >= 1`,
+        );
+      }
+      const acceptanceJudge = byName.get(def.iterative.acceptanceJudge);
+      if (acceptanceJudge === undefined) {
+        violations.push(
+          `Type "${def.name}" iterative.acceptanceJudge "${def.iterative.acceptanceJudge}" is not registered`,
+        );
+      } else if (acceptanceJudge.kind !== 'judge') {
+        violations.push(
+          `Type "${def.name}" iterative.acceptanceJudge "${def.iterative.acceptanceJudge}" has kind "${acceptanceJudge.kind}" (must be "judge")`,
+        );
+      }
+    }
+
     // judgeType validity: when judgeType is non-null it must name a registered
     // def whose kind === 'judge'. A judgeType pointing at an unknown name or a
     // non-judge kind is a misconfiguration that would produce silent misbehaviour

@@ -98,6 +98,19 @@ export interface GoalTypeDef {
    * exactly as today — the deterministic gate remains the semantic check either way.
    */
   outputSchema?: Record<string, unknown>;
+  /**
+   * When present, this type's SPLIT dispatch arm routes through the milestone
+   * loop (`runMilestone`) instead of the single-pass `runSplit` (ADR-031). The
+   * type re-decides against a frozen acceptance-criteria done-condition each
+   * round. Constitution-enforced: MUST be `kind:'make'`; `maxRounds >= 1`;
+   * `acceptanceJudge` must name a registered `kind:'judge'` type.
+   *
+   * `maxRounds` is a runaway-BACKSTOP, not a budget proxy: the type sets a
+   * generous default (`deliver-intent` uses 50) and a commission MAY override it
+   * via {@link import('./goal.js').Goal.maxRounds}. The real terminators are the
+   * per-tree dollar ceiling and the no-progress halt.
+   */
+  iterative?: { maxRounds: number; acceptanceJudge: string };
 }
 
 /**

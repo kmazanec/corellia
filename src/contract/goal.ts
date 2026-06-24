@@ -172,4 +172,14 @@ export interface Goal {
    * threaded to child runs; unlike {@link Budget}, it is never subdivided.
    */
   spendCeilingUsd?: number;
+  /**
+   * Per-commission override for an iterative type's round backstop (ADR-031,
+   * decision 4). When set on a root goal whose type carries `iterative`,
+   * `runMilestone` uses `goal.maxRounds ?? typeDef.iterative.maxRounds`. A
+   * runaway-backstop only — the real terminators are the dollar ceiling and the
+   * no-progress halt — and the constitution's `>= 1` floor is re-checked on the
+   * effective value at the dispatch guard. Additive: ignored by every
+   * non-iterative type.
+   */
+  maxRounds?: number;
 }
