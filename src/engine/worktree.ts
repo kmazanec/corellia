@@ -68,7 +68,13 @@ const WORKTREES_PATTERN = '.corellia/worktrees/';
 // (node_modules, .venv) must be excluded so they are neither staged by
 // collectTree's `git add --all` nor flagged by the scope diff — they are shared
 // infrastructure, never part of a tree's deliverable.
-const EXCLUDE_PATTERNS = [WORKTREES_PATTERN, 'node_modules/', '.venv/'];
+//
+// NB: NO trailing slash. The lifecycle creates these as SYMLINKS, not
+// directories (see openTreeWorktree below). A gitignore pattern ending in `/`
+// matches directories ONLY, so `.venv/` does NOT ignore a `.venv` symlink — and
+// AC-4 run #8 committed exactly that `.venv` symlink into a cats PR. The bare
+// name matches both a directory and a symlink of that name.
+const EXCLUDE_PATTERNS = [WORKTREES_PATTERN, 'node_modules', '.venv'];
 
 /**
  * Resolve the real .git directory for a repo root, following the `gitdir:`

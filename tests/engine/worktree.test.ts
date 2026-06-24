@@ -328,6 +328,47 @@ describe('collect completed tree', () => {
     expect(existsSync(wtResult.root)).toBe(false);
   });
 
+  it('does NOT commit the .venv dependency SYMLINK (AC-4 run #8)', async () => {
+    // The lifecycle symlinks the repo root's .venv into the worktree. A gitignore
+    // pattern ending in `/` matches directories only, so `.venv/` would NOT ignore
+    // the .venv SYMLINK — and run #8 committed exactly that symlink into a cats PR.
+    // The exclude pattern must be the bare name so `git add --all` skips it.
+    const repo = makeTempRepo();
+    const store = new InMemoryEventStore();
+
+    // A real .venv at the repo root so openTreeWorktree symlinks it in.
+    mkdirSync(join(repo, '.venv', 'bin'), { recursive: true });
+    writeFileSync(join(repo, '.venv', 'bin', 'pytest'), '#!/bin/sh\n');
+
+    const wtResult = await openTreeWorktree(repo, 'goal-venv-symlink', store);
+    const worktree = {
+      treeId: wtResult.treeId,
+      branch: wtResult.branch,
+      root: wtResult.root,
+      repoRoot: repo,
+      goalId: 'goal-venv-symlink',
+    };
+    // The worktree's .venv is a symlink (not a dir).
+    expect(existsSync(join(wtResult.root, '.venv', 'bin', 'pytest'))).toBe(true);
+
+    // Write a real feature so the commit is non-empty.
+    const srcDir = join(wtResult.root, 'src');
+    mkdirSync(srcDir, { recursive: true });
+    writeFileSync(join(srcDir, 'feature.ts'), 'export const ok = true;\n');
+
+    await collectTree(worktree, store);
+
+    // List the files in the COMMITTED tree on the tree's branch (the worktree is
+    // gone after collect; the commit lives on wtResult.branch).
+    const tracked = execFileSync(
+      'git',
+      ['ls-tree', '-r', '--name-only', wtResult.branch],
+      { cwd: repo, stdio: 'pipe', encoding: 'utf-8' },
+    );
+    expect(tracked).toContain('src/feature.ts');
+    expect(tracked).not.toContain('.venv');
+  });
+
   it('appends worktree-collected event with commits and treeId', async () => {
     const repo = makeTempRepo();
     const store = new InMemoryEventStore();

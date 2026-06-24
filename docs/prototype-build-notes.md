@@ -2137,3 +2137,43 @@ Hygiene: worktree PRESERVED on failure
 (`.corellia/worktrees/live-foreign-34add5c5-*`), cats primary clean, no PR.
 Next: re-run #8 — the dive should now converge, implement should run, and the
 pipeline should reach the PR.
+
+## AC-4 run #8 — FULL TREE GREEN, real PR opened, feature is CORRECT. AC-4 essentially proven; one cosmetic regression (the `.venv` symlink leaked into the PR).
+
+$0.18, 76.8% cache. The whole tree converged:
+```
+✓ deliver-intent
+  ✓ deep-dive-region src/cats/agents/common
+  ✓ deep-dive-region tests/unit          ← the forced-emit refinement fixed #7's block
+  ✓ implement format_usd helper + tests  ← ran (no longer skipped) and verified green
+  ✓ open-pr
+```
+**PR opened: https://github.com/kmazanec/cats/pull/2** · zero blockers · factory
+did NOT merge it. **The deliverable is CORRECT** (verified by reading the PR
+diff, per run #4's lesson that green-tree ≠ proof): `src/cats/agents/common/
+currency.py` defines `format_usd(cents: int) -> str` exactly as specified —
+docstring, doctests, negative handling — plus `tests/unit/test_format_usd.py`
+with 52 lines of real cases (zero, single-digit, exact-dollar, dollars+cents,
+negative). The feature is real, committed on the branch, and the run-#4 Bug A/B
+ordering fixes held (commit-before-push worked).
+
+**One regression — the `.venv` SYMLINK leaked into the PR diff** (3 changed files:
+the 2 real ones + a `.venv` mode-120000 symlink). Bug B (run #4) added `.venv` to
+`.git/info/exclude` as `.venv/` (trailing slash). But a gitignore pattern ending
+in `/` matches DIRECTORIES ONLY, and the lifecycle creates `.venv` as a SYMLINK,
+not a dir — so `git add --all` staged it. The `diffWithinScope` drop-filter has
+its own `DEP_LINKS` list that correctly handled the symlink (so the scope check
+passed and the tree went green), but the EXCLUDE pattern did not, so it got
+committed. Cosmetic (the helper is still correct) but it pollutes the PR.
+
+**Fix (worktree.ts):** `EXCLUDE_PATTERNS` drop the trailing slash —
+`'node_modules'`, `'.venv'` — so the bare name matches both a directory and a
+symlink. Regression test added: a `.venv` symlink in a worktree is NOT in the
+committed tree after `collectTree` (asserted via `git ls-tree` on the branch).
+1441 green, lint + typecheck clean.
+
+Net: **AC-4 is proven — corellia delivered a correct, verified feature to a
+foreign repo and opened a real PR autonomously.** PR #2 carries the spurious
+`.venv`; close it and re-run #9 for a clean PR that proves the exclude fix.
+
+Hygiene: tree COLLECTED on success (worktree removed), cats primary clean.
