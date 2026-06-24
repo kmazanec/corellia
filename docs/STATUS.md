@@ -1,8 +1,28 @@
 # Status — Corellia
 
-**Updated:** 2026-06-22 · **Roadmap:** [ROADMAP.md](./ROADMAP.md)
+**Updated:** 2026-06-24 · **Roadmap:** [ROADMAP.md](./ROADMAP.md)
 
 ## Now
+
+**AC-4 (deliver-to-foreign) IN PROGRESS — run #6, one blocker left: a DESIGN
+decision.** corellia is delivering a scoped helper to a foreign repo (cats) and
+is now blocked on a single, well-isolated issue: for a tightly-scoped brownfield
+feature the brain's split still mints **whole-repo `architecture`/`stack` maps**
+it doesn't need, and a whole-repo map of cats' 259-file tree can't be built
+faithfully within a bounded read budget (its anchors fail validation). The AC-4
+PIPELINE is otherwise proven sound end-to-end (scoped region dives, `.venv`
+worktree env, DB-free verify, commit-before-push, github-mirror PR path).
+
+Runs #1–#6 each bought a real fix (full record in
+[prototype-build-notes.md](./prototype-build-notes.md)): worktree `.venv` link +
+DB-free test target (#1), `budgetShare` tolerance (#2), scoped-brownfield gate
+carve-out + map-repo split prose (#3), `open-pr` commits before push + `.venv`
+excluded from tree diff (#4), **structural comprehend read-ceiling that forces
+emit, ending the over-explore-to-exhaustion failure (#5, commit `3d8b1c3`)**. Run
+#6 proved the read-ceiling fix works (comprehension now reliably emits) and
+isolated the remaining blocker to the scoped-split/coverage-policy interaction —
+a locked-policy DESIGN decision (ADR-021/ADR-029) surfaced to the operator, NOT a
+reflexive patch.
 
 **AC-3 PROVEN — the strange loop is closed.** On 2026-06-24 corellia built a
 feature on its OWN repo end-to-end and opened a real pull request, autonomously:
