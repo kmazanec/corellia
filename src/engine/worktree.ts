@@ -270,6 +270,147 @@ export function diffWithinScope(
 }
 
 // ---------------------------------------------------------------------------
+// commitRound  (ADR-031 / ADR-032 §4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Commit a milestone round's work onto the tree branch WITHOUT removing the
+ * worktree. Reuses collectTree's git ops — `git add --all`, check
+ * `status --porcelain`, commit if dirty — with a per-round message
+ * (`feat(round N): <title>`) and returns the new HEAD sha (null when the round
+ * left nothing to commit).
+ *
+ * This is what advances HEAD within a tree (ADR-032 §4): without it, ADR-019
+ * verify-on-read is a no-op across rounds (HEAD never moves, so a round-0
+ * knowledge artifact always reads as fresh). Per-round commits are PRESERVED
+ * (decision 5): collectTree at tree-end does not squash them — it now commits
+ * only residual uncommitted changes after the last round commit.
+ */
+export function commitRound(
+  worktree: TreeWorktree,
+  roundIndex: number,
+  title: string,
+): string | null {
+  const { root } = worktree;
+
+  // Stage all changes (respects .git/info/exclude, same trust posture as collectTree).
+  execFileSync('git', ['-C', root, 'add', '--all'], { stdio: 'pipe' });
+
+  // Nothing to commit → HEAD does not advance this round.
+  const statusOutput = execFileSync(
+    'git',
+    ['-C', root, 'status', '--porcelain'],
+    { stdio: 'pipe', encoding: 'utf-8' },
+  ).trim();
+  if (statusOutput.length === 0) {
+    return null;
+  }
+
+  execFileSync(
+    'git',
+    ['-C', root, 'commit', '-m', `feat(round ${roundIndex}): ${title}`],
+    { stdio: 'pipe' },
+  );
+
+  return execFileSync(
+    'git',
+    ['-C', root, 'rev-parse', 'HEAD'],
+    { stdio: 'pipe', encoding: 'utf-8' },
+  ).trim();
+}
+
+// ---------------------------------------------------------------------------
+// diffBodiesWithinScope  (ADR-032 §6)
+// ---------------------------------------------------------------------------
+
+/** The default per-file body cap (chars) before truncation, and the total cap. */
+const DIFF_BODY_PER_FILE_CAP = 8_000;
+const DIFF_BODY_TOTAL_CAP = 40_000;
+
+/**
+ * One in-scope file changed since a ref, with its (capped) body. Feeds round N's
+ * decide context as quoted DATA (weighed, not obeyed).
+ */
+export interface ChangedBody {
+  path: string;
+  /** The file's current body in the worktree, truncated to the per-file cap. */
+  body: string;
+  /** True when the body was truncated at the per-file cap. */
+  truncated: boolean;
+}
+
+/**
+ * Sibling of {@link diffWithinScope}: the same `git diff --name-only` +
+ * `ls-files` machinery, restricted to `sinceRef..HEAD` (plus any working-tree
+ * changes since), returning the capped/truncated BODIES of in-scope changed
+ * paths. This is the real cross-round read path (ADR-032 §6): it reads the
+ * working tree + commits, which actually contain round N-1's built files, not a
+ * function returning a count.
+ *
+ * Reuses {@link isInScope} and the same DEP_LINKS drop as diffWithinScope. The
+ * total body output is capped so a fat round yields a truncated digest, not an
+ * unbounded context blow-up.
+ */
+export function diffBodiesWithinScope(
+  worktreeRoot: string,
+  scope: string[],
+  sinceRef: string,
+): ChangedBody[] {
+  // Tracked changes since the ref (committed across rounds AND working-tree).
+  const diffOutput = execFileSync(
+    'git',
+    ['-C', worktreeRoot, 'diff', '--name-only', sinceRef],
+    { stdio: 'pipe', encoding: 'utf-8' },
+  ).trim();
+
+  // Untracked files (newly written this round, not yet committed).
+  const untrackedOutput = execFileSync(
+    'git',
+    ['-C', worktreeRoot, 'ls-files', '--others', '--exclude-standard'],
+    { stdio: 'pipe', encoding: 'utf-8' },
+  ).trim();
+
+  // Same dependency-link drop as diffWithinScope: a node_modules/.venv symlink is
+  // infrastructure, never a tree's deliverable.
+  const DEP_LINKS = ['node_modules', '.venv'];
+  const isDepLink = (p: string): boolean =>
+    DEP_LINKS.some((d) => p === d || p.startsWith(`${d}/`));
+
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  for (const line of [...diffOutput.split('\n'), ...untrackedOutput.split('\n')]) {
+    const p = line.trim();
+    if (p.length === 0 || isDepLink(p) || seen.has(p)) continue;
+    if (isAbsolute(p) || normalize(p).startsWith('..')) continue;
+    if (!isInScope(p, scope)) continue;
+    seen.add(p);
+    paths.push(p);
+  }
+
+  const bodies: ChangedBody[] = [];
+  let total = 0;
+  for (const p of paths) {
+    if (total >= DIFF_BODY_TOTAL_CAP) break;
+    const abs = join(worktreeRoot, p);
+    let raw: string;
+    try {
+      raw = readFileSync(abs, 'utf-8');
+    } catch {
+      // File was deleted this round (in the diff, gone on disk) — skip its body.
+      continue;
+    }
+    const remaining = DIFF_BODY_TOTAL_CAP - total;
+    const perFileCap = Math.min(DIFF_BODY_PER_FILE_CAP, remaining);
+    const truncated = raw.length > perFileCap;
+    const body = truncated ? raw.slice(0, perFileCap) : raw;
+    total += body.length;
+    bodies.push({ path: p, body, truncated });
+  }
+
+  return bodies;
+}
+
+// ---------------------------------------------------------------------------
 // collectTree / preserveTree
 // ---------------------------------------------------------------------------
 
