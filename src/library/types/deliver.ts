@@ -14,6 +14,12 @@ export function deliverTypes(): GoalTypeDef[] {
       // The root type that commissions intent accepts only spawn + retrieval
       // grants; no code tools, because satisfying intent directly is not its job.
       grants: ['retrieval.api', 'classify_risk', 'spawn'],
+      // The milestone loop (ADR-031): the split dispatch arm routes through
+      // runMilestone, re-deciding against a frozen acceptance-criteria
+      // done-condition each round. maxRounds 50 is a runaway-backstop, NOT a
+      // budget proxy (the $15 ceiling and no-progress halt are the real
+      // terminators); a commission MAY override it via goal.maxRounds.
+      iterative: { maxRounds: 50, acceptanceJudge: 'judge-acceptance' },
     },
 
     {

@@ -153,6 +153,16 @@ export function runScriptCheck(scriptName: string): DeterministicCheck {
 }
 
 /**
+ * `criteriaWellFormed` — the deterministic floor under the milestone-loop ship
+ * gate (ADR-032 §2.3). It parses the acceptance-criteria artifact and rejects
+ * any criterion whose check is not a sandbox-runnable predicate. The
+ * implementation lives in `acceptance-criteria.ts` (it shares that module's
+ * parser); it is re-exported here, its spec-named home, so callers import the
+ * deterministic floor from the checks library alongside the other checks.
+ */
+export { criteriaWellFormed } from './acceptance-criteria.js';
+
+/**
  * Patterns that identify factory-process references in code comments.
  * These are skeleton-level approximations; exact comment parsing is not required.
  */

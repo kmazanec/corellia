@@ -39,5 +39,24 @@ export function critiqueTypes(): GoalTypeDef[] {
       // Read screenshot/token files and retrieval API; no browser grant in v1.
       grants: ['fs.read', 'retrieval.api'],
     },
+
+    {
+      // `judge-acceptance` — the milestone loop's ship-gate judge (ADR-031
+      // decision 1, ADR-032 §3). Reads the cumulative merged artifact + the
+      // frozen acceptance criteria + this round's deterministic check RESULTS,
+      // and renders a gating Verdict (`pass` is load-bearing in the ship gate)
+      // plus quality findings that become next-round decide hints. Distinct from
+      // judge-integration (cohesion): acceptance asks "are the frozen criteria
+      // satisfied to a shippable bar." kind:'judge' ⇒ leafOnly:true (a judge
+      // never recurses); no writes, no dangerous grant.
+      name: 'judge-acceptance',
+      kind: 'judge',
+      family: 'critique',
+      leafOnly: true,
+      tier: { default: 'high', ladder: ['high'] },
+      deterministic: [],
+      judgeType: null,
+      grants: [],
+    },
   ];
 }

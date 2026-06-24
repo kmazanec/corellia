@@ -1,10 +1,38 @@
 import type { GoalTypeDef } from '../../contract/goal-type.js';
-import { artifactPresent } from '../checks.js';
+import { artifactPresent, criteriaWellFormed } from '../checks.js';
 import { prdShapeCheck, archSectionCheck } from '../pm-checks.js';
 import { PRD_SCHEMA } from '../pm-schemas.js';
+import { ACCEPTANCE_CRITERIA_SCHEMA } from '../acceptance-schemas.js';
 
 export function authorTypes(): GoalTypeDef[] {
   return [
+    /**
+     * `author-acceptance-criteria` — the milestone loop's done-condition
+     * minter (ADR-032 §1). `deliver-intent`'s first mandatory round-0 child;
+     * every other child `dependsOn` it. It reads the deliver-intent free text
+     * and emits the SHA-anchored, ordered acceptance checklist, persisted as a
+     * verify-on-read KnowledgeArtifact. `criteriaWellFormed` is the deterministic
+     * floor: it rejects any criterion whose check is a prose rubric line rather
+     * than a sandbox-runnable predicate, so the loop always has a script-backed
+     * boolean per criterion.
+     *
+     * Tier: high (the target the whole loop converges against must be right).
+     * Grants: retrieval API only — it authors a checklist, it does not build.
+     * Per ADR-023: outputSchema drives structured emission; criteriaWellFormed
+     * is the semantic gate.
+     */
+    {
+      name: 'author-acceptance-criteria',
+      kind: 'make',
+      family: 'author',
+      leafOnly: true,
+      tier: { default: 'high', ladder: ['high'] },
+      deterministic: [criteriaWellFormed()],
+      judgeType: null,
+      grants: ['retrieval.api'],
+      outputSchema: ACCEPTANCE_CRITERIA_SCHEMA,
+    },
+
     /**
      * `write-prd` — turn typed intent and injected research findings into a
      * numbered, behavior-focused PRD. Every requirement must be traceable to

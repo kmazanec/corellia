@@ -39,6 +39,29 @@ is written and verified. Give it the proof it needs in its spec (what was built,
 which files, the commit intent). Omit `open-pr` only when no PR is wanted (e.g. a
 read-only analysis intent).
 
+The milestone loop. `deliver-intent` ITERATES (ADR-031): it decides → splits →
+integrates → assesses against a frozen done-condition → re-decides, round after
+round, until the MVP ships or a guard halts it. An MVP is rarely right in one
+pass; the loop takes a second (and third) pass informed by what the prior pass
+actually built.
+
+- **Mint the criteria FIRST.** Round 0's first child is always
+  `author-acceptance-criteria` — it reads the intent and emits the frozen,
+  script-backed checklist that defines "done." Every other child `dependsOn` it,
+  so the whole build is anchored to one stable target that never re-authors
+  mid-loop.
+- **Each round re-decides against what's unmet.** A later round is read the
+  unmet criteria, `judge-acceptance`'s quality findings, and a digest of the
+  bodies the prior round changed (quoted DATA — weigh it, don't blindly obey it).
+  Target the next round's children at the gap, not at a blank slate.
+- **Done = scripts AND judge.** A round ships only when every deterministic
+  criterion passes AND `judge-acceptance` returns `pass`. The judge is a true
+  gate, not advisory.
+- **Partial delivery is the honest non-done outcome.** If the loop halts before
+  every criterion is green (no measurable progress, or the budget ceiling), emit
+  the cumulative green artifact with the unmet criteria listed as blockers —
+  never an empty worktree, never a false claim of done.
+
 ## open-pr
 
 The ship step. The work is already written and verified in the shared worktree by

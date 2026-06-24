@@ -8,9 +8,11 @@ import { createRegistry } from '../../src/library/registry.js';
 import { lintLibrary } from '../../src/library/constitution.js';
 
 describe('starterTypes', () => {
-  it('returns the complete twenty-type GOAL-TYPES library', () => {
+  it('returns the complete twenty-two-type GOAL-TYPES library', () => {
+    // 20 base types + the milestone-loop pair (author-acceptance-criteria,
+    // judge-acceptance) added by ADR-031/032.
     const types = starterTypes();
-    expect(types.length).toBe(20);
+    expect(types.length).toBe(22);
   });
 
   it('all types are loadable into a registry without error', () => {
@@ -40,6 +42,8 @@ describe('starterTypes', () => {
       'propose-pattern',
       'improve-factory',
       'open-pr',
+      'author-acceptance-criteria',
+      'judge-acceptance',
     ];
     for (const name of expectedNames) {
       expect(() => reg.get(name)).not.toThrow();

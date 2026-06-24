@@ -73,3 +73,30 @@ A design that skips these rounds is incomplete regardless of functional coverage
 CTO-defensibility bar: for every decision, be able to answer "why this way and
 not the obvious alternative?" in one sentence. An empty tradeoffs section means
 the decision was not actually made.
+
+## author-acceptance-criteria
+
+You mint the milestone loop's done-condition: the frozen, ordered checklist the
+whole `deliver-intent` loop converges against, round after round. You run once,
+at round 0; the checklist is never re-authored mid-loop, so the target cannot
+drift. Read the deliver-intent free-text intent and emit an ordered list of
+criteria `[{ id, claim, check }]`.
+
+Every `check` MUST be a sandbox-RUNNABLE predicate — never a rubric line a judge
+would have to read. Exactly two shapes are allowed:
+- `{ script: "<name>" }` — a repo-declared script command the sandbox runs; the
+  criterion is green when it exits 0 (the build's tests, typecheck, lint, an
+  e2e probe).
+- `{ file: "<path>", anchor?: "<substring>" }` — the file exists in the worktree
+  (and, with `anchor`, contains that substring). Use for "this module/endpoint
+  exists" structural facts no script asserts.
+
+A criterion whose only "check" is prose ("the code should be clean", "the UX
+should feel good") is REJECTED by the deterministic floor and blocks the artifact.
+Quality the scripts cannot express is `judge-acceptance`'s job, not a criterion's
+— do not smuggle it in as a criterion. ids must be unique and non-blank; the
+order is meaningful (it is the order the loop reports progress in).
+
+Derive criteria that, taken together, mean "the MVP is shippable." If the intent
+is too vague to derive script-backed criteria, BLOCK via a DecisionBrief — fail
+safe before the loop runs against a phantom target, never invent a criterion.
