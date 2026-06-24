@@ -2225,3 +2225,45 @@ surfaced that it cannot yet (a) see/verify non-test (visual/runtime/PDF)
 correctness, (b) reach outside the repo (fetch assets, deploy, ground facts),
 (c) recover or partially-deliver when one leaf fails, or (d) be trusted to stay
 inside its declared scope.
+
+# Iteration 12 — The missing human→commission front door (the `commission` skill)
+
+**Stuck point (recorded per the bootstrap discipline, CLAUDE.md):** Keith asked
+corellia a design question ("should the root goal loop?"), and the work was carried
+by a *harness-orchestrated* design panel and a hand-written flat `SPEC.md` + ADRs.
+That is the harness acting as the planner — the exact dependency the bootstrap loop
+is meant to retire. The signal: **the factory has no front door for a *human* to
+turn an intent into the artifact the factory consumes.** `commission()`
+(`listener.ts`, contract `CommissionInput` in `src/contract/brief.ts:23`) eats a
+typed artifact; nothing produces that artifact *with* a human. The interactive
+intent→commission step lived only in an operator's head + a hand-edited
+`examples/live-*.ts`.
+
+**Why it matters:** the human→commission interface is a permanent architectural
+role (today a coding-harness slash command; later a Slack/web chat front-end). The
+durable contract is the *artifact* (`CommissionInput`), not the chat. Capturing it
+as a reviewed, versionable artifact decouples *plan* from *build* — the same
+separation a hosted front door would have.
+
+**Built (the corellia way, on main — interactive build work):**
+- `.claude/skills/commission/SKILL.md` — the interactive front door. Interviews in
+  the factory's own vocabulary (intent, scope prefixes, budget envelope + `$`
+  ceiling, `production|spike|characterization`, constraints incl. strange-loop
+  hygiene), then writes a `CommissionInput` artifact to `commissions/<id>.ts`.
+  **Plans only — does not run** (decoupled; a review gate sits between plan and
+  build).
+- `examples/run-commission.ts` (`npm run commission:run`) — the separate, explicit
+  runner: loads a `commissions/<id>.ts` artifact and feeds it through the real
+  front door (`listener.commission()`), not a hand-built root goal.
+- `commissions/README.md` + `commissions/example-word-count.ts` — the proven small
+  dogfood target (mirrors `examples/live.ts`'s word-count spec) so the artifact
+  shape is validated on a small goal before the milestone-loop feature.
+
+**Forward-compat note:** the v1 artifact uses the *proven* deliver-intent spec
+convention `{ description, scope?, constraints? }`. Acceptance-criteria-in-spec —
+the milestone-loop done-condition (ADR-031/032, `docs/milestone-loop-SPEC.md`) — is
+the bridge added when that feature lands; the skill is shaped to grow into it, not
+ahead of the engine.
+
+**Not yet re-proven through the factory.** Next: dogfood the skill on the small
+word-count commission, then graduate to producing the milestone-loop commission.
