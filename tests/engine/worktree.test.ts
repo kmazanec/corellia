@@ -184,6 +184,17 @@ describe('dependency link', () => {
     const wt = await openTreeWorktree(repo, 'link-goal', store);
     expect(existsSync(join(wt.root, 'node_modules', 'fixture-pkg', 'index.js'))).toBe(true);
   });
+
+  it('links the repo root .venv into a fresh worktree when present (Python toolchain)', async () => {
+    // AC-4 cats run #1 finding 1: a fresh worktree without the synced .venv makes
+    // `uv run pytest`/`mypy`/`ruff` fail to spawn, so the leaf cannot self-verify.
+    const repo = makeTempRepo();
+    mkdirSync(join(repo, '.venv', 'bin'), { recursive: true });
+    writeFileSync(join(repo, '.venv', 'bin', 'pytest'), '#!/bin/sh\n');
+    const store = new InMemoryEventStore();
+    const wt = await openTreeWorktree(repo, 'venv-goal', store);
+    expect(existsSync(join(wt.root, '.venv', 'bin', 'pytest'))).toBe(true);
+  });
 });
 
 describe('diff vs scope', () => {

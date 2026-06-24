@@ -154,8 +154,16 @@ const engine = buildLiveEngine({
     // Makefile via the `make:<target>` declared-script form — so the deliver
     // leaf can VERIFY ITS OWN WORK (the AC-3 "let the leaf verify" lesson).
     // The operator fixes the command; only the run_script `target` is model input.
+    //
+    // `test` → make:test-unit, NOT make:test: the full suite (`make test`) needs
+    // Postgres+Redis (make dev = compose-up + migrate) and errors out regardless
+    // of the leaf's code; `make test-unit` (uv run pytest tests/unit) is DB-free
+    // and green at baseline (AC-4 run #1 finding 2). `test-unit` is also declared
+    // by its own name because the leaf reaches for it directly. NB the worktree
+    // symlinks the repo root's .venv (worktree.ts), so these uv commands resolve.
     declaredScripts: {
-      test: 'make:test',
+      test: 'make:test-unit',
+      'test-unit': 'make:test-unit',
       typecheck: 'make:typecheck',
       lint: 'make:lint',
     },

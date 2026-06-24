@@ -148,12 +148,22 @@ export async function openTreeWorktree(
 
   // A fresh worktree has no installed dependencies, so a target repo's declared
   // scripts (test runners, linters) would fail on toolchain resolution. Link the
-  // repo root's node_modules in when present — the worktree shares the install,
-  // exactly as a human running the suite from a worktree would arrange.
-  const rootModules = join(repoRoot, 'node_modules');
-  const treeModules = join(root, 'node_modules');
-  if (existsSync(rootModules) && !existsSync(treeModules)) {
-    symlinkSync(rootModules, treeModules, 'dir');
+  // repo root's per-stack dependency dir in when present — the worktree shares the
+  // install, exactly as a human running the suite from a worktree would arrange.
+  //   - node_modules: Node/npm toolchains.
+  //   - .venv: Python (uv/venv) toolchains. Without this a fresh worktree's
+  //     `uv run pytest`/`mypy`/`ruff` auto-creates a venv with RUNTIME deps only
+  //     (test/lint deps live in optional-dependencies) → "Failed to spawn pytest"
+  //     and the leaf cannot self-verify (AC-4 cats run #1 finding 1).
+  // A symlink is enough: tools resolve the dir by path, and it is never committed
+  // (the diff/scope check only sees real changed files). The repo root's install
+  // is the source of truth, exactly as the node_modules precedent.
+  for (const depDir of ['node_modules', '.venv']) {
+    const rootDep = join(repoRoot, depDir);
+    const treeDep = join(root, depDir);
+    if (existsSync(rootDep) && !existsSync(treeDep)) {
+      symlinkSync(rootDep, treeDep, 'dir');
+    }
   }
 
   await store.append({

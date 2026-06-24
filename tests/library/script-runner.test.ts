@@ -129,10 +129,14 @@ describe('make:<target> declared entries (stack-agnostic verify)', () => {
     expect(red.exitStatus).not.toBeNull();
   });
 
-  it('appends a validated target as a positional arg to make', async () => {
+  it('passes the validated target to make as a second GOAL — not a recipe arg', async () => {
+    // HONEST behavior (AC-4 cats run #1 finding 3): unlike npm's `--`, make has no
+    // way to forward a positional arg INTO a recipe — `make test <path>` makes
+    // <path> a second goal. With a catch-all `%:` rule the extra goal is absorbed
+    // (the target reaches make's argv, here echoed via MAKECMDGOALS); WITHOUT one,
+    // a real Makefile errors "No rule to make target". So `make:` targeting is
+    // effectively whole-target-only; callers should not rely on per-file targeting.
     const repo = makeTmp();
-    // The target rule echoes $(filter-out test,$(MAKECMDGOALS))? Simpler: a rule
-    // that prints MAKECMDGOALS, then a catch-all so the extra goal does not error.
     writeFileSync(
       join(repo, 'Makefile'),
       'test:\n\t@echo goals=$(MAKECMDGOALS)\n\n%:\n\t@:\n',
@@ -141,8 +145,20 @@ describe('make:<target> declared entries (stack-agnostic verify)', () => {
     const runner = createScriptRunner(repo, { test: 'make:test' });
     const result = await runner.run('test', 'tests/unit/x.py');
     expect(result.ok).toBe(true);
-    // make is invoked as `make test tests/unit/x.py` — the target is a goal.
+    // The path reached make's argv as a goal (the recipe did not receive it as an arg).
     expect(result.output).toContain('tests/unit/x.py');
+  });
+
+  it('a target against a Makefile with no catch-all rule fails (target is an unknown goal)', async () => {
+    // The real-world case that bit cats: no `%:` rule, so the extra goal has no
+    // rule and make exits non-zero. Documents why the harness declares whole
+    // targets and does not lean on per-file targeting through make.
+    const repo = makeTmp();
+    writeFileSync(join(repo, 'Makefile'), 'test:\n\t@echo ran\n', 'utf8');
+    const runner = createScriptRunner(repo, { test: 'make:test' });
+    const result = await runner.run('test', 'tests/unit/x.py');
+    expect(result.ok).toBe(false);
+    expect(result.exitStatus).not.toBe(0);
   });
 
   it('refuses an invalid target (shell metacharacters) with no spawn', async () => {

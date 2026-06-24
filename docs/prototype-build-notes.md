@@ -1705,3 +1705,89 @@ Plan: implement B+C+D (small, tested engine changes), rewrite `live:foreign` to 
 the github mirror + cats' make-scripts + AC-3-style budget headroom, gate green,
 then run the first live AC-4 proof — expecting, like the AC-3 arc, that each run
 buys one more real fix.
+
+## AC-4 run #1 — comprehension SCOPED + green; implement leaf starved by a non-verifiable env. 3 findings.
+
+First live deliver to cats (`format_usd` helper). Intent id `live-foreign-7db58678`,
+$1.075, 91.7% cache. Tree:
+```
+✗ deliver-intent
+  ✓ map-repo: architecture
+  ✓ map-repo: conventions
+  ✓ deep-dive-region: src/cats/agents/common
+  ✓ deep-dive-region: tests/unit
+  ✗ implement: format_usd  (exhausted tokens budget — never wrote/pushed)
+```
+
+**What the readiness fixes PROVED (all green):** github-mirror slug derivation
+(`kmazanec/cats` from the `github` remote — the origin-only path would have died at
+startup); scoped comprehension held on a foreign repo — the coverage gate minted
+exactly 2 `deep-dive-region` goals bounded to the two touched dirs
+(`src/cats/agents/common`, `tests/unit`), NOT speculative whole-repo maps
+(iteration-09 scoping carries to foreign repos); the `make:` declared-script form
+spawned `make` for real (23 `script-ran` events).
+
+**Why the implement leaf failed:** it burned its whole token budget thrashing
+(130 read_file, 8 write_file, 46 run_script, 23 make invocations) and never reached
+push/PR. Token shape is the tell: 6.8M prompt / 57K completion at 91.7% cache — lots
+of looping, almost no production. Root cause from the event log's `run_script` reason
+text — THREE compounding findings, each a real fix this run buys:
+
+**FINDING 1 (deepest) — a fresh worktree's `.venv` lacks the test/dev deps, so the
+verify command can NEVER go green.** Every `make test` failed identically:
+```
+uv run pytest
+Creating virtual environment at: .venv
+Installed 80 packages in 98ms
+error: Failed to spawn: `pytest`
+  Caused by: No such file or directory (os error 2)
+make: *** [test] Error 2
+```
+The factory's worktree is a SEPARATE checkout (`.corellia/worktrees/…`) without
+cats' synced `.venv`. `uv run pytest` auto-creates a venv with the RUNTIME deps
+only — cats' `pytest`/`ruff`/`mypy` live in `[project.optional-dependencies]`, which
+a plain `uv run` does not install. cats' Makefile assumes the dev env is already
+synced (`make sync` / `make dev` bootstrap). In a fresh worktree it is not, so
+`pytest` isn't on PATH → exit 2 every time. This is the AC-4 analogue of AC-3's
+"let the leaf verify" (finding 6), one layer deeper: the verify command must be
+RUNNABLE in the sandbox worktree — a per-stack bootstrap (`uv sync --all-extras`)
+must run before the first verify, or the leaf is structurally unable to self-verify
+and will thrash to budget exhaustion. *Candidate fixes:* (a) declare the verify
+command to include the sync, e.g. `make:dev-test` where a target does
+`uv sync --all-extras && uv run pytest`; or (b) the engine pre-syncs a worktree once
+on creation via an operator-declared bootstrap command. (b) is the general,
+stack-agnostic fix (npm repos need `npm ci` in a fresh worktree too — corellia's
+own self-build dodged this only because it shares one worktree per tree and node
+resolves from the repo root).
+
+**FINDING 2 — declared the wrong test target; `make test` needs a DB and can't go
+green here anyway.** Even WITH deps, `make test` = `uv run pytest` runs the FULL
+suite, whose integration tests need Postgres+Redis (`make dev` = `compose-up +
+migrate`) — 90 ERRORs, exit 1, regardless of the leaf's code. The DB-free target is
+`make test-unit` (`uv run pytest tests/unit` → 848 passed, exit 0 at baseline, once
+deps are synced). The harness should declare `test → make:test-unit` (and ALSO
+declare `test-unit`, since the leaf correctly tried it — "Script test-unit is not in
+the declared set"). General lesson: the declared verify target must be the
+narrowest one that is green at baseline in the sandbox (no external services).
+
+**FINDING 3 — `make:<target>` cannot forward the model's `target`; it appends it as
+a second make GOAL.** `make test tests/unit/test_format_usd.py` ran `uv run pytest`
+(whole suite, target IGNORED) and then tried to build `tests/unit/...` as a second
+goal. npm's `--` forwards the target into the runner; make has no equivalent —
+positional args become goals, not recipe args. So the AC-3 targeting win (run ONE
+file) silently does not work through `make:`. *Candidate:* either drop target-append
+for the `make:` form (document it as whole-target-only) or support a make-variable
+convention (`make <target> TARGET=<path>` and recipes that read `$(TARGET)`); the
+former is simpler and honest. Note: my unit test for `make:` target-forwarding
+masked this — it added a catch-all `%:` rule to absorb the extra goal, which cats'
+real Makefile does not have. The test should assert the realistic behavior.
+
+**Hygiene:** worktree was PRESERVED (not collected) — correct, since the deliver
+failed (collection is success-only). cats' primary checkout left clean. The
+improvement loop is disabled for this run (no standing envelope), but the report
+correctly routed the 3 blockers to an improve commission id (would have fired with
+an envelope). No PR — as expected, the leaf never reached the open-pr step.
+
+Net: the AC-4 harness path is sound end-to-end UP TO verify; the gap is that the
+sandbox worktree is not a verifiable environment for a fresh Python checkout. Fix
+the worktree-bootstrap (finding 1) + declared target (finding 2) and re-run.
