@@ -4,7 +4,7 @@
 > `docs/iterations/NN-milestone-loop/` (matching the `06-loop` / `07-conventions`
 > layout) at build-planning time, once the next iteration number is confirmed.
 
-**Status: Draft (awaiting Keith approval)**
+**Status: Approved (2026-06-24) — building**
 **ADRs:** ADR-031 (milestone loop at the root), ADR-032 (acceptance criteria
 done-condition + per-round verify-on-read)
 **Goal:** give a composite `deliver-intent` goal the ability to ITERATE
