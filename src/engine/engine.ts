@@ -40,7 +40,12 @@ import {
   type SandboxConfig,
   type SandboxAssembly,
 } from './assembly.js';
-import { diffWithinScope, collectTree, preserveTree } from './worktree.js';
+import { diffWithinScope, collectTree, preserveTree, commitRound, diffBodiesWithinScope } from './worktree.js';
+import {
+  parseAcceptanceCriteria,
+  criterionToCheck,
+  type AcceptanceCriterion,
+} from '../library/acceptance-criteria.js';
 import type { KnowledgeArtifact } from '../contract/knowledge.js';
 import {
   coverageCheck,
@@ -971,7 +976,26 @@ export class Engine {
           }
         }
 
-        const splitReport = await this.runSplit(goal, childrenToSplit, terracedLoserFindings, treeState);
+        // ── ITERATIVE DISPATCH (ADR-031 §4.4) ──────────────────────────────
+        // A type carrying `iterative` routes its split through the milestone
+        // loop instead of the single-pass runSplit. The constitution's `>= 1`
+        // floor is re-checked on the EFFECTIVE maxRounds (goal.maxRounds override
+        // or the type default) so an override cannot smuggle in 0; a bad value
+        // blocks through the structural-error path rather than looping.
+        let splitReport: Report;
+        if (typeDef.iterative) {
+          const effectiveMaxRounds = goal.maxRounds ?? typeDef.iterative.maxRounds;
+          if (!Number.isInteger(effectiveMaxRounds) || effectiveMaxRounds < 1) {
+            const report = blockedReport(
+              `iterative maxRounds must be an integer >= 1 (effective value ${effectiveMaxRounds})`,
+            );
+            await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
+            return report;
+          }
+          splitReport = await this.runMilestone(goal, childrenToSplit, treeState);
+        } else {
+          splitReport = await this.runSplit(goal, childrenToSplit, terracedLoserFindings, treeState);
+        }
 
         // ── PATTERN RECORD ────────────────────────────────────────────────
         // Record the outcome of the split against the shape so the flywheel
@@ -3029,7 +3053,15 @@ export class Engine {
     children: ChildPlan[],
     extraFindings: string[] = [],
     treeState: TreeState = { spentUsd: 0, ceilingUsd: DEFAULT_SPEND_CEILING_USD },
-  ): Promise<{ report: Report; mergedArtifact: Artifact | null; passingCount: number }> {
+  ): Promise<{
+    report: Report;
+    mergedArtifact: Artifact | null;
+    passingCount: number;
+    /** Each child's plan paired with the report it produced, for the iterative
+     * caller (runMilestone) to locate the criteria child's artifact. The
+     * non-iterative caller (runSplit) ignores it. */
+    childOutcomes: { plan: ChildPlan; report: Report }[];
+  }> {
     const t = this.now;
 
     // Subdivide the budget by each child's share
@@ -3340,7 +3372,8 @@ export class Engine {
 
     // `passingCount` is computed by the iterative caller (runMilestone) against
     // the round's worktree; a non-iterative split ignores it (0).
-    return { report, mergedArtifact, passingCount: 0 };
+    const childOutcomes = children.map((plan, i) => ({ plan, report: childReports[i]! }));
+    return { report, mergedArtifact, passingCount: 0, childOutcomes };
   }
 
   private async runSplit(
@@ -3352,6 +3385,236 @@ export class Engine {
     const { report } = await this.runRound(goal, children, extraFindings, treeState);
     await this.store.append({ type: 'emitted', at: this.now(), goalId: goal.id, report });
     return report;
+  }
+
+  // ── MILESTONE LOOP (ADR-031) ───────────────────────────────────────────────
+  /**
+   * The milestone loop: an iterative `deliver-intent`-style root re-decides
+   * against a frozen acceptance-criteria done-condition each round until DONE or
+   * a guard halts it (ADR-031 §4.2). Reached from the split dispatch arm when the
+   * type carries `iterative`.
+   *
+   * Reused verbatim: `runRound` (one split pass), `brain.decide`/`brain.judge`,
+   * `subdivide`, `persistLeafKnowledge`, `checkCeiling`/`debitTreeState`/
+   * `ceilingReport`, the comprehend merge, the lesson/memory promotion edge,
+   * `commitRound`/`diffBodiesWithinScope`.
+   *
+   * Step 5 ships this with the loop OFF: exactly one round (round 0) + criteria
+   * check + judge-acceptance + emit — a safe superset of a single split plus a
+   * criteria assessment. Step 6 turns on the re-decide while-loop and the
+   * four-guard halt.
+   */
+  private async runMilestone(
+    goal: Goal,
+    children: ChildPlan[],
+    treeState: TreeState,
+    _depth = 0,
+  ): Promise<Report> {
+    const t = this.now;
+    const typeDef = this.registry.get(goal.type);
+    const iterative = typeDef.iterative!; // dispatch guard guarantees presence
+    const effectiveMaxRounds = goal.maxRounds ?? iterative.maxRounds;
+
+    // ── ROUND 0 ─────────────────────────────────────────────────────────────
+    // checkCeiling at the very top (the per-round top gate the tradeoff requires).
+    if (await this.checkCeiling(goal, treeState)) {
+      return this.ceilingReport(goal, treeState);
+    }
+
+    const roundIndex = 0;
+    const roundStartedAt = t();
+    await this.store.append({
+      type: 'round-started',
+      at: roundStartedAt,
+      goalId: goal.id,
+      round: roundIndex,
+      spentUsd: treeState.spentUsd,
+      roundWallClockMs: goal.budget.wallClockMs,
+    });
+
+    const { report: roundReport, mergedArtifact, childOutcomes } = await this.runRound(
+      goal,
+      children,
+      [],
+      treeState,
+    );
+
+    // Locate + persist the frozen criteria artifact (round 0's mandatory child).
+    const criteriaArtifact = this.extractCriteriaArtifact(childOutcomes);
+    if (criteriaArtifact !== null) {
+      await this.persistLeafKnowledge(goal, criteriaArtifact);
+    }
+
+    // commitRound — HEAD advances so verify-on-read is real across rounds.
+    this.commitRoundIfWorktree(roundIndex, goal.title);
+
+    // Assess: run the frozen criteria → passingCount, run judge-acceptance.
+    const assessment = await this.assessRound(goal, criteriaArtifact, mergedArtifact, treeState);
+
+    // The four-guard halt's DONE check (decision 1: scripts AND judge). Step 5
+    // runs a SINGLE round, so any non-DONE outcome breaks with a partial; the
+    // loop's re-decide is turned on in step 6.
+    const done =
+      assessment.criteriaTotal > 0 &&
+      assessment.passingCount === assessment.criteriaTotal &&
+      assessment.judgeVerdict.pass;
+
+    await this.store.append({
+      type: 'round-assessed',
+      at: t(),
+      goalId: goal.id,
+      round: roundIndex,
+      passingCount: assessment.passingCount,
+      criteriaTotal: assessment.criteriaTotal,
+      judgeVerdict: assessment.judgeVerdict,
+      outcome: done ? 'done' : 'continue',
+      diffDigest: assessment.diffDigest,
+    });
+
+    // Emit the cumulative report. A non-DONE single round emits the cumulative
+    // green artifact with the unmet criteria as blockers (gap A5, honest partial).
+    const finalReport = done
+      ? roundReport
+      : this.withUnmetBlockers(roundReport, assessment);
+    await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report: finalReport });
+    return finalReport;
+  }
+
+  /**
+   * Locate the frozen acceptance-criteria artifact among a round's children: the
+   * report of the child planned as `author-acceptance-criteria`. Null when no
+   * such child ran or it produced no artifact (the loop then has no criteria to
+   * gate on — handled as zero criteria by the assessment).
+   */
+  private extractCriteriaArtifact(
+    childOutcomes: { plan: ChildPlan; report: Report }[],
+  ): Artifact | null {
+    const criteriaChild = childOutcomes.find(
+      (c) => c.plan.type === 'author-acceptance-criteria',
+    );
+    return criteriaChild?.report.artifact ?? null;
+  }
+
+  /**
+   * Commit the round onto the tree branch (advancing HEAD) when a worktree is
+   * active. No-op without a sandbox (tests / sandbox-less runs) — there is no
+   * worktree to commit, and verify-on-read is moot.
+   */
+  private commitRoundIfWorktree(roundIndex: number, title: string): string | null {
+    const worktree = this._activeAssembly?.worktree;
+    if (worktree === undefined) return null;
+    return commitRound(worktree, roundIndex, title);
+  }
+
+  /**
+   * Assess one round against the frozen criteria: parse the checklist, run each
+   * criterion's deterministic check against the round's cumulative artifact +
+   * sandbox (→ passingCount / criteriaTotal), then run `judge-acceptance` over
+   * the cumulative artifact + criteria + check results. Returns the components
+   * the four-guard halt and the `round-assessed` event need.
+   */
+  private async assessRound(
+    goal: Goal,
+    criteriaArtifact: Artifact | null,
+    mergedArtifact: Artifact | null,
+    treeState: TreeState,
+  ): Promise<{
+    passingCount: number;
+    criteriaTotal: number;
+    judgeVerdict: Verdict;
+    criteria: AcceptanceCriterion[];
+    checkResults: { id: string; ok: boolean; detail: string }[];
+    diffDigest: string[];
+  }> {
+    const parsed = parseAcceptanceCriteria(criteriaArtifact);
+    const criteria = parsed.ok ? parsed.criteria : [];
+    const checkCtx = this.checkContextFor(goal.id);
+
+    const checkResults: { id: string; ok: boolean; detail: string }[] = [];
+    for (const criterion of criteria) {
+      const result = await criterionToCheck(criterion).run(goal, mergedArtifact, checkCtx);
+      checkResults.push({ id: criterion.id, ok: result.ok, detail: result.detail });
+    }
+    const passingCount = checkResults.filter((r) => r.ok).length;
+
+    // judge-acceptance: the ship-gate judge (decision 1). Reads the cumulative
+    // artifact + the frozen criteria + this round's deterministic check RESULTS.
+    let judgeVerdict: Verdict = { pass: false, findings: [] };
+    if (this.registry.has(iterativeAcceptanceJudge(this.registry, goal.type)) && mergedArtifact) {
+      const judgeType = iterativeAcceptanceJudge(this.registry, goal.type);
+      const criteriaSummary = criteria
+        .map((c) => {
+          const r = checkResults.find((x) => x.id === c.id);
+          return `- [${r?.ok ? 'PASS' : 'FAIL'}] ${c.id}: ${c.claim} (${r?.detail ?? 'not run'})`;
+        })
+        .join('\n');
+      const rubric = this.enrichRubric(
+        `Are the frozen acceptance criteria satisfied to a shippable bar for the intent: "${goal.title}"?\n\nFrozen criteria and this round's deterministic check results:\n${criteriaSummary}`,
+        judgeType,
+        goal.intent,
+      );
+      const judgeTypeDef = this.registry.get(judgeType);
+      const judgeTier = judgeTypeDef.tier.default;
+      const judgeCtx: BrainContext = { tier: judgeTier, memories: goal.memories };
+      const { value, usage } = await this.brain.judge(goal, mergedArtifact, rubric, judgeCtx);
+      judgeVerdict = value;
+      if (this.goldenCapture) {
+        await this.store.append({
+          type: 'judge-verdict',
+          at: this.now(),
+          goalId: goal.id,
+          judgeType,
+          verdict: value,
+          tier: judgeTier,
+          usage,
+        });
+        await this.maybeAppendGoldenCandidate(goal.id, judgeType, mergedArtifact, rubric, value, judgeTier);
+      }
+      this.debitTreeState(treeState, usage);
+    }
+
+    // diff DIGEST: pointers, not bodies — the failing criteria ids (the honest
+    // per-round log of what is still unmet).
+    const diffDigest = checkResults.filter((r) => !r.ok).map((r) => `unmet:${r.id}`);
+
+    return {
+      passingCount,
+      criteriaTotal: criteria.length,
+      judgeVerdict,
+      criteria,
+      checkResults,
+      diffDigest,
+    };
+  }
+
+  /**
+   * Decorate a round's report with the unmet criteria as blockers — the honest
+   * non-done outcome (gap A5): the cumulative green artifact is emitted, never an
+   * empty worktree, with the unmet criteria and the judge's gating verdict named.
+   */
+  private withUnmetBlockers(
+    report: Report,
+    assessment: {
+      passingCount: number;
+      criteriaTotal: number;
+      judgeVerdict: Verdict;
+      checkResults: { id: string; ok: boolean; detail: string }[];
+    },
+  ): Report {
+    const unmet = assessment.checkResults.filter((r) => !r.ok);
+    const blockers = [...report.blockers];
+    if (unmet.length > 0) {
+      blockers.push(
+        `Acceptance criteria not yet met (${assessment.passingCount}/${assessment.criteriaTotal}): ` +
+          unmet.map((r) => `${r.id} (${r.detail})`).join('; '),
+      );
+    }
+    if (!assessment.judgeVerdict.pass) {
+      blockers.push(
+        `judge-acceptance did not pass: ${assessment.judgeVerdict.findings.map((f) => f.title).join(', ') || 'no shippable verdict'}`,
+      );
+    }
+    return { ...report, blockers };
   }
 
   // ── BLOCK PATH ────────────────────────────────────────────────────────────
@@ -3419,6 +3682,15 @@ export class Engine {
 }
 
 // ── STEP LOOP HELPERS ────────────────────────────────────────────────────────
+
+/**
+ * The acceptance-judge type name an iterative type names. The dispatch guard
+ * guarantees the type carries `iterative`; the constitution guarantees the named
+ * judge is a registered `kind:'judge'` type.
+ */
+function iterativeAcceptanceJudge(registry: Registry, goalType: string): string {
+  return registry.get(goalType).iterative!.acceptanceJudge;
+}
 
 /**
  * Whether a goal type's grants include at least one grant that maps to a known

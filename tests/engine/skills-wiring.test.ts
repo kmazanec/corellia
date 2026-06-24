@@ -219,6 +219,11 @@ describe('skills-wiring sweep — step-loop harness carries each family skill', 
       if (rep.judgeType) {
         defs.push(leafTypeDef({ name: rep.judgeType, kind: 'judge', family: rep.family, judgeType: null }));
       }
+      // An iterative type names an acceptance judge the constitution requires to
+      // be registered (ADR-031). Stub it so the subset registry lints clean.
+      if (rep.iterative) {
+        defs.push(leafTypeDef({ name: rep.iterative.acceptanceJudge, kind: 'judge', family: rep.family, judgeType: null }));
+      }
       const engine = new Engine({
         registry: registryOf(defs),
         brain,
@@ -283,9 +288,10 @@ describe('skills-wiring sweep — judge rubric carries each judge family skill',
 
 // ── Full-registry wiring sanity: 19 types, lint-clean families, all reachable ─
 
-describe('full 20-type registry wiring', () => {
-  it('starterTypes() exposes the full 20-type set across all 10 families', () => {
-    expect(ALL_TYPES).toHaveLength(20);
+describe('full 22-type registry wiring', () => {
+  it('starterTypes() exposes the full 22-type set across all 10 families', () => {
+    // 20 base + the milestone-loop pair (author-acceptance-criteria, judge-acceptance).
+    expect(ALL_TYPES).toHaveLength(22);
     const families = new Set(ALL_TYPES.map((d) => d.family));
     expect([...families].sort()).toEqual(
       ['arbiter', 'author', 'build', 'comprehend', 'critique', 'curate', 'deliver', 'diagnose', 'improve', 'research'].sort(),
