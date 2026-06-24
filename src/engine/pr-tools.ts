@@ -84,12 +84,13 @@ function writeAskpassHelper(token: string): string {
 }
 
 /**
- * Get the remote URL for the repo (origin), used for the process-clean diff
- * and to derive the push target. Returns null if origin is not configured.
+ * Get the URL for a named remote (default `origin`), used for the process-clean
+ * diff label and the `branch-pushed` event. Returns null if the remote is not
+ * configured.
  */
-function getOriginUrl(repoRoot: string): string | null {
+function getRemoteUrl(repoRoot: string, remote = 'origin'): string | null {
   try {
-    return execFileSync('git', ['-C', repoRoot, 'remote', 'get-url', 'origin'], {
+    return execFileSync('git', ['-C', repoRoot, 'remote', 'get-url', remote], {
       stdio: 'pipe',
       encoding: 'utf-8',
     }).trim();
@@ -103,9 +104,9 @@ function getOriginUrl(repoRoot: string): string | null {
  * full diff from the initial commit if the remote branch does not exist yet.
  * Used by the process-clean gate before pushing.
  */
-function getDiffForCleanCheck(repoRoot: string, branch: string): string {
+function getDiffForCleanCheck(repoRoot: string, branch: string, remote = 'origin'): string {
   // Try diff against the remote tracking branch.
-  const remoteBranch = `origin/${branch}`;
+  const remoteBranch = `${remote}/${branch}`;
   try {
     // Check whether the remote ref exists by asking git rev-parse.
     execFileSync('git', ['-C', repoRoot, 'rev-parse', '--verify', remoteBranch], { stdio: 'pipe' });
@@ -217,6 +218,14 @@ export interface PushBranchDeps {
    * still receives the full gate.
    */
   factoryRepoSlug?: string;
+  /**
+   * The git remote to push to. Defaults to `'origin'`. Set this when the PR
+   * target is a non-`origin` remote — e.g. a repo whose `origin` is a GitLab
+   * host but which has a `github` mirror remote the PR is opened against (the
+   * AC-4 cats case). The slug in `repoSlug` and this remote must name the same
+   * GitHub repo.
+   */
+  remote?: string;
 }
 
 /**
@@ -230,6 +239,7 @@ export interface PushBranchDeps {
  */
 export function pushBranchTool(deps: PushBranchDeps): ToolImpl {
   const { worktreeRoot, branch, treeId, store, repoSlug, factoryRepoSlug } = deps;
+  const remote = deps.remote ?? 'origin';
 
   return {
     def: {
@@ -253,13 +263,13 @@ export function pushBranchTool(deps: PushBranchDeps): ToolImpl {
         };
       }
 
-      // 2. Determine the remote (must be 'origin').
-      const remote = 'origin';
-      const originUrl = getOriginUrl(worktreeRoot);
-      if (!originUrl) {
+      // 2. Resolve the push remote's URL (default 'origin'; the harness may bind
+      //    a different remote, e.g. a `github` mirror when origin is GitLab).
+      const remoteUrl = getRemoteUrl(worktreeRoot, remote);
+      if (!remoteUrl) {
         return {
           ok: false,
-          output: 'push_branch: no "origin" remote is configured for this worktree\'s repo.',
+          output: `push_branch: no "${remote}" remote is configured for this worktree's repo.`,
         };
       }
 
@@ -283,7 +293,7 @@ export function pushBranchTool(deps: PushBranchDeps): ToolImpl {
         factoryRepoSlug !== undefined &&
         repoSlug === factoryRepoSlug;
       const patterns = isFactoryRepo ? ALWAYS_DANGEROUS_PATTERNS : undefined; // undefined → full set (default)
-      const diff = getDiffForCleanCheck(worktreeRoot, branch);
+      const diff = getDiffForCleanCheck(worktreeRoot, branch, remote);
       const cleanResult = scanDiffForProcessLanguage(diff, patterns);
       if (!cleanResult.ok) {
         const lines = cleanResult.offenses.slice(0, 20).join('\n');
@@ -313,12 +323,12 @@ export function pushBranchTool(deps: PushBranchDeps): ToolImpl {
         goalId: goal.id,
         treeId,
         branch,
-        remote: originUrl,
+        remote: remoteUrl,
       });
 
       return {
         ok: true,
-        output: `push_branch: pushed ${branch} to ${originUrl}`,
+        output: `push_branch: pushed ${branch} to ${remoteUrl}`,
       };
     },
   };

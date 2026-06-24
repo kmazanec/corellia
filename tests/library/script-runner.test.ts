@@ -104,6 +104,58 @@ describe('npm-script declared entries', () => {
   });
 });
 
+describe('make:<target> declared entries (stack-agnostic verify)', () => {
+  it('runs a make:<target> entry via `make`, shell-free', async () => {
+    const repo = makeTmp();
+    // A Makefile with a green and a red target — proves exit status is captured.
+    writeFileSync(
+      join(repo, 'Makefile'),
+      'test:\n\t@echo cats-test-ran\n\nfail:\n\t@exit 4\n',
+      'utf8',
+    );
+    const runner = createScriptRunner(repo, { test: 'make:test', fail: 'make:fail' });
+
+    const green = await runner.run('test', undefined, 60_000);
+    expect(green.ok).toBe(true);
+    expect(green.exitStatus).toBe(0);
+    expect(green.output).toContain('cats-test-ran');
+
+    const red = await runner.run('fail', undefined, 60_000);
+    expect(red.ok).toBe(false);
+    // make exits non-zero (its own code 2) when a recipe fails — the runner
+    // surfaces that as ok:false. We assert the failure is captured, not make's
+    // exact code, which is make's contract, not ours.
+    expect(red.exitStatus).not.toBe(0);
+    expect(red.exitStatus).not.toBeNull();
+  });
+
+  it('appends a validated target as a positional arg to make', async () => {
+    const repo = makeTmp();
+    // The target rule echoes $(filter-out test,$(MAKECMDGOALS))? Simpler: a rule
+    // that prints MAKECMDGOALS, then a catch-all so the extra goal does not error.
+    writeFileSync(
+      join(repo, 'Makefile'),
+      'test:\n\t@echo goals=$(MAKECMDGOALS)\n\n%:\n\t@:\n',
+      'utf8',
+    );
+    const runner = createScriptRunner(repo, { test: 'make:test' });
+    const result = await runner.run('test', 'tests/unit/x.py');
+    expect(result.ok).toBe(true);
+    // make is invoked as `make test tests/unit/x.py` — the target is a goal.
+    expect(result.output).toContain('tests/unit/x.py');
+  });
+
+  it('refuses an invalid target (shell metacharacters) with no spawn', async () => {
+    const repo = makeTmp();
+    writeFileSync(join(repo, 'Makefile'), 'test:\n\t@echo ran\n', 'utf8');
+    const runner = createScriptRunner(repo, { test: 'make:test' });
+    const result = await runner.run('test', 'a; rm -rf /');
+    expect(result.ok).toBe(false);
+    expect(result.exitStatus).toBeNull();
+    expect(result.output).toContain('Invalid script target');
+  });
+});
+
 describe('validateScriptTarget', () => {
   it('accepts relative in-repo paths and patterns', () => {
     for (const ok of ['tests/util/x.test.ts', 'src/a.py', 'tests/**/*.spec.js', 'a_b-c.test.ts']) {
@@ -396,5 +448,15 @@ describe('verifyEntryPoints', () => {
     if (!result.ok) {
       expect(result.reason).toContain('"missing"');
     }
+  });
+
+  it('skips scheme-prefixed entries (npm-script:, make:) — they are not disk paths', async () => {
+    const repoRoot = makeTmp();
+    // Neither names a file on disk; both must be skipped, not reported missing.
+    const result = await verifyEntryPoints(repoRoot, {
+      test: 'make:test',
+      lint: 'npm-script:lint',
+    });
+    expect(result.ok).toBe(true);
   });
 });

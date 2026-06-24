@@ -435,3 +435,93 @@ describe('push_branch — real git push against local bare repo', () => {
     expect(events).toHaveLength(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Configurable push remote (AC-4: cats' origin is GitLab; push to `github` mirror)
+// ---------------------------------------------------------------------------
+
+describe('push_branch — configurable remote (non-origin)', () => {
+  it('pushes to the named remote, not origin', async () => {
+    withToken('ghp_LOCAL_FAKE_REMOTE');
+
+    const repo = makeTempRepo('push-remote');
+    // Two bare repos: a decoy `origin` and the real PR target `github`.
+    const origin = makeBareRepo(repo);
+    const github = makeBareRepo(repo);
+    execFileSync('git', ['-C', repo, 'remote', 'add', 'origin', origin], { stdio: 'pipe' });
+    execFileSync('git', ['-C', repo, 'remote', 'add', 'github', github], { stdio: 'pipe' });
+
+    const worktreeDir = mkdtempSync(join(tmpdir(), 'corellia-push-wt-remote-'));
+    cleanups.push(() => rmSync(worktreeDir, { recursive: true, force: true }));
+    const branch = 'tree/push-remote-abc12345';
+
+    makeWorktreeWithBranch(repo, branch, worktreeDir, 'feature.ts', 'export const v = 1;\n');
+
+    const store = new InMemoryEventStore();
+    const treeId = 'push-remote-abc12345';
+    // Bind the `github` remote — origin must be left untouched.
+    const tool = pushBranchTool({ worktreeRoot: worktreeDir, branch, treeId, store, remote: 'github' });
+
+    const goal = {
+      id: 'g-remote',
+      type: 'improve-factory',
+      parentId: null as null,
+      title: 'remote test',
+      spec: {},
+      intent: 'production' as const,
+      scope: [],
+      budget: { attempts: 3, tokens: 1000, toolCalls: 10, wallClockMs: 60000 },
+      memories: [],
+    };
+
+    const result = await tool.execute(goal, {});
+    expect(result.ok).toBe(true);
+
+    // The branch must exist in the `github` bare repo...
+    const githubBranches = execFileSync(
+      'git', ['-C', github, 'branch', '--list', branch], { stdio: 'pipe', encoding: 'utf-8' },
+    ).trim();
+    expect(githubBranches).toContain(branch);
+
+    // ...and must NOT exist in the decoy `origin` bare repo.
+    const originBranches = execFileSync(
+      'git', ['-C', origin, 'branch', '--list', branch], { stdio: 'pipe', encoding: 'utf-8' },
+    ).trim();
+    expect(originBranches).toBe('');
+
+    // The branch-pushed event records the github remote's URL, not origin's.
+    const events = await store.list({ type: 'branch-pushed' });
+    expect(events).toHaveLength(1);
+    const e = events[0];
+    if (e?.type === 'branch-pushed') {
+      expect(e.remote).toBe(github);
+    }
+  });
+
+  it('refuses gracefully when the named remote is not configured', async () => {
+    withToken('ghp_FAKE');
+
+    const repo = makeTempRepo('push-remote-missing');
+    const origin = makeBareRepo(repo);
+    execFileSync('git', ['-C', repo, 'remote', 'add', 'origin', origin], { stdio: 'pipe' });
+
+    const worktreeDir = mkdtempSync(join(tmpdir(), 'corellia-push-wt-remote-missing-'));
+    cleanups.push(() => rmSync(worktreeDir, { recursive: true, force: true }));
+    const branch = 'tree/push-remote-missing';
+    makeWorktreeWithBranch(repo, branch, worktreeDir, 'f.ts', 'export {};\n');
+
+    const store = new InMemoryEventStore();
+    // Bind a remote that does not exist.
+    const tool = pushBranchTool({ worktreeRoot: worktreeDir, branch, treeId: 'm', store, remote: 'github' });
+
+    const goal = {
+      id: 'g1', type: 'improve-factory', parentId: null as null, title: 't', spec: {},
+      intent: 'production' as const, scope: [],
+      budget: { attempts: 3, tokens: 1000, toolCalls: 10, wallClockMs: 60000 }, memories: [],
+    };
+
+    const result = await tool.execute(goal, {});
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('github');
+  });
+});

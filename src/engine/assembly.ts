@@ -106,6 +106,12 @@ export interface SandboxConfig {
      * "no repo is the factory repo → full gate always" (safe default).
      */
     factoryRepoSlug?: string;
+    /**
+     * The git remote to push to (default `origin`). Set this when the PR target
+     * is a non-`origin` remote — e.g. a repo whose `origin` is GitLab but which
+     * has a `github` mirror remote the PR is opened against (the AC-4 cats case).
+     */
+    remote?: string;
     /** Injectable fetch transport for tests; omit for live runs (global fetch). */
     fetchTransport?: FetchTransport;
   };
@@ -249,6 +255,9 @@ export async function openSandboxAssembly(
           repoSlug: config.prBoundary.repoSlug,
           ...(config.prBoundary.factoryRepoSlug !== undefined
             ? { factoryRepoSlug: config.prBoundary.factoryRepoSlug }
+            : {}),
+          ...(config.prBoundary.remote !== undefined
+            ? { remote: config.prBoundary.remote }
             : {}),
         }),
         openPrTool({

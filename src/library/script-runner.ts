@@ -107,16 +107,34 @@ export function createScriptRunner(
         safeTarget = validated;
       }
 
-      // Two declared-entry forms, both name-based and shell-free:
+      // Three declared-entry forms, all name-based and shell-free (the operator
+      // fixes the runner; only `target` is the model's input, and it is validated):
       //   "npm-script:<name>"  -> execute via the package manager (npm run <name>),
       //                           the form package.json scripts actually require;
+      //   "make:<target>"      -> execute `make <target>` (stack-agnostic: any repo
+      //                           with a Makefile, e.g. a Python repo's `make test`);
       //   anything else        -> a repo-relative node script file path.
       const npmScript = entryPoint.startsWith('npm-script:')
         ? entryPoint.slice('npm-script:'.length)
         : null;
-      const command = npmScript !== null ? 'npm' : process.execPath;
-      // npm needs `--` to forward the target as an arg to the underlying runner.
-      const baseArgs = npmScript !== null ? ['run', npmScript] : [join(repoRoot, entryPoint)];
+      const makeTarget = entryPoint.startsWith('make:')
+        ? entryPoint.slice('make:'.length)
+        : null;
+
+      let command: string;
+      let baseArgs: string[];
+      if (npmScript !== null) {
+        command = 'npm';
+        baseArgs = ['run', npmScript];
+      } else if (makeTarget !== null) {
+        command = 'make';
+        baseArgs = [makeTarget];
+      } else {
+        command = process.execPath;
+        baseArgs = [join(repoRoot, entryPoint)];
+      }
+      // npm needs `--` to forward the target as an arg to the underlying runner;
+      // make and the node-file form take the target as a trailing positional arg.
       const args =
         safeTarget === undefined
           ? baseArgs
@@ -265,14 +283,20 @@ export function runScriptTool(runner: ScriptRunner): {
 /**
  * Verify that every declared script entry point exists on disk.
  *
- * Returns `{ok:true}` when all paths are present; returns `{ok:false, reason}`
- * naming the first missing entry point.
+ * Only the repo-relative node-file form is disk-checked. The scheme-prefixed
+ * forms (`npm-script:<name>`, `make:<target>`) name a runner target, not a path —
+ * their existence is the runner's/`make`'s concern at run time, not a file on
+ * disk — so they are skipped here.
+ *
+ * Returns `{ok:true}` when all node-file paths are present; returns
+ * `{ok:false, reason}` naming the first missing entry point.
  */
 export async function verifyEntryPoints(
   repoRoot: string,
   declaredScripts: DeclaredScripts,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   for (const [name, entryPoint] of Object.entries(declaredScripts)) {
+    if (entryPoint.startsWith('npm-script:') || entryPoint.startsWith('make:')) continue;
     const full = join(repoRoot, entryPoint);
     try {
       await access(full);

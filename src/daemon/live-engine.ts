@@ -127,14 +127,16 @@ export function buildLiveEngine(opts: LiveEngineOptions): Engine {
 // ── Helpers for live scripts ───────────────────────────────────────────────────
 
 /**
- * Derive the GitHub owner/repo slug from the origin remote URL of a local
- * repo. Used by live scripts to populate prBoundary.repoSlug without hardcoding.
+ * Derive the GitHub owner/repo slug from a named remote's URL (default `origin`)
+ * of a local repo. Used by live scripts to populate prBoundary.repoSlug without
+ * hardcoding. Pass a non-`origin` remote when the GitHub PR target is a mirror
+ * remote (e.g. cats: `origin` is GitLab, `github` is the GitHub mirror).
  *
- * Returns null if the origin remote is not a recognized GitHub URL.
+ * Returns null if the named remote's URL is not a recognized GitHub URL.
  */
-export function deriveRepoSlug(repoRoot: string): string | null {
+export function deriveRepoSlug(repoRoot: string, remote = 'origin'): string | null {
   try {
-    const url = execFileSync('git', ['-C', repoRoot, 'remote', 'get-url', 'origin'], {
+    const url = execFileSync('git', ['-C', repoRoot, 'remote', 'get-url', remote], {
       stdio: 'pipe',
       encoding: 'utf-8',
     }).trim();
