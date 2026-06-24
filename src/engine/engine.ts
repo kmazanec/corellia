@@ -1939,6 +1939,20 @@ export class Engine {
     const hardToolCallCap = Math.max(budget.toolCalls, 1) * WARN_ONLY_BACKSTOP_MULTIPLE;
     let toolCallsMade = 0;
     let stepIndex = 0;
+    // Comprehend over-explore backstop (AC-4 run #5). The "read at most 6–8 files
+    // then EMIT" economy rule lives only in comprehend.md prose; a model that
+    // ignores it read-loops until it exhausts attempts and emits NOTHING — observed
+    // on a 4-file / 49-LOC region (`src/cats/agents/common`) that ran 49 read-class
+    // calls without ever signalling exploration-complete. Make the rule structural,
+    // scoped to the comprehend (discovery) family only: once read-class tool-calls
+    // cross a hard ceiling, FORCE the two-phase emit on the next step instead of
+    // looping to attempt-exhaustion. deliver/implement leaves are untouched (they
+    // legitimately make many write_file/run_script/re-read calls). The ceiling is a
+    // correctness backstop, not an economy lever — set it well above the 6–8 the
+    // skill asks for so a genuinely thorough dive is never cut short.
+    const COMPREHEND_READ_CEILING = 16;
+    let comprehendReadCalls = 0;
+    let forceEmitNext = false;
     // Accumulate total token usage across all steps for tokens-budget debit.
     let totalTokensUsed = 0;
     // Per-attempt duplicate-call guard (F-64 / ADR-017): tracks (name, stable-args)
@@ -2085,12 +2099,55 @@ export class Engine {
         transcript.push({ role: 'context', content: remainingMsg });
       }
 
+      // Comprehend over-explore backstop: the read ceiling was crossed. Append a
+      // hard "stop reading, emit now" instruction so this step produces the
+      // exploration-complete artifact instead of another read. The two-phase emit
+      // path below (stepOutput.kind === 'artifact') then turns it into the final
+      // structured artifact. If the model still returns tool-calls, they are NOT
+      // routed (the post-step guard returns kind:'failed'), so the attempt fails
+      // fast into the control loop with a real verdict rather than read-looping to
+      // attempt-exhaustion having emitted nothing.
+      if (forceEmitNext) {
+        transcript.push({
+          role: 'context',
+          content:
+            'You have read enough of this region — stop reading. Emit the artifact NOW as ' +
+            'your message content with no tool calls. Do not call any more read tools; ' +
+            'over-reading a bounded region is a failure, not thoroughness.',
+        });
+      }
+
       let stepOutput: import('../contract/brain.js').StepOutput;
       try {
         stepOutput = await this.brain.step(goal, transcript, tools, ctx);
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
         return { kind: 'failed', error, budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
+      }
+
+      // After a forced-emit step that STILL returned tool-calls, do not route them:
+      // the model is ignoring the ceiling. Fail the attempt fast with a useful
+      // signal so the control loop can re-decide, rather than burning more budget.
+      if (forceEmitNext && stepOutput.kind !== 'artifact') {
+        await this.store.append({
+          type: 'step',
+          at: t(),
+          goalId: goal.id,
+          index: stepIndex,
+          outputKind: stepOutput.kind,
+          usage: stepOutput.usage,
+        });
+        this.debitTreeState(treeState, stepOutput.usage);
+        totalTokensUsed += stepOutput.usage.promptTokens + stepOutput.usage.completionTokens;
+        stepIndex++;
+        return {
+          kind: 'failed',
+          error:
+            `comprehend over-explore: kept calling read tools after ${comprehendReadCalls} ` +
+            `read-class calls (ceiling ${COMPREHEND_READ_CEILING}) without emitting an artifact`,
+          budget: { ...budget, toolCalls: remainingToolCalls },
+          transcript,
+        };
       }
 
       // Emit step event and debit usage
@@ -2295,6 +2352,16 @@ export class Engine {
         const result = await this.effectiveBroker!.execute(goal, call);
         remainingToolCalls--;
         toolCallsMade++;
+        // Comprehend over-explore backstop: count successful read-class calls for
+        // the discovery family only. Refused calls (above) `continue` before here,
+        // so they don't count. Once the ceiling is crossed, the next loop iteration
+        // forces the emit (see the top of the while loop).
+        if (typeDef.family === 'comprehend' && READ_ONLY_TOOL_NAMES.has(call.name)) {
+          comprehendReadCalls++;
+          if (comprehendReadCalls >= COMPREHEND_READ_CEILING) {
+            forceEmitNext = true;
+          }
+        }
 
         // Log the tool-call event
         await this.store.append({

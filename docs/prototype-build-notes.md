@@ -1963,3 +1963,64 @@ those 2 commits into the PR diff. The principled factory fix is to cut the tree
 branch from (or diff the PR against) the PUSH REMOTE's base tip, not whatever the
 local checkout is ahead by; recorded as a follow-up. For the immediate re-run, the
 mirror is synced so local main == github main and the branch point is clean.
+
+## AC-4 run #5 — Bugs A/B did NOT recur; blocked one layer earlier on comprehend over-explore (a deep-dive of a 4-FILE region exhausts attempts without ever emitting). New single blocker.
+
+$1.01, 73.9% cache, 1436 tests green at launch. Pre-run prep done: cats GitHub
+mirror synced (pushed the 2 local infra commits so local main == github main ==
+`9ed64ff`, removing Bug C's environmental divergence), spurious PR #1 resolved
+(it auto-marked MERGED when the sync made its branch tip an ancestor of main — it
+carries no feature code; mirror has no `format_usd`, open-PR list empty).
+
+**The run-#4 fixes held.** No spurious PR, no `.venv` scope leak, no
+commit-before-push failure — the run never reached push/PR because comprehension
+blocked first. So Bugs A and B are not refuted; they simply weren't exercised.
+
+**New, single blocker — comprehend over-explore on a TINY region.** The deliver
+root split cleanly (`judge-split` PASS → `split (2 children)`: dive
+`src/cats/agents/common`, dive `tests/unit`, then implement + open-pr). The
+scoped-brownfield carve-out (run #3 fix) worked: it pulled ONLY the 2 region
+dives, no whole-repo architecture/conventions map. The `tests/unit` dive emitted
+fine (✓). But the `src/cats/agents/common` dive — a region of **4 files / 49
+LOC** (`__init__.py`, `cost.py`, 2 `.pyc`) — `decided: satisfy` correctly, then
+ran **49 tool-calls across 6+ steps** (head_sha, list_dir, read_file ×N,
+find_symbol ×N, search, read_file …) in a read-loop, **never emitted a knowledge
+artifact, never reached a verdict**, and exhausted its `attempts` budget →
+BLOCKED. With the dependency dead, `implement` was skipped, `format_usd` was
+never written, and `judge-integration` FAILed ("No format_usd helper… present").
+
+This is the **comprehend over-explore / never-emit** failure — the same class
+STATUS.md flagged ("comprehend.md hardened with a 6–8 read ceiling then emit")
+but it is clearly still not firing reliably: a 49-LOC directory cannot need 49
+tool-calls, and the sibling `tests/unit` dive emitted on the first pass, so the
+behavior is non-deterministic per region. Root cause is NOT region size (run #3's
+problem) and NOT the coverage gate (run #3's carve-out is working) — it is the
+comprehend leaf's step loop not converging to an emit on a small region.
+
+Candidate fixes (to investigate before patching):
+1. **Hard emit-forcing ceiling in the engine, not just the skill prose.** The
+   6–8 read ceiling lives in `comprehend.md` (advisory); the leaf ignored it for
+   49 calls. A structural cap — after N read-class tool-calls with no emit, the
+   step loop forces the emit/synthesize step (or fails fast with a useful signal)
+   — would make this deterministic regardless of what the model decides. Touch
+   points: the comprehend step loop in `src/engine/engine.ts`, the family harness
+   in `src/library/types/comprehend.ts` / `comprehend.md`.
+2. **Tie the read ceiling to region size.** A 4-file region should get a tiny
+   read budget; the ceiling could scale to `min(files, cap)` so a small region
+   is forced to emit almost immediately.
+
+**Store-pollution note (not a product bug, but it muddies reports):** the run's
+report listed ~30 blockers, but only the last 4 (`improve-live-foreign-e77649c8`)
+are from THIS run; the rest (`improve-live-self-*`, `format-duration`,
+`ADR-029…`) are from PRIOR runs persisted in the shared store (`buildStore()`
+honors `CORELLIA_EVENTS_PATH`/`DATABASE_URL`, and `out/events.jsonl` is appended
+across runs). The blocker list and the trace tree both mix runs. For a clean
+single-run signal, point the harness at a fresh events path per run (or filter
+the report to the current `intentId`). The trace above was read by `--goal`
+filtering to this run's region ids.
+
+Hygiene: worktree PRESERVED on failure
+(`.corellia/worktrees/live-foreign-e77649c8-5641f798`), cats primary clean, no PR.
+Orphaned foreign-eyes/live-foreign worktrees continue to accumulate under cats'
+`.corellia/worktrees` — unrelated debt to sweep. Next: fix the comprehend
+over-explore (candidate 1 — a structural emit-forcing cap) and re-run #6.

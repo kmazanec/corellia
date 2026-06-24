@@ -1484,6 +1484,139 @@ describe('two-phase emit: type without outputSchema regression', () => {
   }, 10_000);
 });
 
+// AC-4 run #5: a comprehend-family leaf that read-loops (never volunteers the
+// exploration-complete artifact) must be FORCED to emit at the read ceiling, not
+// run to attempt-exhaustion having produced nothing. Observed live on a 4-file
+// region. Scoped to the comprehend family; deliver/implement leaves are untouched.
+
+const COMPREHEND_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: { result: { type: 'string' } },
+  required: ['result'],
+};
+
+function comprehendType() {
+  return leafTypeDef({
+    name: 'deep-dive-region',
+    family: 'comprehend',
+    grants: ['fs.read'],
+    outputSchema: COMPREHEND_SCHEMA,
+  });
+}
+
+describe('comprehend over-explore backstop', () => {
+  it('forces the emit at the read ceiling instead of read-looping to exhaustion', async () => {
+    const store = new MemoryEventStore();
+    const finalArtifact = textArtifact('{"result":"forced emit"}');
+
+    // The brain ALWAYS asks to read a NEW file (unique path → never duplicate-guarded),
+    // EXCEPT when the transcript carries the forced "stop reading, emit now" nudge —
+    // then it returns the artifact. A brain that never saw the nudge would loop forever.
+    let readsRequested = 0;
+    const brain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair() { throw new Error('not used'); },
+      async step(_goal, transcript) {
+        const sawStopReading = transcript.some(
+          (m) => m.role === 'context' && typeof m.content === 'string' && m.content.includes('stop reading'),
+        );
+        if (sawStopReading) {
+          return { kind: 'artifact', artifact: finalArtifact, usage: ZERO_USAGE };
+        }
+        readsRequested++;
+        return {
+          kind: 'tool-calls',
+          calls: [{ id: `r${readsRequested}`, name: 'read_file', args: { path: `src/f${readsRequested}.ts` } }],
+          usage: ZERO_USAGE,
+        };
+      },
+    };
+
+    const registry = buildRegistry([comprehendType()]);
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      // Every read returns distinct content so the duplicate guard never fires.
+      broker: new FakeBroker([{ callId: 'x', ok: true, output: 'file body' }]),
+    });
+
+    const goal = makeGoal({
+      type: 'deep-dive-region',
+      title: 'Deep-dive region src/small',
+      // Generous attempts/toolCalls so the run would NOT stop on budget — only the
+      // read-ceiling backstop can end this read-loop.
+      budget: { attempts: 50, tokens: 10_000_000, toolCalls: 500, wallClockMs: 600_000 },
+    });
+
+    const report = await engine.run(goal);
+
+    // The backstop forced the emit: the goal produced the artifact, not a blocker.
+    expect(report.blockers).toHaveLength(0);
+    expect(report.artifact).toEqual(finalArtifact);
+
+    // It stopped at the ceiling, not after hundreds of reads. The ceiling is 16;
+    // allow a small margin (a multi-call step could overshoot by a few) but it must
+    // be nowhere near the 500-toolCall / 50-attempt budget.
+    expect(readsRequested).toBeGreaterThanOrEqual(16);
+    expect(readsRequested).toBeLessThanOrEqual(20);
+  }, 10_000);
+
+  it('does NOT force emit for a non-comprehend (deliver/implement) leaf', async () => {
+    const store = new MemoryEventStore();
+    const finalArtifact = textArtifact('done');
+
+    // An implement-family leaf reads 25 distinct files then volunteers the artifact.
+    // The comprehend backstop must NOT fire — implement leaves legitimately make
+    // many tool-calls. So all 25 reads happen and the brain emits on its own.
+    let readsRequested = 0;
+    const TARGET_READS = 25;
+    const brain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair() { throw new Error('not used'); },
+      async step() {
+        if (readsRequested >= TARGET_READS) {
+          return { kind: 'artifact', artifact: finalArtifact, usage: ZERO_USAGE };
+        }
+        readsRequested++;
+        return {
+          kind: 'tool-calls',
+          calls: [{ id: `r${readsRequested}`, name: 'read_file', args: { path: `src/f${readsRequested}.ts` } }],
+          usage: ZERO_USAGE,
+        };
+      },
+    };
+
+    const registry = buildRegistry([
+      leafTypeDef({ name: 'implement', family: 'test', grants: ['fs.read'] }),
+    ]);
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      broker: new FakeBroker([{ callId: 'x', ok: true, output: 'file body' }]),
+    });
+
+    const goal = makeGoal({
+      type: 'implement',
+      title: 'implement many reads',
+      budget: { attempts: 50, tokens: 10_000_000, toolCalls: 500, wallClockMs: 600_000 },
+    });
+
+    const report = await engine.run(goal);
+    expect(report.blockers).toHaveLength(0);
+    expect(report.artifact).toEqual(finalArtifact);
+    // All reads happened — the comprehend ceiling did not cut it off at 16.
+    expect(readsRequested).toBe(TARGET_READS);
+  }, 10_000);
+});
+
 // ── Carried exploration ─────────────────────────────────────────────────────
 // When a step-loop attempt fails and the control loop retries, the next
 // attempt's harness context must contain a compact digest of the prior loop's
