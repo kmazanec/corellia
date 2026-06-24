@@ -100,6 +100,26 @@ function getRemoteUrl(repoRoot: string, remote = 'origin'): string | null {
 }
 
 /**
+ * Stage and commit the worktree's current work onto the branch HEAD, if there is
+ * any uncommitted change. The tree's build leaves write to the SHARED worktree
+ * working tree but do not commit — the post-run collectTree commits, but that
+ * runs AFTER the open-pr leaf. So push_branch must commit the work itself, or it
+ * would push a branch HEAD that does not yet contain the feature (AC-4 cats run
+ * #4: the PR carried no feature). `git add --all` respects .git/info/exclude, so
+ * the lifecycle's node_modules/.venv symlinks (excluded at worktree creation) are
+ * never staged. Returns the number of commits made (0 or 1).
+ */
+function commitWorktreeWork(repoRoot: string): number {
+  execFileSync('git', ['-C', repoRoot, 'add', '--all'], { stdio: 'pipe' });
+  const status = execFileSync('git', ['-C', repoRoot, 'status', '--porcelain'], {
+    stdio: 'pipe', encoding: 'utf-8',
+  }).trim();
+  if (status.length === 0) return 0;
+  execFileSync('git', ['-C', repoRoot, 'commit', '-m', 'feat: deliver tree work'], { stdio: 'pipe' });
+  return 1;
+}
+
+/**
  * Get the diff between the local branch HEAD and the remote branch, or the
  * full diff from the initial commit if the remote branch does not exist yet.
  * Used by the process-clean gate before pushing.
@@ -271,6 +291,18 @@ export function pushBranchTool(deps: PushBranchDeps): ToolImpl {
           ok: false,
           output: `push_branch: no "${remote}" remote is configured for this worktree's repo.`,
         };
+      }
+
+      // 2b. Commit the tree's uncommitted work onto the branch HEAD BEFORE the
+      //     clean gate + push. The build leaves wrote to the shared worktree but
+      //     did not commit (collectTree runs only after the whole tree, i.e. after
+      //     this open-pr leaf). Without this the branch HEAD has no feature commit
+      //     and the PR carries nothing (AC-4 cats run #4).
+      try {
+        commitWorktreeWork(worktreeRoot);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { ok: false, output: `push_branch: failed to commit worktree work: ${msg}` };
       }
 
       // 3. Process-clean gate (AC-20, ADR-025). Run over the diff before any

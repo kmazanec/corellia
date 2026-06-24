@@ -1882,3 +1882,84 @@ this comprehension-scope policy.
 Hygiene each run: worktree PRESERVED on failure, cats primary clean, no PR. Orphaned
 worktrees from prior foreign-eyes sessions are accumulating under cats'
 `.corellia/worktrees` and `.claude/worktrees` — unrelated debt to sweep separately.
+
+### Fixes for run #3 (coverage carve-out + map-repo recursion)
+
+ADR-029 Decision 2 amended (see the ADR): a code-emitting leaf with non-empty scope
+pulls region dives of its touched regions ONLY, no whole-repo architecture/conventions
+map; scope-less leaves still pull whole-repo maps; characterize unchanged. Implemented
+as `isScopedCodeLeaf` in `coverage.ts`. Companion: `comprehend.md` sharpened so a
+whole-repo `map-repo` over a many-subsystem repo splits up front. 1434 green.
+
+## AC-4 run #4 — tree went green + a PR opened, BUT the PR is SPURIOUS. AC-4 NOT yet proven. 3 ordering/correctness bugs.
+
+The carve-out worked: the implement leaf pulled ONLY the 2 region dives (no whole-repo
+maps), comprehension was fast, the helper was written and `make:test-unit` passed
+green. The tree printed all-green and `open-pr` reported a PR:
+**https://github.com/kmazanec/cats/pull/1** — and for a moment this looked like AC-4
+proven. **It is not.** Inspecting the PR:
+- The PR diff contains TWO unrelated files (`docker-compose.yml`,
+  `docker-compose.prod.yml`) — NOT `format_usd`. The helper is **not on the branch**.
+- The factory's work is real but **UNCOMMITTED**: `format_usd.py`,
+  `test_format_usd.py`, and the `__init__.py` edit sit in the worktree as `??`/`M`,
+  never committed, never pushed.
+
+Three distinct bugs, traced from the event log + the live worktree:
+
+**BUG A (critical — ordering).** `open-pr` is a tree leaf that runs INSIDE `_run`,
+so it pushes the branch and opens the PR BEFORE the engine's root-emission step
+commits the work. `collectTree` (which commits the worktree diff) only runs in the
+post-`_run` `finally`, and ONLY on success. So at the moment `open_pr` pushed, the
+feature was not committed — the branch carried only whatever was already committed at
+branch-cut. The PR is opened against work that does not exist yet. `open-pr` must run
+only AFTER the work is committed (collect must precede push/PR, not follow it).
+
+**BUG B (the `.venv` scope leak — what actually blocked this run).** The root-emission
+`diffWithinScope` saw the `.venv` SYMLINK I added in run #1 as a changed path outside
+declared scope → downgraded the would-be success to
+`Scope insufficiency: ... .venv` → `preserveTree` (no commit) instead of
+`collectTree`. So even the happy path could not commit. The worktree must EXCLUDE
+`.venv`/`node_modules` from git (like it already excludes `.corellia/worktrees` via
+`.git/info/exclude`) so the dependency symlinks never enter the tree diff.
+
+**BUG C (base divergence — why the PR shows compose files).** The tree branch was cut
+from cats' LOCAL HEAD (`9ed64ff`), which is 2 infra commits AHEAD of the GitHub mirror's
+`main` (local-only `fix(infra): ...compose...` commits). `open_pr`'s diff is branch vs
+github `main`, so it shows those 2 pre-existing commits. The branch should be cut from
+(or the PR diffed against) the REMOTE PR-base tip, not whatever the local checkout
+happens to be ahead by. (Lower priority than A/B but it pollutes any foreign PR whose
+local checkout is ahead of its push remote.)
+
+Also: `branch-pushed` fired ~16× (open-pr retried the push repeatedly) — a symptom of
+A, worth a look once A is fixed.
+
+Honest status: the AC-4 PIPELINE runs end-to-end (scoped comprehension, write,
+green verify, push, PR-open all fire) but the DELIVERABLE is wrong — the PR neither
+contains the feature nor excludes unrelated work. Fix B (unblocks commit), then A
+(commit-before-PR ordering), then C (remote-base branch), and re-run. The spurious
+cats PR #1 must be closed.
+
+### Fixes for run #4 bugs A + B (open-pr commits the work; .venv excluded)
+
+- **Bug B (worktree.ts):** `.venv` joins `node_modules` in two places — the
+  `.git/info/exclude` written at worktree creation (so `collectTree`'s
+  `git add --all` never stages the symlink) AND the `diffWithinScope` drop-filter
+  (so the scope check never flags it). `ensureGitignored` now writes a list
+  (`EXCLUDE_PATTERNS`). Tests: a non-gitignored `.venv` symlink no longer trips
+  the scope diff.
+- **Bug A (pr-tools.ts):** `push_branch` now commits the worktree's uncommitted
+  work onto the branch HEAD (`commitWorktreeWork`: `git add --all` respecting the
+  exclude, then commit if dirty) BEFORE the process-clean gate + push. So the
+  branch — and the PR — carry the feature even though `collectTree` runs only
+  after the open-pr leaf. `collectTree`'s later commit is a no-op (nothing staged).
+  Test: an uncommitted worktree file is committed + appears on the pushed branch.
+
+1436 green, lint clean.
+
+**Bug C (remote-base divergence) — still open, environmental this run.** cats' LOCAL
+main was 2 infra commits ahead of the GitHub MIRROR's main (pushed to the GitLab
+origin, never to the mirror), so the tree branch — cut from local HEAD — carried
+those 2 commits into the PR diff. The principled factory fix is to cut the tree
+branch from (or diff the PR against) the PUSH REMOTE's base tip, not whatever the
+local checkout is ahead by; recorded as a follow-up. For the immediate re-run, the
+mirror is synced so local main == github main and the branch point is clean.

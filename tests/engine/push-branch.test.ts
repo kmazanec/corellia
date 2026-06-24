@@ -440,6 +440,53 @@ describe('push_branch — real git push against local bare repo', () => {
 // Configurable push remote (AC-4: cats' origin is GitLab; push to `github` mirror)
 // ---------------------------------------------------------------------------
 
+describe('push_branch — commits uncommitted worktree work before pushing', () => {
+  it('an UNCOMMITTED file in the worktree is committed + pushed (AC-4 run #4)', async () => {
+    // The tree's build leaves write to the shared worktree but do not commit
+    // (collectTree runs after the open-pr leaf). push_branch must commit the work
+    // itself, or the branch HEAD — and the PR — carries no feature.
+    withToken('ghp_LOCAL_FAKE_COMMIT');
+
+    const repo = makeTempRepo('push-commit');
+    const bare = makeBareRepo(repo);
+    execFileSync('git', ['-C', repo, 'remote', 'add', 'origin', bare], { stdio: 'pipe' });
+
+    const worktreeDir = mkdtempSync(join(tmpdir(), 'corellia-push-wt-commit-'));
+    cleanups.push(() => rmSync(worktreeDir, { recursive: true, force: true }));
+    const branch = 'tree/push-commit-abc12345';
+
+    // Create the branch worktree with one committed file, then add a SECOND file
+    // that is left UNCOMMITTED (the simulated leaf work).
+    makeWorktreeWithBranch(repo, branch, worktreeDir, 'committed.ts', 'export const a = 1;\n');
+    writeFileSync(join(worktreeDir, 'feature.ts'), 'export const feature = 42;\n');
+    // feature.ts is uncommitted (untracked) at this point.
+
+    const store = new InMemoryEventStore();
+    const tool = pushBranchTool({ worktreeRoot: worktreeDir, branch, treeId: 'push-commit-abc12345', store });
+
+    const goal = {
+      id: 'g-commit', type: 'improve-factory', parentId: null as null, title: 't', spec: {},
+      intent: 'production' as const, scope: [],
+      budget: { attempts: 3, tokens: 1000, toolCalls: 10, wallClockMs: 60000 }, memories: [],
+    };
+
+    const result = await tool.execute(goal, {});
+    expect(result.ok).toBe(true);
+
+    // The worktree is now clean (work was committed, not left dangling).
+    const status = execFileSync('git', ['-C', worktreeDir, 'status', '--porcelain'], {
+      stdio: 'pipe', encoding: 'utf-8',
+    }).trim();
+    expect(status).toBe('');
+
+    // The uncommitted feature file is now ON the pushed branch in the bare repo.
+    const onBranch = execFileSync(
+      'git', ['-C', bare, 'ls-tree', '--name-only', branch], { stdio: 'pipe', encoding: 'utf-8' },
+    ).trim();
+    expect(onBranch).toContain('feature.ts');
+  });
+});
+
 describe('push_branch — configurable remote (non-origin)', () => {
   it('pushes to the named remote, not origin', async () => {
     withToken('ghp_LOCAL_FAKE_REMOTE');

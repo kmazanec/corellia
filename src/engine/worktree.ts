@@ -63,6 +63,13 @@ export interface TreeWorktree {
 
 const WORKTREES_PATTERN = '.corellia/worktrees/';
 
+// Patterns excluded from git in every worktree (via .git/info/exclude). Beyond
+// the worktrees dir itself, the dependency dirs the lifecycle symlinks in
+// (node_modules, .venv) must be excluded so they are neither staged by
+// collectTree's `git add --all` nor flagged by the scope diff — they are shared
+// infrastructure, never part of a tree's deliverable.
+const EXCLUDE_PATTERNS = [WORKTREES_PATTERN, 'node_modules/', '.venv/'];
+
 /**
  * Resolve the real .git directory for a repo root, following the `gitdir:`
  * indirection a linked worktree's .git FILE carries. Consumers that read or
@@ -103,16 +110,16 @@ function ensureGitignored(repoRoot: string): void {
     existing = readFileSync(excludeFile, 'utf-8');
   }
 
-  // Check if the pattern is already present (any form: with or without trailing slash).
-  const alreadyPresent =
-    existing.split('\n').some((line) => {
-      const t = line.trim();
-      return t === WORKTREES_PATTERN || t === WORKTREES_PATTERN.replace(/\/$/, '');
-    });
+  const presentLines = new Set(existing.split('\n').map((l) => l.trim()));
+  const isPresent = (pattern: string): boolean =>
+    presentLines.has(pattern) || presentLines.has(pattern.replace(/\/$/, ''));
 
-  if (!alreadyPresent) {
+  // Append any EXCLUDE_PATTERNS not already present (matched with or without a
+  // trailing slash). Idempotent: a second open adds nothing.
+  const toAdd = EXCLUDE_PATTERNS.filter((p) => !isPresent(p));
+  if (toAdd.length > 0) {
     const suffix = existing.length > 0 && !existing.endsWith('\n') ? '\n' : '';
-    writeFileSync(excludeFile, existing + suffix + WORKTREES_PATTERN + '\n', 'utf-8');
+    writeFileSync(excludeFile, existing + suffix + toAdd.join('\n') + '\n', 'utf-8');
   }
 }
 
@@ -210,14 +217,19 @@ export function diffWithinScope(
     { stdio: 'pipe', encoding: 'utf-8' },
   ).trim();
 
-  // Collect all changed paths (de-duplicate). The dependency link the
-  // lifecycle itself creates is infrastructure, not work — a symlink named
-  // node_modules evades a \`node_modules/\` gitignore rule (a link is not a
-  // directory), so it is dropped here explicitly.
+  // Collect all changed paths (de-duplicate). The dependency links the
+  // lifecycle itself creates are infrastructure, not work — a symlink named
+  // node_modules or .venv evades a `node_modules/`/`.venv/` gitignore rule (a
+  // link is not a directory), so they are dropped here explicitly. (AC-4 cats
+  // run #4: the .venv symlink surfaced as an out-of-scope change and downgraded
+  // a green deliver to a spurious scope-insufficiency block.)
+  const DEP_LINKS = ['node_modules', '.venv'];
+  const isDepLink = (p: string): boolean =>
+    DEP_LINKS.some((d) => p === d || p.startsWith(`${d}/`));
   const all = new Set<string>();
   for (const line of [...diffOutput.split('\n'), ...untrackedOutput.split('\n')]) {
     const p = line.trim();
-    if (p.length > 0 && p !== 'node_modules' && !p.startsWith('node_modules/')) all.add(p);
+    if (p.length > 0 && !isDepLink(p)) all.add(p);
   }
 
   if (all.size === 0) {

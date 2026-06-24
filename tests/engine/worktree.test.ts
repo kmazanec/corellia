@@ -173,6 +173,22 @@ describe('ignored files and the diff scope check', () => {
     const res = diffWithinScope(wt.root, ['src/']);
     expect(res.ok).toBe(true);
   });
+
+  it('the .venv dependency symlink never trips diffWithinScope (AC-4 run #4)', async () => {
+    // The repo does NOT gitignore .venv; the worktree-creation exclude + the
+    // diff-filter must both keep the symlinked .venv out of the scope diff, or a
+    // green deliver downgrades to a spurious scope-insufficiency block.
+    const repo = makeTempRepo();
+    mkdirSync(join(repo, '.venv', 'bin'), { recursive: true });
+    writeFileSync(join(repo, '.venv', 'bin', 'pytest'), '#!/bin/sh\n');
+    const store = new InMemoryEventStore();
+    const wt = await openTreeWorktree(repo, 'venv-scope-goal', store);
+    // Write an in-scope change so the diff is non-empty but valid.
+    mkdirSync(join(wt.root, 'src'), { recursive: true });
+    writeFileSync(join(wt.root, 'src', 'feature.txt'), 'work\n');
+    const res = diffWithinScope(wt.root, ['src/']);
+    expect(res.ok).toBe(true);
+  });
 });
 
 describe('dependency link', () => {
