@@ -1831,3 +1831,54 @@ none). `localId`/`type` remain required (a child missing those is still rejected
 the seam — that test still holds). The engine already renormalizes shares to sum ≤ 1
 downstream, so any positive number is safe. Tests: omitted-share filled from the
 mean; all-omitted → even split. 1430 green, lint clean. Re-run.
+
+## AC-4 run #3 — budgetShare fix worked; now blocked on the REAL iteration-09 gap: the gate demands a whole-repo map for a tiny brownfield add. (DECISION NEEDED)
+
+$0.40, 77.8% cache. The decide root now split cleanly into `implement` (0.75) +
+`open-pr` (0.25) — the budgetShare fix is proven. But the implement child's coverage
+gate then minted comprehension that could not finish:
+```
+gate-checked missing: [architecture, conventions,
+  architecture:src/cats/agents/common, architecture:tests/unit, ...]
+→ map-repo: architecture   ✗ EXHAUSTED wallClockMs (70 tool-calls, mid→high escalate)
+  map-repo: conventions    ✗ (50 calls)
+  deep-dive-region: src/cats/agents/common  ✓
+  deep-dive-region: tests/unit              ✗
+Isomorphic failure (signature: step-loop:failed) ×2 → block
+"format_usd helper not present in artifact" (never implemented)
+```
+
+**Root cause — the unsolved core of iteration-09 (ADR-029 Dec 2), now exposed on a
+big repo.** The coverage gate (`src/library/coverage.ts`) requires a code-emitting
+leaf to have `architecture + conventions` (WHOLE-REPO maps) PLUS region dives. The
+ADR-029 Dec-2 refinement only SKIPS the whole-repo maps when the scope is entirely
+NEW (greenfield: every `existsByRegion` false). cats' scope
+(`src/cats/agents/common/`, `tests/unit/`) is two EXISTING dirs — a brownfield add —
+so the carve-out does not apply and the gate demands the whole-repo
+`architecture`/`conventions` maps. Mapping cats' 259-file architecture cannot finish
+in its subdivided wall-clock slice (1.8M / 14 ≈ 2.1 min), so `map-repo: architecture`
+times out. (Run #1 happened to mint ONLY region dives — the gate/brain shape is
+non-deterministic; run #3 over-fired with the whole-repo maps.)
+
+Two distinct sub-problems, EITHER of which unblocks AC-4:
+1. **The gate over-demands.** A pure helper added to an existing dir should need a
+   region dive of THAT dir, not a whole-repo architecture/conventions map (DESIGN.md
+   JIT rule: "a region no goal touches is never mapped"). The Dec-2 carve-out should
+   extend from "greenfield only" to "a SCOPED brownfield add whose touched regions
+   are all dived needs no whole-repo map" — i.e. region dives SUFFICE for a
+   tightly-scoped feature; whole-repo maps are for whole-repo / unscoped intents.
+2. **When demanded, the whole-repo map didn't recurse.** `map-repo: architecture`
+   chose `satisfy` (one leaf) over splitting into sub-region maps, so it tried to fit
+   259 files into one budget and timed out. The recursion mechanism exists (iter-08,
+   not leafOnly) but the brain didn't invoke it; the decide prompt / split criterion
+   for a too-large map needs to actually fire on a big repo.
+
+This is the locked coverage policy (ADR-021/ADR-029), so it is a DESIGN decision, not
+a reflexive patch — surfacing to the operator before changing it. The AC-4 HARNESS is
+otherwise proven sound: github-mirror PR path, scoped region dives, `.venv` worktree
+link, DB-free test target, and the decide-split all work; the one remaining blocker is
+this comprehension-scope policy.
+
+Hygiene each run: worktree PRESERVED on failure, cats primary clean, no PR. Orphaned
+worktrees from prior foreign-eyes sessions are accumulating under cats'
+`.corellia/worktrees` and `.claude/worktrees` — unrelated debt to sweep separately.
