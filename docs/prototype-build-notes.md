@@ -2092,3 +2092,48 @@ prompt that proposes the children. Then re-run #7.
 
 Hygiene: worktree PRESERVED on failure
 (`.corellia/worktrees/live-foreign-e1002e6f-*`), cats primary clean, no PR.
+
+### Fixes for run #6 (a + b: scoped-split carve-out + repo-size signal)
+
+- **(a) coverage.ts `isScopedRootSplit`:** a root split with non-empty scope is
+  bounded to its touched regions — region dives only, no whole-repo
+  architecture/stack map; the region-dive check no longer skips root splits. A
+  scope-less root split still pulls whole-repo maps. ADR-029 amended (part 2).
+- **(b) repo-size signal:** new optional `BrainContext.repoShape`; the engine
+  (`repoShapeHint`) computes a cheap top-level-dir/file count for a SCOPE-LESS
+  `map-repo` and injects it into the decide call so the skill's "8+ subsystems →
+  split" rule fires on real data. Tests for both. 1440 green, lint clean.
+  (commit `d689858`)
+
+## AC-4 run #7 — (a) PROVEN: no whole-repo maps, scoped dives only, cost 5× lower. New blocker isolated to the comprehend forced-emit being too brittle (one dive blocked → implement skipped). Refined the backstop.
+
+$0.10 (was $0.54 in #6 — 5× cheaper), 71% cache, fresh log
+(`out/ac4-run7.jsonl`). The (a) carve-out is **proven**: `gate-checked: missing
+[architecture:src/cats/agents/common, architecture:tests/unit]` — ONLY region
+dives, NO whole-repo architecture/stack maps. The root split is clean (2 dives +
+implement + open-pr) and `dive-src-cats-agents-common` ✓ passed. This is exactly
+the DESIGN JIT behavior the iteration wanted.
+
+**New blocker — the forced-emit backstop was too brittle.** `dive-tests-unit`
+made 32 read-class calls (so the read ceiling fired across 2 attempts), but the
+run-#5 implementation only NUDGED the model ("stop reading, emit now") and, when
+the model returned tool-calls anyway, returned `kind:'failed'`. TWO such failures
+tripped the isomorphic-failure detector (`signature: step-loop:failed`) → the dive
+BLOCKED. With that dependency dead, the implement leaf was SKIPPED, and the
+integration judge saw a fallback artifact (`with_cost`, not `format_usd`) → FAIL.
+So the `with_cost` "wrong function" was a symptom of the skipped implement, not a
+real mis-implementation.
+
+**Fix (engine.ts):** the forced emit now DRIVES the emit directly instead of
+nudging-and-hoping. At the ceiling it appends the stop-reading instruction, sets
+`outputSchema` on a one-shot emit call, and uses that call's artifact — guaranteeing
+a bounded dive converges to an artifact from what it has already read. Only if the
+model ignores even the forced emit does the attempt fail (once, with carried
+transcript so the retry starts already-read), so a single transient miss no longer
+cascades into an isomorphic block. The flag is consumed per attempt (no force loop).
+Test updated (the forced-emit path now sets the schema). 1440 green, lint clean.
+
+Hygiene: worktree PRESERVED on failure
+(`.corellia/worktrees/live-foreign-34add5c5-*`), cats primary clean, no PR.
+Next: re-run #8 — the dive should now converge, implement should run, and the
+pipeline should reach the PR.

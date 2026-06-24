@@ -2102,22 +2102,75 @@ export class Engine {
         transcript.push({ role: 'context', content: remainingMsg });
       }
 
-      // Comprehend over-explore backstop: the read ceiling was crossed. Append a
-      // hard "stop reading, emit now" instruction so this step produces the
-      // exploration-complete artifact instead of another read. The two-phase emit
-      // path below (stepOutput.kind === 'artifact') then turns it into the final
-      // structured artifact. If the model still returns tool-calls, they are NOT
-      // routed (the post-step guard returns kind:'failed'), so the attempt fails
-      // fast into the control loop with a real verdict rather than read-looping to
-      // attempt-exhaustion having emitted nothing.
+      // Comprehend over-explore backstop: the read ceiling was crossed. Instead of
+      // nudging the model and HOPING it volunteers the artifact (it may keep
+      // reading, and two such failures trip the isomorphic-failure detector into a
+      // block — AC-4 run #7), DIRECTLY drive the emit from what has already been
+      // read. For an outputSchema type this is the two-phase emit's emit call,
+      // forced now: append the emit instruction and set the schema so the brain
+      // MUST return the structured artifact. For a no-schema type the same
+      // instruction is appended and the brain returns the artifact as content. The
+      // forced flag is consumed (a single forced emit per attempt) so we never loop
+      // on it. This GUARANTEES the dive of a bounded region converges to an
+      // artifact rather than read-looping to exhaustion.
+      const typeDefForForce = this.registry.get(goal.type);
       if (forceEmitNext) {
+        forceEmitNext = false; // consume — one forced emit per attempt
         transcript.push({
           role: 'context',
           content:
-            'You have read enough of this region — stop reading. Emit the artifact NOW as ' +
-            'your message content with no tool calls. Do not call any more read tools; ' +
-            'over-reading a bounded region is a failure, not thoroughness.',
+            `You have read enough of this region (${comprehendReadCalls} read-class ` +
+            `calls). STOP reading. Emit the artifact NOW from what you have already ` +
+            `read — over-reading a bounded region is a failure, not thoroughness. ` +
+            (typeDefForForce.outputSchema !== undefined
+              ? 'Respond with ONLY the JSON object matching the required schema, no tool calls.'
+              : 'Respond with ONLY the artifact as your message content, no tool calls.'),
         });
+        const forceCtx: BrainContext =
+          typeDefForForce.outputSchema !== undefined
+            ? { ...ctx, outputSchema: typeDefForForce.outputSchema }
+            : ctx;
+        let forcedOutput: import('../contract/brain.js').StepOutput;
+        try {
+          forcedOutput = await this.brain.step(goal, transcript, tools, forceCtx);
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          return { kind: 'failed', error, budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
+        }
+        await this.store.append({
+          type: 'step',
+          at: t(),
+          goalId: goal.id,
+          index: stepIndex,
+          outputKind: forcedOutput.kind,
+          usage: forcedOutput.usage,
+        });
+        this.debitTreeState(treeState, forcedOutput.usage);
+        totalTokensUsed += forcedOutput.usage.promptTokens + forcedOutput.usage.completionTokens;
+        stepIndex++;
+        if (await this.checkCeiling(goal, treeState)) {
+          return { kind: 'ceiling', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
+        }
+        if (forcedOutput.kind === 'artifact') {
+          return {
+            kind: 'artifact',
+            artifact: forcedOutput.artifact,
+            budget: { ...budget, toolCalls: remainingToolCalls },
+            transcript,
+            tokensUsed: totalTokensUsed,
+          };
+        }
+        // The model ignored the forced emit and returned tool-calls anyway. Fail
+        // the attempt with a useful signal; the control loop re-decides (and the
+        // carried transcript means the next attempt starts already-read).
+        return {
+          kind: 'failed',
+          error:
+            `comprehend over-explore: ignored the forced emit after ${comprehendReadCalls} ` +
+            `read-class calls (ceiling ${COMPREHEND_READ_CEILING})`,
+          budget: { ...budget, toolCalls: remainingToolCalls },
+          transcript,
+        };
       }
 
       let stepOutput: import('../contract/brain.js').StepOutput;
@@ -2126,31 +2179,6 @@ export class Engine {
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
         return { kind: 'failed', error, budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
-      }
-
-      // After a forced-emit step that STILL returned tool-calls, do not route them:
-      // the model is ignoring the ceiling. Fail the attempt fast with a useful
-      // signal so the control loop can re-decide, rather than burning more budget.
-      if (forceEmitNext && stepOutput.kind !== 'artifact') {
-        await this.store.append({
-          type: 'step',
-          at: t(),
-          goalId: goal.id,
-          index: stepIndex,
-          outputKind: stepOutput.kind,
-          usage: stepOutput.usage,
-        });
-        this.debitTreeState(treeState, stepOutput.usage);
-        totalTokensUsed += stepOutput.usage.promptTokens + stepOutput.usage.completionTokens;
-        stepIndex++;
-        return {
-          kind: 'failed',
-          error:
-            `comprehend over-explore: kept calling read tools after ${comprehendReadCalls} ` +
-            `read-class calls (ceiling ${COMPREHEND_READ_CEILING}) without emitting an artifact`,
-          budget: { ...budget, toolCalls: remainingToolCalls },
-          transcript,
-        };
       }
 
       // Emit step event and debit usage

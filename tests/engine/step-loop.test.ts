@@ -1520,7 +1520,7 @@ describe('comprehend over-explore backstop', () => {
       async repair() { throw new Error('not used'); },
       async step(_goal, transcript) {
         const sawStopReading = transcript.some(
-          (m) => m.role === 'context' && typeof m.content === 'string' && m.content.includes('stop reading'),
+          (m) => m.role === 'context' && typeof m.content === 'string' && m.content.toLowerCase().includes('stop reading'),
         );
         if (sawStopReading) {
           return { kind: 'artifact', artifact: finalArtifact, usage: ZERO_USAGE };
