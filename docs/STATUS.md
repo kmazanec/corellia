@@ -4,11 +4,30 @@
 
 ## Now
 
+**AC-3 PROVEN — the strange loop is closed.** On 2026-06-24 corellia built a
+feature on its OWN repo end-to-end and opened a real pull request, autonomously:
+comprehend → implement test-first → verify green → `open-pr` ship step → **PR
+[#6](https://github.com/kmazanec/corellia/pull/6)**. Zero blockers; worktree
+collected; primary `main` undisturbed. $0.39. This was the named blocker on
+AC-3/AC-4 since iteration 06; **AC-4 (deliver-to-foreign) is now unblocked.**
+
+Getting AC-3 there took 6 live `live:self` runs (~$6 total), each buying one real
+engine/harness fix — soft budgets, transport timeout, decide-skill injection,
+head_sha tool, sandbox-path truth, block-without-effort coercion,
+conventions-pointer, the correct prescribed model (z-ai/glm-5.2 vs a silent
+claude-sonnet-4 fallback), declared verification scripts, path-like fence parsing,
+targeted test execution, and the `open-pr` ship step. Full run-by-run record in
+[prototype-build-notes.md](./prototype-build-notes.md). Next iteration: multi-tree
+PARALLEL build + cherry-pick aggregation (today the engine uses one shared
+worktree per tree).
+
+---
+
 Iteration 09 (Comprehension scoping — ADR-029 Decisions 2+4) **PROVEN LIVE — AC-2
 PASSED.** On 2026-06-23 a scoped intent converged END-TO-END on a real foreign
 repo (cats): all 4 scoped comprehension goals passed (3 artifacts written) and
 the `implement` leaf delivered the change — `AC-2 CHECKPOINT: PASSED`, $0.59.
-This unblocks AC-3/AC-4 (deliver-to-self / deliver-to-foreign).
+This unblocked AC-3/AC-4 (deliver-to-self / deliver-to-foreign).
 
 Getting there took 8 live runs this session, each buying one real fix (full
 run-by-run record in [prototype-build-notes.md](./prototype-build-notes.md)):

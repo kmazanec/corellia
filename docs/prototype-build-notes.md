@@ -1623,3 +1623,33 @@ parallel build + fold-back is the recorded next iteration.)
 Tests: open-pr contract (make/leaf/deliver, repo.branch+repo.pr, no fs.write);
 type count 19→20 across starter-types + skills-wiring. 1418+ green, lint clean.
 Next: re-run live:self — expect the brain to spawn open-pr and actually open a PR.
+
+## AC-3 run #6 — PROVEN. The factory builds AND SHIPS a feature to its own repo. 🎉
+
+Tree all-green, zero blockers, and the ship step fired:
+```
+✓ deliver-intent
+  ✓ map-repo: architecture
+  ✓ map-repo: conventions
+  ✓ implement: format-duration test-first and verify suite
+  ✓ open-pr: Open PR for format-duration utility
+```
+Verified from the event log: push_branch → ran, open_pr → ran, pr-opened →
+**https://github.com/kmazanec/corellia/pull/6** (branch tree/live-self-c88f1b01-…).
+The deliver root spawned the new open-pr leaf, which pushed the collected branch
+and opened ONE real PR, left open for human review. $0.39, 84.7% cache.
+
+Strange-loop hygiene intact: worktree COLLECTED + torn down (success-only),
+primary clean (post-check "NO" = the pre-existing media/video.zip false-positive),
+branch still main. The factory operated on its own repo without disturbing the
+primary checkout.
+
+**AC-3 is PROVEN end-to-end: corellia comprehends its own codebase, builds a
+feature test-first, verifies it green (typecheck/lint/targeted tests), and opens a
+real PR — autonomously.** This was the named blocker on AC-3/AC-4 since iteration
+06; AC-4 (deliver-to-foreign) is now unblocked.
+
+Total AC-3 arc: 6 live runs, ~$6.0, each buying a real fix (soft budgets, transport
+timeout, decide-skill, head_sha, sandbox-path truth, block-coercion,
+conventions-pointer, correct prescribed model, declared scripts, fence parsing,
+targeted tests, and the open-pr ship step). Every fix landed on main with tests.
