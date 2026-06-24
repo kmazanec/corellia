@@ -2024,3 +2024,71 @@ Hygiene: worktree PRESERVED on failure
 Orphaned foreign-eyes/live-foreign worktrees continue to accumulate under cats'
 `.corellia/worktrees` — unrelated debt to sweep. Next: fix the comprehend
 over-explore (candidate 1 — a structural emit-forcing cap) and re-run #6.
+
+### Fix for run #5 (structural comprehend read ceiling)
+
+`runStepLoop` (src/engine/engine.ts) now counts read-class tool-calls for the
+comprehend family ONLY and, once they cross a hard ceiling (16, well above the
+6–8 comprehend.md asks), appends a "stop reading, emit now" instruction so the
+step produces the exploration-complete artifact (two-phase emit then yields the
+final structured artifact). A forced-emit step that still returns tool-calls
+fails the attempt fast with a useful signal instead of read-looping to
+attempt-exhaustion. deliver/implement leaves untouched. Tests: a read-looping
+comprehend leaf is forced to emit at the ceiling; a 25-read implement leaf is
+NOT cut off. 1438 green, lint clean. (commit `3d8b1c3`)
+
+## AC-4 run #6 — read-ceiling fix WORKS (comprehension now emits); exposed the real next layer: the gate mints a whole-repo `architecture` map for a SCOPED feature, and a 16-read map of a 259-file repo emits an artifact that FAILS anchor validation.
+
+$0.54, 54.6% cache, fresh event log (`out/ac4-run6.jsonl`, `CORELLIA_EVENTS_PATH`
+per-run — clean single-run signal, no prior-run blocker bleed). 1438 green at
+launch.
+
+**The fix did its job.** Run #5's pathology (a small dive read-loops to
+attempt-exhaustion emitting NOTHING) is GONE. This run, `Map repo: stack` ✓
+emitted and passed, and `Map repo: architecture` reached `step 7/8: artifact` on
+EVERY attempt — the read ceiling forced the two-phase emit after ~16 reads. So
+comprehension now reliably produces an artifact.
+
+**Two distinct things changed/surfaced:**
+
+1. **The brain split into WHOLE-REPO maps, not scoped region dives (run #3
+   sub-problem #1, still unfixed — and the dominant blocker now).** The deliver
+   root's `decide` chose `split (3 children)` with `map-architecture` +
+   `map-stack` + implement children directly; `gate-checked: missing
+   [architecture, stack]`. The run-#3 `isScopedCodeLeaf` carve-out (region dives
+   only, no whole-repo map) is on the *implement leaf's* coverage gate — but here
+   the ROOT's own split minted the whole-repo maps as siblings before the implement
+   leaf's gate ran, so the carve-out never got a say. This is the non-determinism
+   the run-#3 note called out: the brain's split shape, not just the gate, decides
+   whether whole-repo maps appear. For a tightly-scoped helper, a whole-repo
+   architecture map is exactly the speculative comprehension DESIGN's JIT rule
+   forbids. **This is the real fix needed** (see below).
+
+2. **A 16-read whole-repo map of a 259-file repo emits an INVALID artifact.** The
+   forced emit fires after ~16 reads, but that is too little to map a 259-file
+   architecture faithfully: the emitted artifact's claimed pointers
+   (`src/cats/messaging/envelopes.py`, …) FAILED the deterministic anchor gate
+   (`knowledge:map-repo: No claimed architecture pointer matches any node in the
+   fresh scan`) — the model named plausible files it hadn't actually confirmed.
+   Each attempt: ~7 read steps → forced emit → gate FAIL → re-attempt → attempts
+   exhausted. So the flat ceiling of 16 is right for a bounded region dive but
+   wrong for a `map-repo` over a large repo: a whole-repo map must either (a) NOT
+   be minted for a scoped feature (fix #1), or (b) SPLIT into sub-region maps so
+   each child maps a bounded slice within its own read ceiling (run #3
+   sub-problem #2, the recursion that didn't fire), or (c) scale the read ceiling
+   with map breadth. (a) is the principled fix; (b)/(c) only matter for genuinely
+   whole-repo intents.
+
+**Conclusion — the next fix is #1, not a ceiling tweak.** The comprehend
+emit-forcing is now sound. The remaining AC-4 blocker is that a scoped brownfield
+helper is still pulling whole-repo `architecture`/`stack` maps it does not need.
+The fix must ensure a tightly-scoped deliver intent's split pulls region dives of
+the touched regions only — extending the run-#3 carve-out from the implement
+leaf's gate to the ROOT's split decision (or making the split decide-prompt mint
+region dives, not whole-repo maps, when the intent scope is narrow). Touch points:
+the split/coverage interaction in `src/engine/engine.ts` (~2638 gate, the split
+eval), `src/library/coverage.ts` (`isScopedCodeLeaf`), and the deliver decide
+prompt that proposes the children. Then re-run #7.
+
+Hygiene: worktree PRESERVED on failure
+(`.corellia/worktrees/live-foreign-e1002e6f-*`), cats primary clean, no PR.
