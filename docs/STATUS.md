@@ -2,6 +2,15 @@
 
 **Updated:** 2026-06-24 · **Roadmap:** [ROADMAP.md](./ROADMAP.md)
 
+## Iteration 11 backlog — gaps from building a real deployed product
+
+Driving an external greenfield app (**tiutni**, a deployed tax-filing assistant)
+through the factory surfaced an exhaustive list of corellia's own gaps — visual/
+runtime verification, scope/grant enforcement, partial-delivery + salvage-on-block,
+a cross-module `repair-integration` rung, and the structural "can't fetch assets /
+deploy / ground facts / scaffold from empty" gaps. Captured (not yet built) in
+**[gaps-from-tiutni.md](./gaps-from-tiutni.md)** with a severity-ordered build plan.
+
 ## Now
 
 **AC-4 PROVEN — corellia delivers to a FOREIGN repo and opens a clean PR,
