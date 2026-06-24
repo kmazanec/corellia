@@ -2265,5 +2265,30 @@ the milestone-loop done-condition (ADR-031/032, `docs/milestone-loop-SPEC.md`) �
 the bridge added when that feature lands; the skill is shaped to grow into it, not
 ahead of the engine.
 
-**Not yet re-proven through the factory.** Next: dogfood the skill on the small
-word-count commission, then graduate to producing the milestone-loop commission.
+**Dogfood run (2026-06-24) — front door PROVEN; a milestone-loop repro fell out.**
+`npm run commission:run -- example-word-count` ran the reviewed artifact through the
+real front door end to end:
+- **Plumbing ✅** — artifact loaded + validated, ceiling note surfaced, went through
+  `listener.commission()` (not a hand-built goal), `deliver-intent` split into
+  `implement` + `open-pr`, both children passed, events logged (24), artifact
+  written. The skill→artifact→front-door→factory→disk path is validated. This was
+  the dogfood's goal.
+- **Integration gate ✅ working as designed** — the root `deliver-intent`
+  **BLOCKED** at `judge-integration`: the `implement` step produced **two
+  conflicting contents for the same `wc.mjs`** (one literal-string-only, one
+  file-path-first + stdin-on-no-arg), and the judge refused to ship a contradiction
+  rather than guessing. (The file that reached disk passes all three spec smoke
+  tests by luck of its fallback, but its *primary* contract is file-path-first,
+  diverging from "accepts a single string argument" — the judge caught a real
+  spec-divergence, not a phantom.)
+- **A live milestone-loop repro 🎯** — this is the SAME class of terminal
+  integration block that stopped tiutni Run 1 (`gaps-from-tiutni.md`), now in a
+  ~$0.20, single-file, repeatable form. Today `deliver-intent` blocks here; the
+  milestone loop (ADR-031/032) is exactly the fix — on this block, re-decide
+  another round informed by the conflict and converge, instead of terminally
+  blocking. **`commissions/example-word-count.ts` is now the minimal test case for
+  the milestone-loop feature: it should flip from BLOCK to converged-PASS once the
+  loop lands.**
+
+Next: graduate the skill to producing the milestone-loop commission; and when that
+feature is built, re-run this commission as the convergence proof.
