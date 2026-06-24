@@ -193,6 +193,49 @@ describe('LlmBrain.decide', () => {
     expect(result.value.children[0]!.scope).toEqual([]);
   });
 
+  it('fills budgetShare for a split child that omits it (terse, not malformed)', async () => {
+    // Regression (AC-4 cats run #2): the model proposed a valid child (localId,
+    // type, title) but omitted `budgetShare`. parseDecision threw, the decide
+    // root blocked before any work. A missing share is terseness — default it
+    // (mean of the present shares; even split if none) rather than reject.
+    const { fetch } = stubFetch(
+      chatResponse(JSON.stringify({
+        kind: 'split',
+        children: [
+          { localId: 'impl-helper', type: 'implement', title: 'helper', spec: {}, budgetShare: 0.6 },
+          { localId: 'impl-test', type: 'implement', title: 'test', spec: {} }, // no budgetShare
+        ],
+      })),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(result.value.kind).toBe('split');
+    if (result.value.kind !== 'split') throw new Error('expected split');
+    const filled = result.value.children[1]!;
+    expect(Number.isFinite(filled.budgetShare)).toBe(true);
+    expect(filled.budgetShare).toBeGreaterThan(0);
+    // With one present share (0.6) the omitted child takes the mean → 0.6.
+    expect(filled.budgetShare).toBeCloseTo(0.6);
+  });
+
+  it('splits evenly when NO child supplies a budgetShare', async () => {
+    const { fetch } = stubFetch(
+      chatResponse(JSON.stringify({
+        kind: 'split',
+        children: [
+          { localId: 'a', type: 'implement', title: 'a', spec: {} },
+          { localId: 'b', type: 'implement', title: 'b', spec: {} },
+        ],
+      })),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(result.value.kind).toBe('split');
+    if (result.value.kind !== 'split') throw new Error('expected split');
+    expect(result.value.children[0]!.budgetShare).toBeCloseTo(0.5);
+    expect(result.value.children[1]!.budgetShare).toBeCloseTo(0.5);
+  });
+
   it('rejects a split child missing a load-bearing field at the parse seam', async () => {
     // A child missing `type` is malformed, not merely terse — it must fail here
     // with a clear message rather than corrupting the split downstream. Two such

@@ -1791,3 +1791,43 @@ an envelope). No PR — as expected, the leaf never reached the open-pr step.
 Net: the AC-4 harness path is sound end-to-end UP TO verify; the gap is that the
 sandbox worktree is not a verifiable environment for a fresh Python checkout. Fix
 the worktree-bootstrap (finding 1) + declared target (finding 2) and re-run.
+
+### Fixes for run #1 (worktree .venv link + DB-free test target)
+
+- **worktree.ts:** `openTreeWorktree` now symlinks the repo root's `.venv` into a
+  fresh worktree, exactly as it already did `node_modules` (generalized to a small
+  loop). Verified directly: a cats worktree with the symlinked `.venv` runs
+  `uv run pytest tests/unit` → 848 passed, exit 0. This is the general,
+  stack-agnostic shape (per-stack dep dir shared from the root), not a cats special
+  case. Test added.
+- **live-foreign.ts:** declared `test → make:test-unit` (+ a `test-unit` entry)
+  instead of `make:test`, so verify hits the DB-free unit suite that is green at
+  baseline. typecheck/lint unchanged.
+- **make: target honesty:** split the masking unit test into the catch-all and
+  no-catch-all cases — `make:` targeting is whole-target-only (finding 3),
+  documented, not relied upon.
+
+## AC-4 run #2 — new failure, caught instantly: decide-root split rejected for a missing budgetShare. 1 fix.
+
+Re-ran. This time it failed at the FIRST decide call (9 events, $0, 0 tokens — never
+spawned a child), with a DIFFERENT blocker:
+```
+Decision-maker could not produce a valid decision:
+  split child "impl-helper" missing numeric "budgetShare"
+```
+The deliver-intent root's `decide` proposed a real split (children `impl-helper`,
+etc., each with valid localId/type/title), but one child omitted `budgetShare`.
+`parseDecision`/`normalizeChild` THREW on the missing number → the decide-fallback
+blocked the whole root. This is the SAME lesson as the iteration-08 empty-children
+softening, one field deeper, and exactly the `parseDecision`-strictness item
+STATUS.md flagged as next. The run #1 fixes (`.venv` link, test-unit) are correct
+but never got exercised — the root blocked before any worktree work.
+
+**Fix (brains/llm.ts):** `budgetShare` has a natural default like the list fields —
+a child with a valid localId/type but no share is TERSE, not malformed. `normalizeChild`
+now marks a missing/non-positive share as NaN instead of throwing; `parseDecision`
+fills NaN shares via `fillBudgetShares` (mean of the present shares; even `1/n` if
+none). `localId`/`type` remain required (a child missing those is still rejected at
+the seam — that test still holds). The engine already renormalizes shares to sum ≤ 1
+downstream, so any positive number is safe. Tests: omitted-share filled from the
+mean; all-omitted → even split. 1430 green, lint clean. Re-run.

@@ -447,15 +447,20 @@ function normalizeChild(raw: unknown, i: number): ChildPlan {
   if (typeof c['type'] !== 'string' || c['type'] === '') {
     throw new Error(`split child "${c['localId']}" missing "type"`);
   }
-  if (typeof c['budgetShare'] !== 'number') {
-    throw new Error(`split child "${c['localId']}" missing numeric "budgetShare"`);
-  }
   const dependsOn = Array.isArray(c['dependsOn'])
     ? (c['dependsOn'].filter((d) => typeof d === 'string') as string[])
     : [];
   const scope = Array.isArray(c['scope'])
     ? (c['scope'].filter((s) => typeof s === 'string') as string[])
     : [];
+  // `budgetShare` has a natural default, like the list fields: a child with a
+  // valid localId/type but no numeric share is TERSE, not malformed. Throwing
+  // here turned a recoverable omission into a hard block of the whole split (the
+  // AC-4 cats run #2 failure: one child missing budgetShare blocked the deliver
+  // root before any work). Mark a missing/non-positive share with NaN; the caller
+  // (`parseDecision`) fills it from the remaining share, evenly, after mapping.
+  const rawShare = c['budgetShare'];
+  const budgetShare = typeof rawShare === 'number' && rawShare > 0 ? rawShare : NaN;
   const child: ChildPlan = {
     localId: c['localId'],
     type: c['type'],
@@ -463,10 +468,30 @@ function normalizeChild(raw: unknown, i: number): ChildPlan {
     spec: c['spec'] ?? {},
     dependsOn,
     scope,
-    budgetShare: c['budgetShare'],
+    budgetShare,
   };
   if (c['intent'] !== undefined) child.intent = c['intent'] as NonNullable<ChildPlan['intent']>;
   return child;
+}
+
+/**
+ * Fill in `budgetShare` for any child the model left without one (marked NaN by
+ * {@link normalizeChild}). A missing share is terseness, not a malformed split, so
+ * we default it rather than reject the decision. Each unfilled child gets the mean
+ * of the shares the model DID provide; if it provided none, all children split
+ * evenly (`1/n`). The engine renormalizes shares to sum ≤ 1 downstream, so the
+ * only requirement here is a positive, sensible number per child.
+ */
+function fillBudgetShares(children: ChildPlan[]): ChildPlan[] {
+  if (children.length === 0) return children;
+  const present = children.map((c) => c.budgetShare).filter((s) => Number.isFinite(s));
+  const fallback =
+    present.length > 0
+      ? present.reduce((a, b) => a + b, 0) / present.length
+      : 1 / children.length;
+  return children.map((c) =>
+    Number.isFinite(c.budgetShare) ? c : { ...c, budgetShare: fallback },
+  );
 }
 
 /**
@@ -538,13 +563,14 @@ function parseDecision(raw: string): Decision {
       return { kind: 'satisfy' };
     }
     // Normalize each child into a structurally-complete ChildPlan. The model
-    // routinely omits the list fields that have a natural empty default
-    // (`dependsOn`, `scope`) — left raw, those omissions crash deep in the engine
-    // (`[...child.dependsOn]`) instead of being caught here. The genuinely
-    // structural fields (`localId`, `type`, `budgetShare`) are required: a child
-    // missing one is malformed, not merely terse, and fails at the parse seam
-    // with a clear message rather than corrupting the split.
-    return { kind: 'split', children: children.map(normalizeChild) };
+    // routinely omits fields that have a natural default — the list fields
+    // (`dependsOn`, `scope`) and now `budgetShare` (filled below). Left raw, those
+    // omissions crash deep in the engine (`[...child.dependsOn]`) or hard-block the
+    // split. The genuinely structural fields (`localId`, `type`) are still
+    // required: a child missing one is malformed, not merely terse, and fails at
+    // the parse seam with a clear message.
+    const normalized = children.map(normalizeChild);
+    return { kind: 'split', children: fillBudgetShares(normalized) };
   }
   if (kind === 'block') {
     const brief = obj['brief'];
