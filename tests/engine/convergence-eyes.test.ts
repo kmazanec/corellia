@@ -287,26 +287,34 @@ describe('convergence-eyes — full-stack scripted path', () => {
     expect(gateChecked.length).toBeGreaterThanOrEqual(1);
     const rootGate = gateChecked.find((e) => e.goalId === 'conv');
     expect(rootGate?.type === 'gate-checked' && rootGate.ok).toBe(false);
-    // The code-leaf child carries scope, so the gate evaluates code-leaf coverage
-    // (architecture + conventions) plus a region dive for the touched src region.
+    // The code-leaf child carries scope (`src/`), a tightly-scoped brownfield add.
+    // Per ADR-029 Dec 2 (amended), it pulls ONLY the region dive of the touched
+    // region — NOT a whole-repo architecture/conventions map. So the only miss is
+    // the `src` region dive; no bare whole-repo category miss.
     expect(rootGate?.type === 'gate-checked' && rootGate.missing).toEqual(
-      expect.arrayContaining(['architecture', 'conventions', 'architecture:src']),
+      expect.arrayContaining(['architecture:src']),
     );
+    const wholeRepoMisses = (rootGate?.type === 'gate-checked' ? rootGate.missing : [])
+      .filter((m) => m === 'architecture' || m === 'conventions');
+    expect(wholeRepoMisses).toHaveLength(0);
 
-    // ── comprehension children spawned as DEPENDENCIES of the code leaf ──────
+    // ── comprehension child spawned as a DEPENDENCY of the code leaf ─────────
     const spawned = events.filter((e) => e.type === 'child-spawned');
     const mapChildren = spawned.filter((e) => e.type === 'child-spawned' && e.childType === 'map-repo');
     const diveChildren = spawned.filter((e) => e.type === 'child-spawned' && e.childType === 'deep-dive-region');
-    expect(mapChildren).toHaveLength(2);
+    // Scoped leaf → region dive only; no whole-repo maps.
+    expect(mapChildren).toHaveLength(0);
     expect(diveChildren).toHaveLength(1);
     const codeSpawn = spawned.find((e) => e.type === 'child-spawned' && e.childType === 'implement');
-    // The code leaf depends on all three comprehension children (maps before fan-out).
-    expect(codeSpawn?.type === 'child-spawned' && codeSpawn.dependsOn.length).toBe(3);
+    // The code leaf depends on the single dive child (comprehension before fan-out).
+    expect(codeSpawn?.type === 'child-spawned' && codeSpawn.dependsOn.length).toBe(1);
 
     // ── knowledge events landed (persist hook over helpers) ─────────────
+    // Only the region dive runs now (no whole-repo maps), so one facts event and
+    // no whole-repo knowledge-written.
     const kWritten = events.filter((e) => e.type === 'knowledge-written');
     const kFacts = events.filter((e) => e.type === 'knowledge-facts-written');
-    expect(kWritten).toHaveLength(2);
+    expect(kWritten).toHaveLength(0);
     expect(kFacts).toHaveLength(1);
 
     // ── SEQUENCING: every knowledge-written precedes the code leaf's first write ─

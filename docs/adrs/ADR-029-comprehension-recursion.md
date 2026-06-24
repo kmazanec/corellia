@@ -144,3 +144,35 @@ primary fix.
 - Builds in iteration 08 (recursion). The contract barrier touched is the
   comprehension integrate edge (structured artifact merge); no change to the tool,
   brain, or event-base contracts beyond reusing the existing knowledge events.
+
+## Amendment (2026-06-24) — Decision 2 extended to scoped brownfield adds
+
+Decision 2 ("comprehension is JIT, pulled by the split gate, bounded by the
+regions the goal touches") originally suppressed the whole-repo
+architecture/conventions/stack maps only for **greenfield** scope (every touched
+region brand-new). The AC-4 cats deliver (build notes, AC-4 run #3) exposed the
+missing half: a **tightly-scoped brownfield add** to EXISTING dirs (a pure helper
+into `src/cats/agents/common/`) still pulled the whole-repo `architecture` +
+`conventions` maps, and mapping cats' 259-file repo timed out in its subdivided
+wall-clock slice — so a one-file feature could never reach implementation.
+
+The JIT rule applies identically whether the touched region is new or existing:
+*a region no goal touches is never mapped*. So the carve-out is generalized:
+
+- A **code-emitting leaf with non-empty scope** requires the **region dives of its
+  touched (existing) regions ONLY** — NOT a whole-repo architecture/conventions
+  map. The region dives ARE its comprehension. (Greenfield is now the special case
+  where those regions also happen to be new, so no dive is pulled either.)
+- A **scope-less** code leaf (a genuine unscoped / whole-repo edit) still requires
+  the whole-repo maps — there is no region to bound comprehension to.
+- **Characterize/test** work is unchanged: it genuinely reads the wider codebase
+  to write tests, so it keeps the whole-repo categories even when scoped.
+
+Implemented in `src/library/coverage.ts` (`isScopedCodeLeaf` branch). Pure policy
+change; no contract touched. Tests in `tests/library/coverage.test.ts`.
+
+A companion robustness fix (not a policy change): the `comprehend` skill's
+satisfy-vs-split guidance is sharpened so a whole-repo `map-repo` over a LARGE
+repo (many subsystems) splits into per-subsystem sub-region maps UP FRONT rather
+than attempting one node and exhausting the budget — defense for the genuine
+whole-repo-map case the carve-out does not cover.

@@ -107,8 +107,11 @@ export interface MissingRequirement {
  *
  * Row semantics (evaluated in order per goal class):
  *   1. learn-kind goals → no requirements (they ARE the coverage).
- *   2. root splits     → architecture + stack.
- *   3. code-emitting leaves (make kind, !leafOnly skipped; make kind, leafOnly) → architecture + conventions + region dives for touched regions.
+ *   2. root splits     → architecture + stack (greenfield scoped root splits: none).
+ *   3. code-emitting leaves (make kind) →
+ *        - SCOPED (non-empty scope): region dives for the touched regions ONLY,
+ *          no whole-repo map (ADR-029 Dec 2, amended for brownfield).
+ *        - UNSCOPED (empty scope): architecture + conventions (whole-repo).
  *   4. characterize/test work → architecture + conventions + test-scaffold + region dives.
  *
  * "Fresh" is ADR-019's rule: SHA matches HEAD, or self-validation passes.
@@ -238,6 +241,19 @@ export function coverageCheck(
     goal.scope.length > 0 &&
     goal.scope.every((s) => !regionExists(regionKey(s)));
 
+  // Relevance bound, extended (ADR-029 Decision 2, amended for brownfield —
+  // AC-4 cats run #3): a code-emitting leaf whose scope is NON-EMPTY is bounded
+  // to the regions it touches. Its comprehension is the deep-dive of THOSE
+  // regions (checked below), NOT a whole-repo architecture/conventions map. The
+  // JIT rule is "a region no goal touches is never mapped; no comprehension is
+  // ever speculative" — so a tightly-scoped feature pulls region dives only, and
+  // the whole-repo maps are reserved for a SCOPE-LESS leaf (a genuine
+  // whole-repo / unscoped edit) where there is no region to bound to. Without
+  // this, a one-file add to an existing dir demanded a whole-repo map that times
+  // out on a large repo (cats: 259 files). The greenfield carve-out above is now
+  // the special case of this where the regions also happen to be new.
+  const isScopedCodeLeaf = !goal.isRootSplit && goal.scope.length > 0;
+
   if (goal.isRootSplit && !isGreenfieldRootSplit) {
     // Row 2: root split
     requiredCategories = [...COVERAGE_POLICY_TABLE.ROOT_SPLIT_CATEGORIES];
@@ -245,10 +261,17 @@ export function coverageCheck(
     // Greenfield root split — no whole-repo comprehension pulled.
     requiredCategories = [];
   } else if (COVERAGE_POLICY_TABLE.CHARACTERIZE_TYPE_NAMES.includes(goal.typeName)) {
-    // Row 4: characterize/test work
+    // Row 4: characterize/test work. Characterize work genuinely reads the wider
+    // codebase to write tests, so it keeps the whole-repo categories even when
+    // scoped — only the plain code-emitting leaf narrows to region dives.
     requiredCategories = [...COVERAGE_POLICY_TABLE.CHARACTERIZE_CATEGORIES];
+  } else if (isScopedCodeLeaf) {
+    // Row 3, scoped: a tightly-scoped code leaf — region dives (below) suffice;
+    // no whole-repo architecture/conventions map.
+    requiredCategories = [];
   } else {
-    // Row 3: code-emitting leaf (make kind, default)
+    // Row 3, unscoped: a code-emitting leaf with NO scope — fall back to the
+    // whole-repo categories, since there is no region to bound comprehension to.
     requiredCategories = [...COVERAGE_POLICY_TABLE.CODE_LEAF_CATEGORIES];
   }
 

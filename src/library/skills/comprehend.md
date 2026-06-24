@@ -45,11 +45,23 @@ node can hold without dropping evidence. A normal repo, a single package, one
 subsystem, or any small/empty region is a SATISFY: read the few representative
 files and emit the artifact. Splitting a region that fits is the most common
 failure — it spawns redundant child comprehensions, never converges, and burns
-budget. If you split, every child must be the SAME comprehension type as this
-goal (a `map-repo` splits into sub-region `map-repo`s; a `deep-dive-region` into
+budget.
+
+BUT a whole-repo `map-repo` over a LARGE repo is the opposite failure: trying to
+read it all in one node exhausts the budget (wall-clock or tokens) before the
+artifact is emitted, and the whole goal fails having produced nothing. Concrete
+rule for `map-repo`: BEFORE reading, size the repo (e.g. count top-level source
+directories / files). If it has MANY top-level subsystems (roughly 8+ source
+packages, or many hundreds of files) — too much to characterize faithfully in one
+node — SPLIT IMMEDIATELY into one sub-region `map-repo` per top-level subsystem,
+rather than trying to satisfy and stalling. Decide this up front from the repo's
+shape, not after you have already burned most of the budget reading. A handful of
+packages: satisfy. A sprawling monorepo of many subsystems: split.
+
+If you split, every child must be the SAME comprehension type as this goal (a
+`map-repo` splits into sub-region `map-repo`s; a `deep-dive-region` into
 sub-region `deep-dive-region`s — never into a different comprehension type), and
-the sub-regions must be DISJOINT and together COVER the parent. When in doubt,
-satisfy.
+the sub-regions must be DISJOINT and together COVER the parent.
 
 Message protocol: every message you send must either contain tool calls or be
 the final raw JSON artifact — nothing else. Never narrate, never announce

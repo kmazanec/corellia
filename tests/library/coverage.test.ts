@@ -382,6 +382,84 @@ describe('region dives bounded to existing regions', () => {
   });
 });
 
+// ── ADR-029 Decision 2, amended for brownfield (AC-4 cats run #3) ──────────────
+
+describe('scoped code leaf pulls region dives only — no whole-repo map', () => {
+  it('a scoped brownfield leaf with its region dived PASSES without any architecture/conventions artifact', () => {
+    // The cats case: implement format_usd into an EXISTING dir. The region dive of
+    // that dir is its comprehension; the whole-repo architecture/conventions maps
+    // (which time out on a big repo) must NOT be demanded.
+    const result = coverageCheck(
+      makeGoal({
+        typeName: 'implement',
+        scope: ['src/cats/agents/common/'],
+        existsByRegion: { 'src/cats/agents/common': true },
+      }),
+      makeKnowledge({
+        artifacts: [], // NO whole-repo maps at all
+        regionFacts: [
+          { repoRoot: '/repo', region: 'src/cats/agents/common', generatedAtSha: HEAD },
+        ],
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.missing).toHaveLength(0);
+  });
+
+  it('a scoped leaf still demands the region dive (only the whole-repo map is dropped)', () => {
+    const result = coverageCheck(
+      makeGoal({
+        typeName: 'implement',
+        scope: ['src/cats/agents/common/'],
+        existsByRegion: { 'src/cats/agents/common': true },
+      }),
+      makeKnowledge({ artifacts: [], regionFacts: [] }),
+    );
+    expect(result.ok).toBe(false);
+    // The miss is the REGION dive, not a whole-repo architecture/conventions map.
+    const regions = result.missing.filter((m) => m.region).map((m) => m.region);
+    expect(regions).toContain('src/cats/agents/common');
+    // No bare (region-less) whole-repo category miss.
+    const wholeRepoMiss = result.missing.filter((m) => m.region === undefined);
+    expect(wholeRepoMiss).toHaveLength(0);
+  });
+
+  it('an UNSCOPED code leaf still demands the whole-repo architecture + conventions maps', () => {
+    // No scope to bound comprehension to → the whole-repo maps are the floor.
+    const result = coverageCheck(
+      makeGoal({ typeName: 'implement', scope: [] }),
+      makeKnowledge({ artifacts: [], regionFacts: [] }),
+    );
+    expect(result.ok).toBe(false);
+    const cats = result.missing.map((m) => m.category);
+    expect(cats).toContain('architecture');
+    expect(cats).toContain('conventions');
+  });
+
+  it('characterize work keeps the whole-repo maps even when scoped', () => {
+    // Characterize genuinely reads the wider codebase to write tests — the narrow
+    // carve-out is for plain code-emitting leaves only.
+    const result = coverageCheck(
+      makeGoal({
+        typeName: 'characterize',
+        scope: ['src/payments/'],
+        existsByRegion: { 'src/payments': true },
+      }),
+      makeKnowledge({
+        artifacts: [],
+        regionFacts: [
+          { repoRoot: '/repo', region: 'src/payments', generatedAtSha: HEAD },
+        ],
+      }),
+    );
+    expect(result.ok).toBe(false);
+    const cats = result.missing.map((m) => m.category);
+    expect(cats).toContain('architecture');
+    expect(cats).toContain('conventions');
+    expect(cats).toContain('test-scaffold');
+  });
+});
+
 describe('existsByRegion backward compatibility (absent = treat as existing)', () => {
   it('omitting existsByRegion preserves the legacy region-dive demand', () => {
     const without = coverageCheck(
