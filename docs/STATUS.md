@@ -4,25 +4,26 @@
 
 ## Now
 
-**AC-4 (deliver-to-foreign) IN PROGRESS — run #6, one blocker left: a DESIGN
-decision.** corellia is delivering a scoped helper to a foreign repo (cats) and
-is now blocked on a single, well-isolated issue: for a tightly-scoped brownfield
-feature the brain's split still mints **whole-repo `architecture`/`stack` maps**
-it doesn't need, and a whole-repo map of cats' 259-file tree can't be built
-faithfully within a bounded read budget (its anchors fail validation). The AC-4
-PIPELINE is otherwise proven sound end-to-end (scoped region dives, `.venv`
-worktree env, DB-free verify, commit-before-push, github-mirror PR path).
+**AC-4 PROVEN — corellia delivers to a FOREIGN repo and opens a clean PR,
+autonomously.** On 2026-06-24 corellia delivered a `format_usd` helper to cats
+(a foreign repo) end-to-end: scoped comprehension (2 region dives, no whole-repo
+maps) → implement test-first → verify green (DB-free unit suite) → `open-pr` →
+**PR [#3](https://github.com/kmazanec/cats/pull/3)** carrying exactly the 3
+correct files (helper + tests + `__init__` export), **no `.venv` leak**, factory
+did NOT merge it. Zero blockers; tree collected; cats `main` undisturbed. $0.13.
+**Both deliver acceptance criteria (AC-3 self, AC-4 foreign) are now PROVEN.**
 
-Runs #1–#6 each bought a real fix (full record in
-[prototype-build-notes.md](./prototype-build-notes.md)): worktree `.venv` link +
-DB-free test target (#1), `budgetShare` tolerance (#2), scoped-brownfield gate
-carve-out + map-repo split prose (#3), `open-pr` commits before push + `.venv`
-excluded from tree diff (#4), **structural comprehend read-ceiling that forces
-emit, ending the over-explore-to-exhaustion failure (#5, commit `3d8b1c3`)**. Run
-#6 proved the read-ceiling fix works (comprehension now reliably emits) and
-isolated the remaining blocker to the scoped-split/coverage-policy interaction —
-a locked-policy DESIGN decision (ADR-021/ADR-029) surfaced to the operator, NOT a
-reflexive patch.
+AC-4 took 9 live `live:foreign` runs, each buying one real engine/harness fix
+(full run-by-run record in [prototype-build-notes.md](./prototype-build-notes.md)):
+worktree `.venv` link + DB-free test target (#1), `budgetShare` tolerance (#2),
+scoped-leaf gate carve-out + map-repo split prose (#3), `open-pr` commits before
+push + `.venv` excluded from the scope diff (#4), structural comprehend
+read-ceiling forced-emit (#5), **scoped-ROOT-split carve-out + repo-size signal
+for whole-repo maps (#6, ADR-029 part 2)**, forced-emit drives the artifact
+directly instead of nudge-and-fail (#7), and the bare-name `.venv`/`node_modules`
+exclude so the dependency SYMLINK is ignored (#8). #9 proved a clean PR. **1441
+tests green, lint + typecheck clean.** Next iteration: multi-tree PARALLEL build +
+cherry-pick aggregation (today the engine uses one shared worktree per tree).
 
 **AC-3 PROVEN — the strange loop is closed.** On 2026-06-24 corellia built a
 feature on its OWN repo end-to-end and opened a real pull request, autonomously:

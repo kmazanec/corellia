@@ -2177,3 +2177,28 @@ foreign repo and opened a real PR autonomously.** PR #2 carries the spurious
 `.venv`; close it and re-run #9 for a clean PR that proves the exclude fix.
 
 Hygiene: tree COLLECTED on success (worktree removed), cats primary clean.
+
+## AC-4 run #9 — CLEAN PR. AC-4 fully proven, exclude fix confirmed. ✅
+
+$0.13, 71.7% cache, zero blockers, full tree green.
+**PR opened: https://github.com/kmazanec/cats/pull/3** · factory did NOT merge it.
+
+The exclude fix is confirmed: the PR diff carries EXACTLY 3 correct files and **no
+`.venv`**:
+- `src/cats/agents/common/format_usd.py` — `format_usd(cents: int) -> str`
+- `tests/unit/test_format_usd.py` — real cases (positive, zero, negative,
+  exact-dollar, one-cent, negative-one-cent)
+- `src/cats/agents/common/__init__.py` — exports `format_usd` AND preserves the
+  existing `with_cost` export (it correctly read the existing module via the dive)
+
+This is the complete AC-4 deliverable: a FOREIGN repo, a CORRECT verified feature,
+a CLEAN PR, factory did not merge it, $0.13. PR #2 (spurious `.venv`) was closed
+and its branch deleted.
+
+**AC-4 took runs #1–#9, each buying one real engine/harness fix** (worktree
+`.venv` link + DB-free test target, budgetShare tolerance, scoped-leaf carve-out,
+commit-before-push + .venv-in-diff, comprehend read-ceiling forced-emit,
+scoped-ROOT-split carve-out + repo-size signal, forced-emit drives the artifact,
+and finally the bare-name exclude pattern). The strange-loop bootstrap worked as
+designed: every stall was recorded, hand-fixed the Corellia way, and re-proven
+through `live:foreign`.
