@@ -148,9 +148,10 @@ describe('root split — architecture + stack required', () => {
     expect(result.missing[0]?.category).toBe('architecture');
   });
 
-  it('root split does not check region dives even with scope', () => {
-    // root splits require architecture + stack; no region dive row applies
-    const result = coverageCheck(
+  it('scoped root split checks region dives, not whole-repo maps (AC-4 run #6)', () => {
+    // A scoped root split is bounded to its touched regions: whole-repo maps being
+    // present does NOT satisfy it — it needs the dive of src/auth.
+    const withMapsOnly = coverageCheck(
       makeGoal({ isRootSplit: true, scope: ['src/auth'] }),
       makeKnowledge({
         artifacts: [
@@ -159,7 +160,17 @@ describe('root split — architecture + stack required', () => {
         ],
       }),
     );
-    expect(result.ok).toBe(true);
+    expect(withMapsOnly.ok).toBe(false);
+    expect(withMapsOnly.missing.map((m) => m.region)).toEqual(['src/auth']);
+
+    // With the region dive present (and no whole-repo maps needed), it passes.
+    const withDive = coverageCheck(
+      makeGoal({ isRootSplit: true, scope: ['src/auth'] }),
+      makeKnowledge({
+        regionFacts: [{ repoRoot: '/repo', region: 'src/auth', generatedAtSha: HEAD }],
+      }),
+    );
+    expect(withDive.ok).toBe(true);
   });
 });
 
@@ -277,7 +288,7 @@ describe('greenfield root split — no whole-repo comprehension pulled', () => {
     expect(result.missing).toHaveLength(0);
   });
 
-  it('root split with a MIX of new and existing scope still demands whole-repo maps', () => {
+  it('scoped root split (mix of new + existing) pulls region dives only — no whole-repo maps (AC-4 run #6)', () => {
     const result = coverageCheck(
       makeGoal({
         isRootSplit: true,
@@ -286,10 +297,14 @@ describe('greenfield root split — no whole-repo comprehension pulled', () => {
       }),
       makeKnowledge(),
     );
-    expect(result.ok).toBe(false);
+    // A scoped root split is bounded to its touched regions: no whole-repo
+    // architecture/stack map. Only the EXISTING region (src/engine) pulls a dive;
+    // the new region (src/util) has nothing to comprehend.
     const cats = result.missing.map((m) => m.category);
-    expect(cats).toContain('architecture');
-    expect(cats).toContain('stack');
+    expect(cats).not.toContain('stack');
+    const dives = result.missing.filter((m) => m.region !== undefined).map((m) => m.region);
+    expect(dives).toContain('src/engine');
+    expect(dives).not.toContain('src/util');
   });
 
   it('scope-less root split (whole-repo intent) still demands whole-repo maps', () => {
@@ -303,7 +318,7 @@ describe('greenfield root split — no whole-repo comprehension pulled', () => {
     expect(cats).toContain('stack');
   });
 
-  it('existing-scope root split (existsByRegion all true) still demands whole-repo maps', () => {
+  it('scoped existing-scope root split pulls the region dive, not whole-repo maps (AC-4 run #6)', () => {
     const result = coverageCheck(
       makeGoal({
         isRootSplit: true,
@@ -314,8 +329,10 @@ describe('greenfield root split — no whole-repo comprehension pulled', () => {
     );
     expect(result.ok).toBe(false);
     const cats = result.missing.map((m) => m.category);
-    expect(cats).toContain('architecture');
-    expect(cats).toContain('stack');
+    // No whole-repo maps — just the dive of the one touched existing region.
+    expect(cats).not.toContain('stack');
+    const dives = result.missing.filter((m) => m.region !== undefined).map((m) => m.region);
+    expect(dives).toEqual(['src/engine']);
   });
 });
 
@@ -476,15 +493,18 @@ describe('existsByRegion backward compatibility (absent = treat as existing)', (
     expect(without.missing.some((m) => m.region === 'src/payments')).toBe(true);
   });
 
-  it('omitting existsByRegion preserves the legacy root-split demand', () => {
+  it('omitting existsByRegion on a scoped root split defaults regions to existing → pulls the dive, not whole-repo maps', () => {
     const without = coverageCheck(
       makeGoal({ isRootSplit: true, scope: ['src/auth'] }),
       makeKnowledge(),
     );
     expect(without.ok).toBe(false);
     const cats = without.missing.map((m) => m.category);
-    expect(cats).toContain('architecture');
-    expect(cats).toContain('stack');
+    // Scoped root split → no whole-repo maps; the omitted-existsByRegion default
+    // (treat-as-existing) means src/auth IS dived.
+    expect(cats).not.toContain('stack');
+    const dives = without.missing.filter((m) => m.region !== undefined).map((m) => m.region);
+    expect(dives).toEqual(['src/auth']);
   });
 });
 

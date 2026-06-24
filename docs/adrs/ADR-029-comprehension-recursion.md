@@ -176,3 +176,39 @@ satisfy-vs-split guidance is sharpened so a whole-repo `map-repo` over a LARGE
 repo (many subsystems) splits into per-subsystem sub-region maps UP FRONT rather
 than attempting one node and exhausting the budget — defense for the genuine
 whole-repo-map case the carve-out does not cover.
+
+## Amendment (2026-06-24, part 2) — Decision 2 extended to the SCOPED ROOT SPLIT
+
+The part-1 carve-out covered the code-emitting **leaf**. AC-4 cats run #6 (build
+notes) exposed that the *deliver-intent ROOT split itself* still demanded whole-repo
+maps: a scoped deliver intent (scope = `src/cats/agents/common/`, `tests/unit/` —
+both existing) hit `gate-checked: missing [architecture, stack]` and minted a
+whole-repo `map-repo: architecture` of cats' 259-file tree, which cannot be built
+faithfully in a bounded read budget (its claimed pointers fail the deterministic
+anchor gate). The leaf carve-out never got a say because the root's split pulled
+the whole-repo maps first.
+
+The JIT rule applies to the decomposition intent too: *a scoped intent is bounded
+to the regions it touches whether it is a leaf or a split.* So:
+
+- A **root split with non-empty scope** (brownfield OR greenfield) pulls the
+  **region dives of its touched (existing) regions ONLY** — NOT a whole-repo
+  architecture/stack map. (Greenfield stays the special case where those regions
+  are also new, so no dive is pulled either.)
+- A **scope-less root split** (a genuine whole-repo intent — e.g. "map this repo")
+  still requires the whole-repo architecture + stack maps; there is no region to
+  bound to.
+
+Implemented in `src/library/coverage.ts` (`isScopedRootSplit` branch; the region-
+dive check is no longer gated on `!isRootSplit`). Pure policy change; no contract
+touched. Tests in `tests/library/coverage.test.ts`.
+
+A second companion robustness fix (Decision 1 / the recursion, made to actually
+fire): the genuine whole-repo `map-repo` case now gets a **factual repo-size
+signal** at decide time. The engine computes a cheap top-level-dir / file count
+for a scope-less `map-repo` and injects it as `ctx.repoShape` (new optional
+`BrainContext` field) into the decide call, so the skill's "8+ subsystems → split"
+rule fires on real data instead of a blind guess (run #6: the architecture map
+chose satisfy and then could not converge). The brain weighs it, never obeys it.
+Implemented in `src/engine/engine.ts` (`repoShapeHint`) + `src/brains/llm.ts`
+(decide prompt). Tests in `tests/brains/llm.test.ts`.

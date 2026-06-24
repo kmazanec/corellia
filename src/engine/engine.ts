@@ -14,6 +14,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { readdirSync } from 'node:fs';
 import type { Goal, Tier, MemoryPointer, Budget, Usage } from '../contract/goal.js';
 import type { Decision, ChildPlan } from '../contract/decision.js';
 import type { Artifact, Report } from '../contract/report.js';
@@ -671,10 +672,12 @@ export class Engine {
         // already gets at produce/judge time — without it the decide call is blind
         // (e.g. comprehension over-splits: a map-repo splitting needlessly).
         const decideSkill = this.decideSkillBlock(goal.type);
+        const repoShape = this.repoShapeHint(goal);
         const baseCtx: BrainContext = {
           tier: currentTier,
           memories: goal.memories,
           ...(decideSkill ? { skill: decideSkill } : {}),
+          ...(repoShape ? { repoShape } : {}),
           ...(memoStatus === 'provisional' && memo !== null
             ? { patternHint: memo }
             : {}),
@@ -2666,6 +2669,60 @@ export class Engine {
     if (preamble) parts.push(preamble);
     if (section) parts.push(section.trim());
     return parts.length > 0 ? parts.join('\n\n') : undefined;
+  }
+
+  /**
+   * A cheap factual size signal for a WHOLE-REPO `map-repo` decide call (AC-4
+   * run #6): the comprehend skill carries a "8+ subsystems → split immediately"
+   * rule, but the brain was deciding blind and chose satisfy, then could not map
+   * a 259-file repo in one node. Counting top-level source dirs + tracked files
+   * lets the brain apply that rule on real data. Returns undefined when there is
+   * no active sandbox, the goal is not a whole-repo map, or the scan fails — in
+   * which case the decide falls back to the goal-context-only behavior. Scoped
+   * goals (non-empty scope) are excluded: scoping already bounds them.
+   */
+  private repoShapeHint(goal: Goal): string | undefined {
+    if (this._activeAssembly === undefined) return undefined;
+    if (goal.type !== 'map-repo') return undefined;
+    if (goal.scope.length > 0) return undefined; // scoped → already bounded
+    const root = this._activeAssembly.worktree.root;
+    // Directories that are never source subsystems; excluded from the count so a
+    // repo's real subsystem breadth drives the split decision, not its tooling.
+    const IGNORE = new Set([
+      '.git', 'node_modules', '.venv', 'venv', '__pycache__', 'dist', 'build',
+      'out', '.corellia', '.claude', 'coverage', '.next', 'target', '.cache',
+    ]);
+    try {
+      const entries = readdirSync(root, { withFileTypes: true });
+      let topDirs = 0;
+      let topFiles = 0;
+      for (const e of entries) {
+        if (IGNORE.has(e.name)) continue;
+        if (e.isDirectory()) topDirs++;
+        else if (e.isFile()) topFiles++;
+      }
+      // A coarse total-file estimate one level deep into each top dir — enough to
+      // distinguish "a handful of packages" from "a sprawling monorepo" without a
+      // full recursive walk on the decide path.
+      let nestedFiles = 0;
+      for (const e of entries) {
+        if (!e.isDirectory() || IGNORE.has(e.name)) continue;
+        try {
+          nestedFiles += readdirSync(`${root}/${e.name}`).length;
+        } catch {
+          // unreadable subdir — skip, the count is a hint not a contract
+        }
+      }
+      return (
+        `top-level source dirs: ${topDirs}; top-level files: ${topFiles}; ` +
+        `approx entries one level deep: ${nestedFiles}. ` +
+        `(Rule of thumb: ~8+ top-level source subsystems, or many hundreds of ` +
+        `files, is too large to map faithfully in one node — split into one ` +
+        `sub-region map-repo per top-level subsystem.)`
+      );
+    } catch {
+      return undefined;
+    }
   }
 
   private async runCoverageGate(

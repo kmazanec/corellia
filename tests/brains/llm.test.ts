@@ -314,6 +314,29 @@ describe('LlmBrain.decide', () => {
     expect(userMsg).not.toContain('FAMILY SKILL');
   });
 
+  it('injects ctx.repoShape (the size signal) into the decide message (AC-4 run #6)', async () => {
+    const { fetch, calls } = stubFetch(chatResponse(JSON.stringify({ kind: 'satisfy' })));
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    await brain.decide(baseGoal, {
+      tier: 'mid',
+      memories: [],
+      repoShape: 'top-level source dirs: 14; top-level files: 9; approx entries one level deep: 200.',
+    });
+    const body = JSON.parse(calls[0]?.options.body as string);
+    const userMsg: string = body.messages.find((m: { role: string }) => m.role === 'user').content;
+    expect(userMsg).toContain('REPO SHAPE');
+    expect(userMsg).toContain('top-level source dirs: 14');
+  });
+
+  it('omits the repo-shape block when ctx.repoShape is absent', async () => {
+    const { fetch, calls } = stubFetch(chatResponse(JSON.stringify({ kind: 'satisfy' })));
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    await brain.decide(baseGoal, { tier: 'mid', memories: [] });
+    const body = JSON.parse(calls[0]?.options.body as string);
+    const userMsg: string = body.messages.find((m: { role: string }) => m.role === 'user').content;
+    expect(userMsg).not.toContain('REPO SHAPE');
+  });
+
   it('includes prior attempt verdict in the user message when present', async () => {
     const { fetch, calls } = stubFetch(chatResponse(JSON.stringify({ kind: 'satisfy' })));
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });

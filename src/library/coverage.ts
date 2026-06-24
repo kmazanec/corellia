@@ -107,7 +107,11 @@ export interface MissingRequirement {
  *
  * Row semantics (evaluated in order per goal class):
  *   1. learn-kind goals → no requirements (they ARE the coverage).
- *   2. root splits     → architecture + stack (greenfield scoped root splits: none).
+ *   2. root splits (make kind) →
+ *        - SCOPED (non-empty scope, brownfield or greenfield): region dives for
+ *          the touched EXISTING regions ONLY, no whole-repo map (ADR-029 Dec 2,
+ *          amended for a scoped root split — AC-4 run #6).
+ *        - SCOPE-LESS (empty scope = genuine whole-repo intent): architecture + stack.
  *   3. code-emitting leaves (make kind) →
  *        - SCOPED (non-empty scope): region dives for the touched regions ONLY,
  *          no whole-repo map (ADR-029 Dec 2, amended for brownfield).
@@ -241,6 +245,22 @@ export function coverageCheck(
     goal.scope.length > 0 &&
     goal.scope.every((s) => !regionExists(regionKey(s)));
 
+  // Relevance bound (ADR-029 Decision 2, amended for a SCOPED root split —
+  // AC-4 cats run #6): a root split whose scope is non-empty is bounded to the
+  // regions it touches, exactly like a scoped code leaf. Its comprehension is the
+  // deep-dive of those EXISTING regions (checked below), NOT a whole-repo
+  // architecture+stack map. The JIT rule ("a region no goal touches is never
+  // mapped; no comprehension is ever speculative") applies to the decomposition
+  // intent too: a tightly-scoped deliver intent does not need a whole-repo map to
+  // place a one-file helper into a known directory — it needs to understand THAT
+  // directory. Whole-repo maps stay reserved for a SCOPE-LESS root split (a
+  // genuine whole-repo / unscoped intent). Without this, run #6's scoped deliver
+  // intent demanded a whole-repo architecture map of cats' 259-file tree, which
+  // cannot be built faithfully in a bounded read budget (its anchors fail
+  // validation). The greenfield carve-out above is the special case where the
+  // touched regions also happen to be new.
+  const isScopedRootSplit = goal.isRootSplit && goal.scope.length > 0;
+
   // Relevance bound, extended (ADR-029 Decision 2, amended for brownfield —
   // AC-4 cats run #3): a code-emitting leaf whose scope is NON-EMPTY is bounded
   // to the regions it touches. Its comprehension is the deep-dive of THOSE
@@ -254,12 +274,16 @@ export function coverageCheck(
   // the special case of this where the regions also happen to be new.
   const isScopedCodeLeaf = !goal.isRootSplit && goal.scope.length > 0;
 
-  if (goal.isRootSplit && !isGreenfieldRootSplit) {
-    // Row 2: root split
-    requiredCategories = [...COVERAGE_POLICY_TABLE.ROOT_SPLIT_CATEGORIES];
-  } else if (isGreenfieldRootSplit) {
-    // Greenfield root split — no whole-repo comprehension pulled.
+  if (isGreenfieldRootSplit || isScopedRootSplit) {
+    // Scoped root split (brownfield or greenfield) — no whole-repo architecture/
+    // stack map. A scoped intent is bounded to its touched regions; their dives
+    // (checked below) are its comprehension. Greenfield is the case where those
+    // regions are also new (so even the dives are skipped per existsByRegion).
     requiredCategories = [];
+  } else if (goal.isRootSplit) {
+    // Row 2: a SCOPE-LESS root split (a genuine whole-repo intent) — whole-repo
+    // architecture + stack maps, since there is no region to bound to.
+    requiredCategories = [...COVERAGE_POLICY_TABLE.ROOT_SPLIT_CATEGORIES];
   } else if (COVERAGE_POLICY_TABLE.CHARACTERIZE_TYPE_NAMES.includes(goal.typeName)) {
     // Row 4: characterize/test work. Characterize work genuinely reads the wider
     // codebase to write tests, so it keeps the whole-repo categories even when
@@ -283,10 +307,13 @@ export function coverageCheck(
     }
   }
 
-  // ── Region dive check (make leaves + characterize, but NOT root splits) ───
-  // For code-emitting leaves: a region in the goal's scope that has no deep-dive
-  // fact at the current SHA → missing region dive.
-  if (!goal.isRootSplit && goal.scope.length > 0) {
+  // ── Region dive check (scoped leaves, characterize, AND scoped root splits) ──
+  // A region in the goal's scope that has no deep-dive fact at the current SHA →
+  // missing region dive. This now applies to a SCOPED root split too (AC-4 run
+  // #6): a scoped deliver intent pulls dives of its touched regions instead of a
+  // whole-repo map. A SCOPE-LESS root split (handled above with whole-repo maps)
+  // has no scope here, so it pulls no dives — its comprehension is the maps.
+  if (goal.scope.length > 0) {
     // Build a set of (region, sha) pairs that are covered
     const coveredRegions = new Set<string>();
     for (const rf of knowledge.regionFacts) {

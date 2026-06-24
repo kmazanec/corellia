@@ -59,6 +59,17 @@ export interface BrainContext {
    * the goal context alone, exactly as before.
    */
   skill?: string;
+  /**
+   * A cheap, factual hint about the size/shape of the repo or region this goal
+   * would comprehend — e.g. "top-level source dirs: 14; tracked files: 259".
+   * Injected into the DECIDE call for a whole-repo `map-repo` so the brain can
+   * apply the skill's "8+ subsystems → split" rule on REAL data instead of
+   * guessing (AC-4 run #6: a whole-repo architecture map of a 259-file repo
+   * chose satisfy, then could not be built faithfully in one node). The engine
+   * computes this from the working tree; the brain weighs it, never obeys it.
+   * Absent → the brain decides on the goal context alone, exactly as before.
+   */
+  repoShape?: string;
 }
 
 /**
