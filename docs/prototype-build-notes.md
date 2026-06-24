@@ -1653,3 +1653,55 @@ Total AC-3 arc: 6 live runs, ~$6.0, each buying a real fix (soft budgets, transp
 timeout, decide-skill, head_sha, sandbox-path truth, block-coercion,
 conventions-pointer, correct prescribed model, declared scripts, fence parsing,
 targeted tests, and the open-pr ship step). Every fix landed on main with tests.
+
+# Iteration 10 — AC-4: deliver-to-foreign (cats). Harness/engine readiness findings.
+
+With AC-3 proven, AC-4 (the PRD's second Desired-Outcome half — a feature ships on
+a repo the factory did NOT write) is unblocked. Target: **cats**
+(`/Users/keith/dev/gauntlet/cats`). Before any live run, reading `examples/live-foreign.ts`
+against the proven `live:self` harness and inspecting the cats repo surfaced FOUR
+load-bearing readiness gaps. Recording them here (bootstrap loop: record the stuck
+point before hand-building) — these are real engine/harness fixes, not config tweaks.
+
+**FINDING A — the PR boundary is GitHub-only; cats' `origin` is GitLab.** cats'
+`origin` remote is `ssh://git@labs.gauntletai.com:22022/keithmazanec/cats.git` — a
+self-hosted **GitLab** instance (confirmed: `/api/v4/version` → 401, `sign_in`
+redirect). `deriveRepoSlug`/`extractRepoSlug` only match `github.com` URLs → return
+`null` for cats' origin, so `live:foreign` exits at the slug-derivation guard before
+doing anything. And `open_pr` POSTs to `api.github.com` regardless. *Unblock:* cats
+also has a **`github` mirror remote** → `git@github.com:kmazanec/cats.git` (Keith's
+own repo, push access). AC-4 opens a real PR against that GitHub mirror — the
+supported path. The harness must derive the slug from the `github` remote, not
+`origin`.
+
+**FINDING B — `push_branch` hard-codes `remote = 'origin'`** (`pr-tools.ts`). For
+cats the PR-target remote is `github`, not `origin` (origin is GitLab). Pushing to
+origin would push to the wrong host. *Fix:* thread an optional `remote` through
+`prBoundary` → `pushBranchTool` (default `'origin'`, preserving every existing
+caller); the harness sets it to `github` for cats.
+
+**FINDING C — `deriveRepoSlug` reads only `origin`.** Add an optional remote-name
+param (default `origin`) so the harness can read the slug from cats' `github`
+remote. (`getOriginUrl` inside `push_branch` similarly assumes origin, but it is
+only used for the process-clean diff label + the `branch-pushed` event's `remote`
+field; the actual push target is the new `remote` param. Left as-is for now —
+not load-bearing for the push itself.)
+
+**FINDING D — the declared-script scheme is Node/npm-only; it cannot express a
+Python verify command.** `createScriptRunner` accepts exactly two declared-entry
+forms: `npm-script:<name>` (→ `npm run <name>`) or a repo-relative **node** script
+file (run with `process.execPath`). cats has no `package.json`; its checks are
+`uv run pytest` / `uv run ruff check .` / `uv run mypy` (via a Makefile with
+`test`/`lint`/`typecheck` targets). Neither declared form fits — so the cats deliver
+leaf would have NO way to verify its own work, which is exactly the AC-3 failure
+mode (finding 6: "let the leaf verify"). This violates the PRD's stated
+"stack-agnostic via repo scripts" requirement. *Fix:* add a third declared-entry
+form — **`make:<target>`** — that spawns `make <target>` (+ the validated model
+`target` appended), keeping the operator-fixes-the-command / model-supplies-only-the-
+target security invariant and staying stack-agnostic (any repo with a Makefile).
+cats declares `test → make:test`, `lint → make:lint`, `typecheck → make:typecheck`.
+
+Plan: implement B+C+D (small, tested engine changes), rewrite `live:foreign` to use
+the github mirror + cats' make-scripts + AC-3-style budget headroom, gate green,
+then run the first live AC-4 proof — expecting, like the AC-3 arc, that each run
+buys one more real fix.

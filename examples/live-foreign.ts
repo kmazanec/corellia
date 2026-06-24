@@ -19,13 +19,23 @@
  * REQUIRED ENVIRONMENT VARIABLES
  * ─────────────────────────────────────────────────────────────────────────────
  *   OPENROUTER_API_KEY   — required; Bearer token for all LLM requests
- *   GITHUB_TOKEN         — required; `repo` scope on the cats remote
+ *   GITHUB_TOKEN         — required; `repo` scope on the cats GITHUB MIRROR
  *   CATS_REPO_PATH       — required; absolute path to the cats local checkout
  *   CATS_FEATURE         — required; feature title/description to commission
  *   CATS_SCOPE           — required; comma-separated scope prefixes (e.g. "src/")
  *
+ * THE GITHUB-MIRROR PATH (AC-4 readiness, build-notes iteration 10)
+ * ─────────────────────────────────────────────────────────────────────────────
+ * cats' `origin` is a self-hosted GitLab host (labs.gauntletai.com) — the PR
+ * boundary speaks GitHub REST only. cats ALSO has a `github` mirror remote
+ * (git@github.com:kmazanec/cats.git). This harness derives the repo slug from,
+ * and pushes the tree branch to, that GITHUB remote (CATS_GIT_REMOTE, default
+ * `github`), so a real PR opens on the GitHub mirror.
+ *
  * OPTIONAL OVERRIDES
  * ─────────────────────────────────────────────────────────────────────────────
+ *   CATS_GIT_REMOTE      — the GitHub remote to derive the slug from + push to
+ *                          (default: github). origin is GitLab; the mirror is github.
  *   CATS_BASE_BRANCH     — base branch for the PR (default: main)
  *   CORELLIA_MODEL_LOW/MID/HIGH — model tier overrides
  *   STANDING_BUDGET_JSON / STANDING_SPEND_CEILING_USD — improvement envelope
@@ -82,6 +92,8 @@ const FEATURE = requireEnv('CATS_FEATURE');
 const SCOPE_RAW = requireEnv('CATS_SCOPE');
 const SCOPE = SCOPE_RAW.split(',').map((s) => s.trim()).filter(Boolean);
 const BASE_BRANCH = process.env['CATS_BASE_BRANCH'] ?? 'main';
+// cats' origin is GitLab; the GitHub mirror (PR target) is the `github` remote.
+const GIT_REMOTE = process.env['CATS_GIT_REMOTE'] ?? 'github';
 
 // Resolve cats repo.
 const rawCatsPath = process.argv[2] ?? process.env['CATS_REPO_PATH'];
@@ -95,16 +107,19 @@ const catsRoot = resolve(expanded);
 
 assertGitRepo(catsRoot, 'live:foreign');
 
-// Derive the GitHub repo slug from cats' origin remote.
-const catsRepoSlug = deriveRepoSlug(catsRoot);
+// Derive the GitHub repo slug from cats' GitHub mirror remote (default `github`).
+// origin is GitLab and would not match; the PR opens against the GitHub mirror.
+const catsRepoSlug = deriveRepoSlug(catsRoot, GIT_REMOTE);
 if (!catsRepoSlug) {
-  console.error('live:foreign: cannot derive repo slug from cats git remote get-url origin.');
-  console.error('  Ensure the origin remote is a GitHub URL (https or SSH).');
+  console.error(`live:foreign: cannot derive a GitHub repo slug from cats "${GIT_REMOTE}" remote.`);
+  console.error(`  Ensure git remote get-url ${GIT_REMOTE} is a GitHub URL (https or SSH).`);
+  console.error(`  cats' origin is GitLab — set CATS_GIT_REMOTE to the GitHub mirror remote.`);
   process.exit(1);
 }
 
 console.log(`Target repo:  ${catsRoot} (cats)`);
-console.log(`Repo slug:    ${catsRepoSlug}`);
+console.log(`Repo slug:    ${catsRepoSlug} (from "${GIT_REMOTE}" remote)`);
+console.log(`Push remote:  ${GIT_REMOTE}`);
 console.log(`Feature:      ${FEATURE}`);
 console.log(`Scope:        ${SCOPE.join(', ')}`);
 console.log(`Base branch:  ${BASE_BRANCH}`);
@@ -135,12 +150,24 @@ const engine = buildLiveEngine({
   store,
   sandbox: {
     repoRoot: catsRoot,
-    declaredScripts: {},
+    // cats is a Python repo (no package.json). Its checks run through its
+    // Makefile via the `make:<target>` declared-script form — so the deliver
+    // leaf can VERIFY ITS OWN WORK (the AC-3 "let the leaf verify" lesson).
+    // The operator fixes the command; only the run_script `target` is model input.
+    declaredScripts: {
+      test: 'make:test',
+      typecheck: 'make:typecheck',
+      lint: 'make:lint',
+    },
     knowledge: true,
     // prBoundary enables push_branch + open_pr for this deliver run and for any
     // improvement commission that routes through the improvement loop.
     prBoundary: {
       repoSlug: catsRepoSlug,
+      // Push to the GitHub mirror remote, NOT origin (origin is GitLab).
+      remote: GIT_REMOTE,
+      // No factoryRepoSlug: cats is a FOREIGN repo → the full process-clean gate
+      // applies (factory vocabulary in the diff is blocked).
       // No fetchTransport override: uses real GitHub REST (live run).
     },
   },
@@ -170,9 +197,14 @@ const commission: CommissionInput = {
   },
   scope: SCOPE,
   budget: {
-    attempts: 5,
-    tokens: 1_000_000,
-    toolCalls: 80,
+    // First-proof headroom, matching live:self's AC-3 rationale: keep structural
+    // budget rejections (subdivide flooring a small child to attempts:1, which a
+    // recursing comprehension child cannot fan out from) off the critical path so
+    // they don't mask the real question — does deliver-to-foreign function
+    // end-to-end. Tune down once AC-4 is proven.
+    attempts: 80,
+    tokens: 5_000_000,
+    toolCalls: 600,
     wallClockMs: 1_800_000,
   },
   intent: 'production',
@@ -180,7 +212,7 @@ const commission: CommissionInput = {
 
 console.log('── commissioning ─────────────────────────────────────────────────────────');
 console.log(`  Intent id:  ${intentId}`);
-console.log(`  Budget:     5 attempts, 1M tokens, 80 tool calls, 30 min`);
+console.log(`  Budget:     80 attempts, 5M tokens, 600 tool calls, 30 min`);
 console.log('');
 console.log('Running... (this is a live LLM run; costs are real)');
 console.log('');
