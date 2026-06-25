@@ -14,6 +14,7 @@ import { InMemoryEventStore } from '../../src/eventlog/memory-store.js';
 import {
   openTreeWorktree,
   diffWithinScope,
+  treeChangedWithinScope,
   collectTree,
   preserveTree,
   sanitizeTreeId,
@@ -223,9 +224,11 @@ describe('diff vs scope', () => {
     const result = diffWithinScope(wt.root, ['src/']);
     expect(result.ok).toBe(true);
     expect(result.scopeInsufficiency).toBeUndefined();
+    // changedCount 0 is the hollow-emit signal the emission gate reads.
+    expect(result.changedCount).toBe(0);
   });
 
-  it('returns ok:true when changed file is within scope', async () => {
+  it('returns ok:true with a positive changedCount when changed file is within scope', async () => {
     const repo = makeTempRepo();
     const store = new InMemoryEventStore();
 
@@ -239,6 +242,7 @@ describe('diff vs scope', () => {
     const result = diffWithinScope(wt.root, ['src/']);
     expect(result.ok).toBe(true);
     expect(result.scopeInsufficiency).toBeUndefined();
+    expect(result.changedCount).toBe(1);
   });
 
   it('returns ok:false when an out-of-scope file was written (script-mutated-file case)', async () => {
@@ -256,6 +260,48 @@ describe('diff vs scope', () => {
     expect(result.ok).toBe(false);
     expect(result.scopeInsufficiency).toBeDefined();
     expect(result.scopeInsufficiency).toContain('outside/secret.ts');
+  });
+
+  it('treeChangedWithinScope: 0 for an untouched tree (the hollow-emit signal)', async () => {
+    const repo = makeTempRepo();
+    const store = new InMemoryEventStore();
+    const wt = await openTreeWorktree(repo, 'goal-tc-0', store);
+    expect(treeChangedWithinScope(wt.root, wt.baseSha, ['src/'])).toBe(0);
+  });
+
+  it('treeChangedWithinScope: counts an uncommitted in-scope write', async () => {
+    const repo = makeTempRepo();
+    const store = new InMemoryEventStore();
+    const wt = await openTreeWorktree(repo, 'goal-tc-1', store);
+    mkdirSync(join(wt.root, 'src'), { recursive: true });
+    writeFileSync(join(wt.root, 'src', 'new.ts'), 'export const x = 1;\n');
+    expect(treeChangedWithinScope(wt.root, wt.baseSha, ['src/'])).toBe(1);
+  });
+
+  it('treeChangedWithinScope: counts COMMITTED changes since base (the milestone-round case)', async () => {
+    // The bug the base-SHA fix addresses: a milestone round COMMITS its work,
+    // advancing HEAD, so `git diff HEAD` shows nothing — but the change is real
+    // vs. the base the worktree forked from.
+    const repo = makeTempRepo();
+    const store = new InMemoryEventStore();
+    const wt = await openTreeWorktree(repo, 'goal-tc-2', store);
+    mkdirSync(join(wt.root, 'src'), { recursive: true });
+    writeFileSync(join(wt.root, 'src', 'committed.ts'), 'export const y = 2;\n');
+    execFileSync('git', ['-C', wt.root, 'add', '--all'], { stdio: 'pipe' });
+    execFileSync('git', ['-C', wt.root, 'commit', '-m', 'feat(round 1): work'], { stdio: 'pipe' });
+    // git diff HEAD now sees nothing...
+    expect(diffWithinScope(wt.root, ['src/']).changedCount).toBe(0);
+    // ...but treeChangedWithinScope counts it against the base.
+    expect(treeChangedWithinScope(wt.root, wt.baseSha, ['src/'])).toBe(1);
+  });
+
+  it('treeChangedWithinScope: an out-of-scope change does not count', async () => {
+    const repo = makeTempRepo();
+    const store = new InMemoryEventStore();
+    const wt = await openTreeWorktree(repo, 'goal-tc-3', store);
+    mkdirSync(join(wt.root, 'other'), { recursive: true });
+    writeFileSync(join(wt.root, 'other', 'x.ts'), 'export const z = 3;\n');
+    expect(treeChangedWithinScope(wt.root, wt.baseSha, ['src/'])).toBe(0);
   });
 
   it('names all offending paths in the insufficiency report', async () => {

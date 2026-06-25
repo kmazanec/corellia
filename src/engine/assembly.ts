@@ -202,7 +202,7 @@ export async function openSandboxAssembly(
   store: EventStore,
   now: () => number = () => Date.now(),
 ): Promise<SandboxAssembly> {
-  const { treeId, branch, root } = await openTreeWorktree(config.repoRoot, rootGoalId, store);
+  const { treeId, branch, root, baseSha } = await openTreeWorktree(config.repoRoot, rootGoalId, store);
 
   const worktree: TreeWorktree = {
     treeId,
@@ -210,6 +210,7 @@ export async function openSandboxAssembly(
     root,
     repoRoot: config.repoRoot,
     goalId: rootGoalId,
+    baseSha,
   };
 
   // The base runner is bound to the worktree root + declared scripts, with a
@@ -363,6 +364,7 @@ export function openLearnAssembly(
     root,
     repoRoot: root,
     goalId: rootGoalId,
+    baseSha: '',
   };
 
   const checkContextFor = (_goalId: string): CheckContext => ({

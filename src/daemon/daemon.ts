@@ -208,7 +208,7 @@ async function onSigterm(): Promise<void> {
     // Same path layout as openTreeWorktree (worktree.ts).
     const root = join(repoRoot, '.corellia', 'worktrees', treeId);
 
-    const worktree = { treeId, branch, root, repoRoot, goalId: intentId };
+    const worktree = { treeId, branch, root, repoRoot, goalId: intentId, baseSha: '' };
     try {
       await preserveTree(worktree, store, 'SIGTERM: daemon shutting down');
       console.log(`[daemon] preserved worktree for intent ${intentId}`);

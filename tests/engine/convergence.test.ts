@@ -263,6 +263,66 @@ describe('convergence — scripted full-stack composed path', () => {
   });
 });
 
+// ── hollow-emit gate: a make root that changes NO files blocks ──
+//
+// A make-kind leaf emits a plausible artifact but makes NO write_file calls, so
+// the worktree is unchanged. The integration judge reads artifact TEXT and could
+// be fooled; the emission gate is the deterministic ground truth: a make root that
+// "succeeds" with zero in-scope worktree change is a hollow emit and must block.
+// (Build run live-self-a2397f0f: a slice did 0 write_file, only open_pr, and the
+// tree would otherwise have claimed success with nothing built.)
+
+describe('hollow-emit gate', () => {
+  it('blocks a make root that emits a non-empty artifact but writes no files', async () => {
+    const repo = makeFixtureRepo();
+    const store = new MemoryEventStore();
+
+    // The leaf emits text WITHOUT any write_file call — the hollow emit.
+    const brain = planBrain([
+      { kind: 'artifact', artifact: { kind: 'text', text: 'I implemented the feature (but wrote nothing).' }, usage: USAGE },
+    ]);
+
+    const registry = buildRegistry([
+      // A make leaf with NO deterministic checks of its own, so only the
+      // tree-level emission gate stands between it and a (false) success.
+      {
+        name: 'implement',
+        kind: 'make' as const,
+        family: 'build',
+        leafOnly: true,
+        tier: { default: 'mid', ladder: ['mid'] },
+        deterministic: [],
+        judgeType: null,
+        grants: ['fs.read', 'fs.write'],
+      },
+    ]);
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      sandbox: { repoRoot: repo, declaredScripts: {} },
+    });
+
+    const goal = makeGoal({
+      id: 'hollow-root',
+      type: 'implement',
+      title: 'build the thing',
+      scope: ['src/'],
+      budget: { attempts: 2, tokens: 100_000, toolCalls: 50, wallClockMs: 120_000 },
+    });
+
+    const report = await engine.run(goal);
+
+    // It must NOT count as a delivery — the gate blocks the hollow emit.
+    expect(report.blockers.length).toBeGreaterThan(0);
+    expect(report.blockers.join(' ')).toMatch(/hollow emit/i);
+    // The worktree was preserved (blocked), not collected.
+    const events = await store.list();
+    expect(events.some((e) => e.type === 'worktree-collected')).toBe(false);
+  });
+});
+
 // ── attribution: SPLIT tree, script-ran goalId equals child id ──
 //
 // A root goal splits into one tool-granted implement child leaf that calls

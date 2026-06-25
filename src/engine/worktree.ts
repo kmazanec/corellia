@@ -51,6 +51,13 @@ export interface TreeWorktree {
   repoRoot: string;
   /** The goal id of the tree-root goal (for event emission). */
   goalId: string;
+  /**
+   * The commit the worktree branch forked from (repo HEAD at `worktree add`).
+   * The hollow-emit gate counts changes since THIS, not since the moving HEAD —
+   * milestone rounds commit their work (advancing HEAD), so `git diff HEAD` would
+   * show nothing even though the tree delivered real changes vs. its base.
+   */
+  baseSha: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -145,13 +152,25 @@ export async function openTreeWorktree(
   repoRoot: string,
   rootGoalId: string,
   store: EventStore,
-): Promise<{ treeId: string; branch: string; root: string }> {
+): Promise<{ treeId: string; branch: string; root: string; baseSha: string }> {
   const treeId = sanitizeTreeId(rootGoalId);
   const branch = `tree/${treeId}`;
   const root = join(repoRoot, '.corellia', 'worktrees', treeId);
 
   // Ensure .corellia/worktrees is gitignored before creating the directory.
   ensureGitignored(repoRoot);
+
+  // The commit the new branch will fork from = the repo's current HEAD. Captured
+  // so the hollow-emit gate can diff against it rather than the moving HEAD (which
+  // milestone round commits advance). Empty string if the repo has no commits yet.
+  let baseSha = '';
+  try {
+    baseSha = execFileSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], {
+      stdio: 'pipe', encoding: 'utf-8',
+    }).trim();
+  } catch {
+    baseSha = '';
+  }
 
   // Create the worktree on a new branch.
   // execFileSync with args-array (no shell string).
@@ -188,7 +207,7 @@ export async function openTreeWorktree(
     path: root,
   });
 
-  return { treeId, branch, root };
+  return { treeId, branch, root, baseSha };
 }
 
 // ---------------------------------------------------------------------------
@@ -206,7 +225,7 @@ export async function openTreeWorktree(
 export function diffWithinScope(
   worktreeRoot: string,
   scope: string[],
-): { ok: boolean; scopeInsufficiency?: string } {
+): { ok: boolean; scopeInsufficiency?: string; changedCount: number } {
   // Collect changed paths: all tracked changes (staged + unstaged) via diff HEAD,
   // plus untracked files via ls-files. diff HEAD is a strict superset of
   // diff --cached HEAD, so the redundant --cached exec is omitted.
@@ -239,15 +258,19 @@ export function diffWithinScope(
   }
 
   if (all.size === 0) {
-    return { ok: true };
+    // No worktree change at all. In-scope by vacuity, but the count is 0 — the
+    // caller uses changedCount to distinguish a real delivery from a hollow emit
+    // (a make root that "succeeded" without writing anything).
+    return { ok: true, changedCount: 0 };
   }
 
   // If scope is empty, allow everything (consistent with isInScope behavior).
   if (scope.length === 0) {
-    return { ok: true };
+    return { ok: true, changedCount: all.size };
   }
 
   const offending: string[] = [];
+  let inScope = 0;
   for (const p of all) {
     // Reject absolute paths and traversals outright.
     if (isAbsolute(p) || normalize(p).startsWith('..')) {
@@ -256,17 +279,69 @@ export function diffWithinScope(
     }
     if (!isInScope(p, scope)) {
       offending.push(p);
+    } else {
+      inScope++;
     }
   }
 
   if (offending.length === 0) {
-    return { ok: true };
+    return { ok: true, changedCount: inScope };
   }
 
   return {
     ok: false,
     scopeInsufficiency: `File(s) outside declared scope: ${offending.join(', ')}`,
+    changedCount: inScope,
   };
+}
+
+/**
+ * Count files changed within `scope` since the worktree's BASE commit — both
+ * committed (`base..HEAD`, which captures milestone round commits) and
+ * uncommitted (the single-pass case). This is the hollow-emit signal: a make root
+ * that "succeeded" with 0 changes here delivered nothing. Distinct from
+ * `diffWithinScope`, which checks the UNCOMMITTED diff against scope at emit and
+ * would see nothing once round commits have advanced HEAD. Dep-link paths are
+ * dropped (same as diffWithinScope). Any git error → returns a positive count
+ * (fail-open: never block a real delivery on a git hiccup).
+ */
+export function treeChangedWithinScope(
+  worktreeRoot: string,
+  baseSha: string,
+  scope: string[],
+): number {
+  const gitLines = (args: string[]): string[] => {
+    try {
+      return execFileSync('git', ['-C', worktreeRoot, ...args], { stdio: 'pipe', encoding: 'utf-8' })
+        .trim().split('\n').map((s) => s.trim()).filter(Boolean);
+    } catch {
+      return [];
+    }
+  };
+  const DEP_LINKS = ['node_modules', '.venv'];
+  const isDepLink = (p: string): boolean =>
+    DEP_LINKS.some((d) => p === d || p.startsWith(`${d}/`));
+
+  const committed = baseSha ? gitLines(['diff', '--name-only', `${baseSha}..HEAD`]) : [];
+  const uncommittedTracked = gitLines(['diff', '--name-only', 'HEAD']);
+  const untracked = gitLines(['ls-files', '--others', '--exclude-standard']);
+
+  const all = new Set<string>();
+  for (const p of [...committed, ...uncommittedTracked, ...untracked]) {
+    if (!isDepLink(p)) all.add(p);
+  }
+  if (all.size === 0) {
+    // Genuinely no change. (If git errored on EVERY query we'd also land here;
+    // that is acceptable — the gate treats 0 as hollow only for a make root that
+    // ALSO reported success, and a totally broken git would have failed earlier.)
+    return 0;
+  }
+  if (scope.length === 0) return all.size;
+  let inScope = 0;
+  for (const p of all) {
+    if (!isAbsolute(p) && !normalize(p).startsWith('..') && isInScope(p, scope)) inScope++;
+  }
+  return inScope;
 }
 
 // ---------------------------------------------------------------------------
