@@ -282,6 +282,71 @@ describe('ADR-029 — map-repo split merges children into ONE KnowledgeArtifact'
 });
 
 // ---------------------------------------------------------------------------
+// repoShapeHint — a LARGE scoped region gets a split-or-die size signal
+// ---------------------------------------------------------------------------
+
+describe('repoShapeHint — scoped region size signal (live-self-4b84f2d2)', () => {
+  // Reach the private hint + size counter via the established as-unknown seam.
+  type HintSeam = {
+    _activeAssembly: { worktree: { root: string } } | undefined;
+    repoShapeHint(goal: Goal): string | undefined;
+  };
+
+  function engineWithRoot(root: string): HintSeam {
+    const engine = new Engine({
+      registry: buildRegistry([diveType()]),
+      brain: new ScriptedBrain(),
+      store: new MemoryEventStore(),
+      memory: new NoopMemoryView(),
+    });
+    const seam = engine as unknown as HintSeam;
+    seam._activeAssembly = { worktree: { root } };
+    return seam;
+  }
+
+  it('emits a SPLIT hint for a deep-dive of a large scoped region (docs/ regression)', () => {
+    const root = makeTmp();
+    mkdirSync(join(root, 'docs', 'adrs'), { recursive: true });
+    mkdirSync(join(root, 'docs', 'iterations'), { recursive: true });
+    // Many files — like docs/ after the OKF reorg, which blew the dive wall-clock.
+    for (let i = 0; i < 60; i++) {
+      writeFileSync(join(root, 'docs', 'adrs', `ADR-${i}.md`), 'x\n');
+    }
+    for (let i = 0; i < 20; i++) {
+      writeFileSync(join(root, 'docs', 'iterations', `iter-${i}.md`), 'x\n');
+    }
+
+    const seam = engineWithRoot(root);
+    const goal = makeGoal({ type: 'deep-dive-region', scope: ['docs/'] });
+    const hint = seam.repoShapeHint(goal);
+
+    expect(hint).toBeDefined();
+    expect(hint).toMatch(/region size/i);
+    expect(hint).toMatch(/SPLIT it/i);
+  });
+
+  it('stays silent for a SMALL scoped region (no needless split pressure)', () => {
+    const root = makeTmp();
+    mkdirSync(join(root, 'src', 'util'), { recursive: true });
+    writeFileSync(join(root, 'src', 'util', 'a.ts'), 'x\n');
+    writeFileSync(join(root, 'src', 'util', 'b.ts'), 'x\n');
+
+    const seam = engineWithRoot(root);
+    const goal = makeGoal({ type: 'deep-dive-region', scope: ['src/util/'] });
+    expect(seam.repoShapeHint(goal)).toBeUndefined();
+  });
+
+  it('does not fire for a non-comprehension type even when scoped large', () => {
+    const root = makeTmp();
+    mkdirSync(join(root, 'docs'), { recursive: true });
+    for (let i = 0; i < 60; i++) writeFileSync(join(root, 'docs', `f-${i}.md`), 'x\n');
+
+    const seam = engineWithRoot(root);
+    const goal = makeGoal({ type: 'implement', scope: ['docs/'] });
+    expect(seam.repoShapeHint(goal)).toBeUndefined();
+  });
+});
+
 // deep-dive-region split → RegionFacts merge
 // ---------------------------------------------------------------------------
 

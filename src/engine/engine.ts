@@ -2743,23 +2743,45 @@ export class Engine {
    * which case the decide falls back to the goal-context-only behavior. Scoped
    * goals (non-empty scope) are excluded: scoping already bounds them.
    */
+  // Directories that are never source subsystems; excluded from size counts so a
+  // region's real breadth drives the split decision, not its tooling.
+  private static readonly SHAPE_IGNORE = new Set([
+    '.git', 'node_modules', '.venv', 'venv', '__pycache__', 'dist', 'build',
+    'out', '.corellia', '.claude', 'coverage', '.next', 'target', '.cache',
+  ]);
+
   private repoShapeHint(goal: Goal): string | undefined {
     if (this._activeAssembly === undefined) return undefined;
-    if (goal.type !== 'map-repo') return undefined;
-    if (goal.scope.length > 0) return undefined; // scoped → already bounded
+    // The size signal applies to the two comprehension types that map a region and
+    // must split when it is too large to cover faithfully in one node (ADR-029).
+    if (goal.type !== 'map-repo' && goal.type !== 'deep-dive-region') return undefined;
     const root = this._activeAssembly.worktree.root;
-    // Directories that are never source subsystems; excluded from the count so a
-    // repo's real subsystem breadth drives the split decision, not its tooling.
-    const IGNORE = new Set([
-      '.git', 'node_modules', '.venv', 'venv', '__pycache__', 'dist', 'build',
-      'out', '.corellia', '.claude', 'coverage', '.next', 'target', '.cache',
-    ]);
+
+    // SCOPED region (e.g. a deep-dive of `docs/`): a scope was NOT a guarantee of
+    // boundedness — a scoped region can itself be huge (a deep-dive of `docs/`
+    // after the OKF reorg blew its wall-clock; live-self-4b84f2d2). Measure the
+    // region's actual size and, if it is large, emit the same split-or-die hint.
+    if (goal.scope.length > 0) {
+      const { dirs, files } = this.countRegion(root, goal.scope);
+      // Small regions need no hint — the dive fits one node. The threshold is a
+      // coarse "this won't fit one wall-clock slice" line, not a contract.
+      if (files < 40) return undefined;
+      return (
+        `region size (scope: ${goal.scope.join(', ')}): ~${files} files across ` +
+        `~${dirs} directories. (Rule of thumb: a region of many dozens of files / ` +
+        `directories is too large to deep-dive faithfully in one node — SPLIT it ` +
+        `into sub-region children, one per sub-directory or cohesive area, rather ` +
+        `than attempting the whole region in a single dive.)`
+      );
+    }
+
+    // WHOLE-REPO map (unscoped map-repo): subsystem breadth one level deep.
     try {
       const entries = readdirSync(root, { withFileTypes: true });
       let topDirs = 0;
       let topFiles = 0;
       for (const e of entries) {
-        if (IGNORE.has(e.name)) continue;
+        if (Engine.SHAPE_IGNORE.has(e.name)) continue;
         if (e.isDirectory()) topDirs++;
         else if (e.isFile()) topFiles++;
       }
@@ -2768,7 +2790,7 @@ export class Engine {
       // full recursive walk on the decide path.
       let nestedFiles = 0;
       for (const e of entries) {
-        if (!e.isDirectory() || IGNORE.has(e.name)) continue;
+        if (!e.isDirectory() || Engine.SHAPE_IGNORE.has(e.name)) continue;
         try {
           nestedFiles += readdirSync(`${root}/${e.name}`).length;
         } catch {
@@ -2785,6 +2807,43 @@ export class Engine {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Coarsely count the files and directories under a set of scope prefixes,
+   * bounded so the decide-path cost stays small. Returns approximate totals — a
+   * size SIGNAL for the split decision, never a contract. Ignored tooling dirs
+   * (node_modules, .git, …) are excluded. The walk stops early once it is clearly
+   * "large" so a genuinely huge region never makes the hint itself expensive.
+   */
+  private countRegion(root: string, scope: string[]): { dirs: number; files: number } {
+    let dirs = 0;
+    let files = 0;
+    const CAP = 500; // stop counting past this — already unambiguously "large"
+    const walk = (abs: string): void => {
+      if (files >= CAP) return;
+      let entries: import('node:fs').Dirent[];
+      try {
+        entries = readdirSync(abs, { withFileTypes: true });
+      } catch {
+        return; // unreadable / non-existent prefix — contributes nothing
+      }
+      for (const e of entries) {
+        if (Engine.SHAPE_IGNORE.has(e.name)) continue;
+        if (e.isDirectory()) {
+          dirs++;
+          walk(`${abs}/${e.name}`);
+        } else if (e.isFile()) {
+          files++;
+        }
+        if (files >= CAP) return;
+      }
+    };
+    for (const prefix of scope) {
+      const clean = prefix.replace(/\/+$/, '');
+      walk(`${root}/${clean}`);
+    }
+    return { dirs, files };
   }
 
   private async runCoverageGate(
