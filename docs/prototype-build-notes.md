@@ -2292,3 +2292,35 @@ real front door end to end:
 
 Next: graduate the skill to producing the milestone-loop commission; and when that
 feature is built, re-run this commission as the convergence proof.
+
+# Iteration 13 — Building the milestone loop: stuck point + factory-first experiment
+
+**The chicken-and-egg stuck point (recorded per bootstrap discipline).** The
+milestone loop (ADR-031/032) is the feature that gives `deliver-intent` the ability
+to iterate (decide→split→integrate→assess→re-decide) instead of being single-pass.
+But that means **the feature being built is the very capability whose absence makes
+the build hard**: implementing the loop is large, multi-round, integration-heavy
+engine surgery across `src/contract` + `src/engine` + `src/library` (6 dependent,
+test-gated steps) — exactly the shape today's single-pass `deliver-intent` blocks
+on (proven by the word-count repro above, and by tiutni Run 1). So "have the factory
+build its own looping ability" is genuinely circular: the thing that would let it
+succeed is the thing under construction.
+
+**What was hand-built (the fallback).** Steps 1–6 of `docs/milestone-loop-SPEC.md`
+were hand-built by a harness-orchestrated builder agent in an isolated worktree
+(`build/milestone-loop`, off `main`): contract scaffolding + lint, the
+behavior-preserving `runRound` extraction, the criteria/judge types + deterministic
+floor, `commitRound`/`diffBodiesWithinScope`, `runMilestone` single-round, then the
+four-guard loop. Suite green (1479 pass; the 2 pre-existing daemon-spawn failures
+excepted). This branch is the FALLBACK — it is NOT yet merged.
+
+**The discipline gap, named honestly.** Hand-building *first* skipped the bootstrap
+loop's step 1 ("prefer the factory; let it stall; the stall is the signal"). The
+correction (Keith's call): before accepting the hand-built code, **commission the
+full feature through the real front door (`live:self`) off `main` (which lacks the
+loop), and watch where it stalls.** The factory builds against a codebase WITHOUT
+the loop, the hand-built branch stays isolated so the experiment is uncontaminated,
+and we compare. The stall — or the surprise — is the diagnostic that should have
+been produced first.
+
+**Run record:** see below / the event-log cost summary for the live:self outcome.
