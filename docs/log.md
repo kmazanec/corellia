@@ -16,6 +16,18 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-25
 
+- **ADR-034/035 build run #3** (`live-self-4b84f2d2`, $1.05) — the breakthrough
+  run: the satisfy-prevention worked, the root SPLIT (no satisfy), `judge-split`
+  PASSED first try into 6 proper vertical slices (4 `implement` + 2
+  `improve-factory` — the factory correctly typed the self-modification slices),
+  and it built far past the prior dead-ends. It blocked downstream: the `docs/`
+  comprehension dive exhausted its wall-clock (~112s — `docs/` is now large after
+  the OKF reorg) and that one failed dependency cascade-blocked all 6 build slices.
+  Filed as [issue](issues/comprehension-region-wallclock-exhaustion.md) (a large
+  region should split, not time out; + the cascade has no degraded path). Four
+  engine fixes this session (decide-json, satisfy-guard, satisfy-prevention,
+  CORELLIA_REFS) took the factory from "blocks at decision #1" → "splits and builds
+  6 slices." Worktree torn down; main undisturbed.
 - **Cannot-satisfy guard + decide-time prevention** for `mustDecompose` types
   (`mustDecompose` on `GoalTypeDef`/`deliver-intent`; engine guard + constitution
   lint; `BrainContext.mustDecompose` so the decide prompt omits `satisfy`). A
