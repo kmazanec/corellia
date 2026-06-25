@@ -41,6 +41,17 @@ Each issue is one OKF `type: issue` file with `kind` (bug | idea | future-work),
 | [ground-fact-external-knowledge](ground-fact-external-knowledge.md) | future-work | structural, knowledge, grounding |
 | [milestone-loop-step-8-slice-nesting](milestone-loop-step-8-slice-nesting.md) | future-work | milestone-loop, engine |
 
+## Factory self-hosting (meta) — the factory participates in this discipline itself
+
+These capture the work to make Corellia a first-class participant in the OKF
+issue/iteration/log discipline, not just its subject.
+
+| Issue | Kind | Sev | Tags |
+|---|---|---|---|
+| [factory-manages-issues](factory-manages-issues.md) | future-work | medium | factory, issues, self-hosting |
+| [factory-authors-iterations](factory-authors-iterations.md) | future-work | medium | factory, iterations, self-hosting |
+| [factory-okf-discipline](factory-okf-discipline.md) | idea | low | factory, docs, okf, constitution |
+
 ## Low severity
 
 | Issue | Kind | Tags |

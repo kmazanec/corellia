@@ -21,7 +21,7 @@ Operator supplied the 2025 brackets/deduction figures; and when a later edit cha
 the standard deduction to `$15,750`, the operator caught it, checked the
 authoritative source (the IRS form's own margin) before acting, and confirmed
 `$15,750` was actually correct for 2025 (OBBBA) — i.e. did the fact-verification the
-factory has no mechanism for. Source: `docs/gaps-from-tiutni.md` §B5.
+factory has no mechanism for. Source: the gap-audit iteration (docs/iterations/2026-06-24-01-gap-audit-tiutni/index.md).
 
 ## Proposed direction
 A `ground-fact` capability — when a goal depends on an external fact (a rate,

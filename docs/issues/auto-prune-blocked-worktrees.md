@@ -17,8 +17,8 @@ Blocked runs left `.corellia/worktrees/<id>/` for the operator to
 
 ## Evidence
 tiutni blocked runs left orphaned worktrees for the operator to remove. Source:
-`docs/gaps-from-tiutni.md` §D4. (Corroborated by the iteration-13 run record in
-`docs/prototype-build-notes.md`: the blocked `live-self-93cbaae0` worktree + its
+the gap-audit iteration (docs/iterations/2026-06-24-01-gap-audit-tiutni/index.md). (Corroborated by the iteration-13 run record in
+the relevant iteration record under docs/iterations/: the blocked `live-self-93cbaae0` worktree + its
 `tree/*` branch were torn down by hand.)
 
 ## Proposed direction

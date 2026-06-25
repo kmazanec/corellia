@@ -23,7 +23,7 @@ factory-factory · dangerous grants.
 semantic retrieval · full replay tooling.
 
 ## Evidence
-`docs/ROADMAP.md` "Non-goals and deferred" section (mirrors PRD §4). Some deferred
+the roadmap (now folded into docs/iterations/index.md + docs/issues/) "Non-goals and deferred" section (mirrors PRD §4). Some deferred
 items overlap with the ride-along items issue (semantic retrieval ≈ pgvector
 retrieval; full replay tooling ≈ replay harness).
 

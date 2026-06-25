@@ -20,7 +20,7 @@ already sees.
 ## Evidence
 Operator did: `curl`ed the official `f1040.pdf` from irs.gov, confirmed the tax
 year, inspected its 199 AcroForm fields, vendored it into the repo. Source:
-`docs/gaps-from-tiutni.md` §B1.
+the gap-audit iteration (docs/iterations/2026-06-24-01-gap-audit-tiutni/index.md).
 
 ## Proposed direction
 A sandboxed `fetch_resource` tool (allow-listed domains, size cap, checksum recorded

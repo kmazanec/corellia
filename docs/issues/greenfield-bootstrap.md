@@ -20,7 +20,7 @@ not the first commit.
 Operator did: `git init`, wrote the initial `package.json`/`tsconfig`/server
 scaffold + the frozen `domain/types.ts` contract + typed stubs, committed a green
 baseline — because the worktree flow REQUIRES an existing git repo with something to
-build *into*. Source: `docs/gaps-from-tiutni.md` §B4.
+build *into*. Source: the gap-audit iteration (docs/iterations/2026-06-24-01-gap-audit-tiutni/index.md).
 
 ## Proposed direction
 A `scaffold-project` goal type (or, at minimum, a documented "operator seeds the

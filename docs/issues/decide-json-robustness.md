@@ -22,8 +22,7 @@ law working correctly (a node that can't decide responsibly blocks), but the cau
 is a transport/prompt-shape gap, not a reasoning failure.
 
 ## Evidence
-`docs/prototype-build-notes.md` iteration-13 run record (2026-06-25, intent
-`live-self-93cbaae0`, $1.01). Event sequence:
+the relevant iteration record under docs/iterations/. Event sequence:
 `goal-received → risk-classified → pattern-consulted → decided(block)`. Blocker:
 *"Decision-maker could not produce a valid decision: Expected double-quoted property
 name in JSON at position 1546 (line 1 column 1547)"* — ≈ the embedded ~1583-char

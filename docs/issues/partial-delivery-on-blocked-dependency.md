@@ -19,7 +19,7 @@ even when most modules are perfect.
 ## Evidence
 Run 1 (tiutni): filler failed → orchestrator `"Blocked because a dependency failed"`
 → root blocked, even though 3 of 5 modules were perfect. The operator hand-fished
-the good modules out of the worktree. Source: `docs/gaps-from-tiutni.md` §A5.
+the good modules out of the worktree. Source: the gap-audit iteration (docs/iterations/2026-06-24-01-gap-audit-tiutni/index.md).
 
 ## Proposed direction
 **Partial-delivery**: when some children succeed and others block, emit a report

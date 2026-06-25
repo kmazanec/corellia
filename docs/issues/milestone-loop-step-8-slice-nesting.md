@@ -19,7 +19,7 @@ the final build step and is explicitly gated to land only AFTER the flat root-lo
 is proven live (step 7).
 
 ## Evidence
-`docs/milestone-loop-SPEC.md` §4.5, §6, and §8 build sequence step 8 (UNBUILT). The
+docs/iterations/2026-06-24-03-milestone-loop/spec.md §4.5, §6, and §8 build sequence step 8 (UNBUILT). The
 spec is explicit: "Lands as build-sequence step 8, a distinct late step AFTER the
 flat root-loop is proven via live:self (step 7). Not interleaved."
 

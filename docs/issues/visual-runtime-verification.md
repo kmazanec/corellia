@@ -22,7 +22,7 @@ Operator did: rendered the filled 1040 to an image and eyeballed every line to
 confirm the AcroForm field→line map (a transposed field silently puts money on the
 wrong line — no unit test catches it); screenshotted the UI to catch a
 swapped-column regression; drove a live HTTP conversation to confirm the agent
-actually tool-calls. Source: `docs/gaps-from-tiutni.md` §B2.
+actually tool-calls. Source: the gap-audit iteration (docs/iterations/2026-06-24-01-gap-audit-tiutni/index.md).
 
 ## Proposed direction
 A **visual/runtime verification rung** — a tool that can (a) start the app and hit

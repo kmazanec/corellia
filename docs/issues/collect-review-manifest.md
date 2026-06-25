@@ -20,7 +20,7 @@ before each merge.
 ## Evidence
 Operator did: manually `git diff main..tree/<id>`, checked every element id the JS
 depended on still existed, that no network call changed, etc., before each merge.
-Source: `docs/gaps-from-tiutni.md` §C2.
+Source: the gap-audit iteration (docs/iterations/2026-06-24-01-gap-audit-tiutni/index.md).
 
 ## Proposed direction
 A `collect` step that produces a structured **review manifest** (files changed,

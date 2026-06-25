@@ -18,7 +18,7 @@ conventional-commits, not descriptive.
 
 ## Evidence
 tiutni runs (collected commits + auto-commits). Source:
-`docs/gaps-from-tiutni.md` §D1.
+the gap-audit iteration (docs/iterations/2026-06-24-01-gap-audit-tiutni/index.md).
 
 ## Proposed direction
 Have the deliver report supply a proper commit subject/body from the goal intent.

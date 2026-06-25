@@ -18,7 +18,7 @@ surfaces it.
 
 ## Evidence
 Run 2's (tiutni) total block correlated with the configured model's weaker tool-use.
-Source: `docs/gaps-from-tiutni.md` §D2.
+Source: the gap-audit iteration (docs/iterations/2026-06-24-01-gap-audit-tiutni/index.md).
 
 ## Proposed direction
 Track per-tier tool-call success rate as a metric; surface "this tier is failing

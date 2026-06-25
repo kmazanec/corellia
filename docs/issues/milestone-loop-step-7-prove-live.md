@@ -20,10 +20,10 @@ honest partial on a deliberately-hard intent. This is a hard gate: nesting (step
 must not proceed until the flat loop is proven.
 
 ## Evidence
-`docs/milestone-loop-SPEC.md` §8 build sequence step 7 (UNBUILT). The designated
+docs/iterations/2026-06-24-03-milestone-loop/spec.md §8 build sequence step 7 (UNBUILT). The designated
 proof target is `commissions/example-word-count.ts` flipping its current BLOCK to a
 converged PASS. Context: the iteration-13 factory-first attempt
-(`docs/prototype-build-notes.md`, intent `live-self-93cbaae0`) stalled UPSTREAM of
+(the relevant iteration record under docs/iterations/, intent `live-self-93cbaae0`) stalled UPSTREAM of
 this on a separate decide-robustness gap, so the loop itself has not yet reached a
 live verdict. The hand-built `build/milestone-loop` branch (steps 1–6) remains
 unmerged.
@@ -32,7 +32,7 @@ unmerged.
 Commission a small composite intent via `live:self`; confirm convergence (green PR,
 per-round commits) and an honest partial on a hard intent. Use
 `commissions/example-word-count.ts` as the BLOCK→PASS proof. Record the run in the
-event log / `docs/prototype-build-notes.md` per bootstrap discipline. (Note: the
+event log / the relevant iteration record under docs/iterations/ per bootstrap discipline. (Note: the
 decide-robustness gap may need resolving first for a clean run — see
 `decide-json-robustness.md`.)
 

@@ -22,7 +22,7 @@ Run 1 (tiutni) `deliver-intent` blocker: *"Guardrails reject core domain inputs:
 'transcript'; budgetExhausted not called; QUESTION_BUDGET absent."* All true bugs —
 but they live at the SEAM between the guardrails leaf and the (never-built)
 orchestrator leaf. The judge saw them; no leaf owned the fix. Source:
-`docs/gaps-from-tiutni.md` §A4.
+the gap-audit iteration (docs/iterations/2026-06-24-01-gap-audit-tiutni/index.md).
 
 ## Proposed direction
 A `repair-integration` goal type the root can spawn when `judge-integration` fails —

@@ -20,7 +20,7 @@ reachable" — a hard brief requirement — is outside its model.
 Operator did: wrote the Dockerfile + `render.yaml`, created the GitHub repo
 (`gh repo create`), pushed, drove the Render dashboard in a browser to create the
 blueprint, set `OPENROUTER_API_KEY`, and triggered every redeploy. Source:
-`docs/gaps-from-tiutni.md` §B3.
+the gap-audit iteration (docs/iterations/2026-06-24-01-gap-audit-tiutni/index.md).
 
 ## Proposed direction
 A `deploy` goal family + provider adapter (start with Render's API:

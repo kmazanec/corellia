@@ -29,7 +29,7 @@ deleted:
 listed here.)
 
 ## Evidence
-`docs/ROADMAP.md` "Ride-along items (small, any iteration)" section. The roadmap is
+the roadmap (now folded into docs/iterations/index.md + docs/issues/) "Ride-along items (small, any iteration)" section. The roadmap is
 being deleted; these bullets were future/unbuilt.
 
 ## Proposed direction

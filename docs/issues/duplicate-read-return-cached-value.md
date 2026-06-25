@@ -18,7 +18,7 @@ must reason around, sometimes stalling, instead of handing back the result.
 ## Evidence
 Run 1 (tiutni), ×2: `"Duplicate read refused (F-64): an identical call to
 list_dir/read_file … was already executed this attempt."` Source:
-`docs/gaps-from-tiutni.md` §A3.
+the gap-audit iteration (docs/iterations/2026-06-24-01-gap-audit-tiutni/index.md).
 
 ## Proposed direction
 When refusing a duplicate read, **return the prior result's content** (or a pointer

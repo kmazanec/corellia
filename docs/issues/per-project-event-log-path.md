@@ -17,7 +17,7 @@ is no per-target-repo default log path.
 
 ## Evidence
 tiutni runs (operator set the env var each invocation). Source:
-`docs/gaps-from-tiutni.md` §D3.
+the gap-audit iteration (docs/iterations/2026-06-24-01-gap-audit-tiutni/index.md).
 
 ## Proposed direction
 Derive a default per-target-repo log path.

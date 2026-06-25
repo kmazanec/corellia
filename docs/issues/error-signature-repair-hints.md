@@ -20,7 +20,7 @@ class of error.
 ## Evidence
 Run 1 (tiutni), `"ReferenceError: it is not defined"` ×2 — the factory wrote a
 vitest test file that omitted `import { it, describe, expect } from 'vitest'`, then
-burned attempts re-running it. Source: `docs/gaps-from-tiutni.md` §A2.
+burned attempts re-running it. Source: the gap-audit iteration (docs/iterations/2026-06-24-01-gap-audit-tiutni/index.md).
 
 ## Proposed direction
 A small library of **error-signature → suggested-repair** hints injected into the

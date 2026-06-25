@@ -19,7 +19,7 @@ progress. The operator got an *empty* worktree and started from zero.
 ## Evidence
 Run 2 (tiutni), both children: `"step-loop:failed … escalating to block"` ×16;
 worktree collected with the stub bodies UNTOUCHED. Run 1 hit the same signature on
-the orchestrator dependency. Source: `docs/gaps-from-tiutni.md` §A1.
+the orchestrator dependency. Source: the gap-audit iteration (docs/iterations/2026-06-24-01-gap-audit-tiutni/index.md).
 
 ## Proposed direction
 On `step-loop:failed`, (a) preserve the worktree's best attempt as a draft

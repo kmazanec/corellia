@@ -23,7 +23,7 @@ Run 3 (tiutni) was scoped to `public/` only, yet `src/tax/engine.ts` and several
 test files were modified (the standard-deduction constants). The operator only found
 this by reviewing `git show` on the merge commit — the factory neither blocked the
 out-of-scope write nor flagged it in its report. Source:
-`docs/gaps-from-tiutni.md` §C1.
+the gap-audit iteration (docs/iterations/2026-06-24-01-gap-audit-tiutni/index.md).
 
 ## Proposed direction
 Enforce the declared `scope` prefixes at the broker's `write_file` boundary (refuse
