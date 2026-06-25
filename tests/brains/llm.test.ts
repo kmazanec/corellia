@@ -276,6 +276,64 @@ describe('LlmBrain.decide', () => {
     expect(result.value.kind).toBe('block');
   });
 
+  it('repairs a trailing-comma near-miss WITHOUT a re-ask (decide-json-robustness)', async () => {
+    // The model emitted otherwise-valid JSON with a trailing comma before the
+    // close. tryRepairJson fixes it in-process; no second LLM call is spent.
+    const { fetch, calls } = stubFetch(
+      chatResponse('{"kind":"satisfy",}'),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(result.value.kind).toBe('satisfy');
+    expect(calls).toHaveLength(1); // repaired locally — no re-ask round-trip
+  });
+
+  it('repairs a truncated (unterminated) decision tail WITHOUT a re-ask', async () => {
+    // A truncated split: the children array and object are never closed. The
+    // repair pass appends the missing closers; the result parses to a real split.
+    const { fetch, calls } = stubFetch(
+      chatResponse(
+        '{"kind":"split","children":[{"localId":"a","type":"implement","title":"t","spec":{},"dependsOn":[],"scope":["src/"],"budgetShare":1}',
+      ),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(result.value.kind).toBe('split');
+    expect(calls).toHaveLength(1);
+  });
+
+  it('renders a large free-text deliver-intent spec as readable text, not raw JSON (decide-json-robustness)', async () => {
+    // The load-bearing fix: a dense free-text spec must NOT be inlined as a
+    // JSON.stringify brace/quote blob (which the model echoes back malformed and
+    // blocks at decision #1). It is rendered as labeled prose carrying every field.
+    const denseGoal: Goal = {
+      ...baseGoal,
+      type: 'deliver-intent',
+      spec: {
+        description:
+          'Teach the factory to create issues → consume them (commission) → delete them. ' +
+          'Mint a "file-issue" type (make/author) and an issue→CommissionInput reader; ' +
+          'gate writes to docs/issues/. Acceptance: a run can write a conformant issue.',
+        scope: ['src/library/', 'src/engine/'],
+        constraints: ['open a PR when done', 'must not touch product repos'],
+      },
+    };
+    const { fetch, calls } = stubFetch(chatResponse(JSON.stringify({ kind: 'satisfy' })));
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    await brain.decide(denseGoal, ctxSonnet);
+    const body = JSON.parse(calls[0]?.options.body as string);
+    const userMsg: string = body.messages.find((m: { role: string }) => m.role === 'user').content;
+    // Labeled, readable rendering — the information is present...
+    expect(userMsg).toContain('Description:');
+    expect(userMsg).toContain('Teach the factory to create issues');
+    expect(userMsg).toContain('Constraints:');
+    expect(userMsg).toContain('open a PR when done');
+    expect(userMsg).toContain('src/library/');
+    // ...but NOT as an escaped JSON blob (the brace/quote soup that broke decode).
+    expect(userMsg).not.toContain('"description":');
+    expect(userMsg).not.toContain('\\"');
+  });
+
   it('includes memories quoted as data in the user message', async () => {
     const { fetch, calls } = stubFetch(chatResponse(JSON.stringify({ kind: 'satisfy' })));
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });

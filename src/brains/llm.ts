@@ -514,6 +514,122 @@ function stripJsonEnvelope(raw: string): string {
 }
 
 /**
+ * Render a goal spec as readable, labeled text rather than a raw JSON dump.
+ *
+ * The decide/produce/judge prompts embed the spec verbatim. A large free-text
+ * `deliver-intent` spec (`{ description, scope?, constraints? }`, 1500+ chars of
+ * arrows, parentheses, nested quotes, code snippets) serialized with
+ * `JSON.stringify` is a wall of escaped braces and quotes. When the model then has
+ * to emit its OWN decision JSON, it interpolates fragments of that brace/quote soup
+ * into string values and loses well-formedness — the tree blocks at decision #1
+ * (decide-json-robustness). Rendering the spec as plain labeled prose carries the
+ * same information with none of the JSON-escaping the model echoes back malformed.
+ *
+ * Known spec shapes get a readable layout; anything else falls back to pretty JSON
+ * (a primitive spec, or an unknown object shape, is still echoed faithfully).
+ */
+function renderSpec(spec: unknown): string {
+  if (spec === null || spec === undefined) return '  (none)';
+  if (typeof spec === 'string') return indentBlock(spec);
+  if (typeof spec !== 'object') return `  ${String(spec)}`;
+
+  const s = spec as Record<string, unknown>;
+  // The proven deliver-intent convention: { description, scope?, constraints? }.
+  const hasDescription = typeof s['description'] === 'string';
+  if (hasDescription) {
+    const parts: string[] = [];
+    parts.push(`  Description:\n${indentBlock(String(s['description']), 4)}`);
+    const scope = s['scope'];
+    if (Array.isArray(scope) && scope.length > 0) {
+      parts.push(`  Scope: ${scope.map((x) => String(x)).join(', ')}`);
+    }
+    const constraints = s['constraints'];
+    if (Array.isArray(constraints) && constraints.length > 0) {
+      parts.push(
+        `  Constraints:\n` +
+          constraints.map((c) => `    - ${String(c)}`).join('\n'),
+      );
+    }
+    // Surface any other top-level keys we did not special-case, as labeled text,
+    // so an unanticipated field is never silently dropped from the prompt.
+    const known = new Set(['description', 'scope', 'constraints']);
+    for (const [k, v] of Object.entries(s)) {
+      if (known.has(k)) continue;
+      parts.push(`  ${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`);
+    }
+    return parts.join('\n');
+  }
+
+  // Unknown object shape: pretty JSON, but as the fallback only. Most specs that
+  // reach the malformed-output failure are the free-text deliver shape above.
+  return indentBlock(JSON.stringify(spec, null, 2));
+}
+
+/** Indent every line of a block by `n` spaces (default 2). */
+function indentBlock(text: string, n = 2): string {
+  const pad = ' '.repeat(n);
+  return text
+    .split('\n')
+    .map((line) => pad + line)
+    .join('\n');
+}
+
+/**
+ * A cheap, conservative repair pass for near-miss malformed JSON, attempted by
+ * `callJson` BEFORE spending a re-ask round-trip. It only fixes structural
+ * near-misses that do not change meaning — trailing commas before a close, and a
+ * truncated tail (an unterminated object/array) by closing the open brackets. It
+ * does NOT guess content; if the repaired string still does not parse against the
+ * caller's `parse`, the caller falls back to the existing re-ask. Returns the
+ * repaired raw string, or null if nothing safe could be done.
+ *
+ * This is the general net under the decide-json-robustness fix: rendering the spec
+ * as readable text (see `renderSpec`) removes the common CAUSE; this catches the
+ * residual near-misses at any call site (decide, judge) without another LLM call.
+ */
+function tryRepairJson(raw: string): string | null {
+  let s = stripJsonEnvelope(raw);
+  // Remove trailing commas before a closing brace/bracket: `,}` → `}`, `, ]` → `]`.
+  const noTrailingCommas = s.replace(/,(\s*[}\]])/g, '$1');
+  if (noTrailingCommas !== s) s = noTrailingCommas;
+  // Close an unterminated tail: count unbalanced { and [ that are not inside a
+  // string, and append the matching closers. Only attempt when the imbalance is
+  // a positive (more opens than closes) — a negative imbalance is not a truncation.
+  const closers = unbalancedClosers(s);
+  if (closers) s = s + closers;
+  return s === stripJsonEnvelope(raw) ? null : s;
+}
+
+/**
+ * Scan `s` tracking string state and brace/bracket depth; return the string of
+ * closers needed to balance an unterminated tail (e.g. `}]`), or null if the
+ * structure is already balanced or is inside an unterminated string (which we do
+ * not try to repair — that would be guessing content).
+ */
+function unbalancedClosers(s: string): string | null {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (const ch of s) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{') stack.push('}');
+    else if (ch === '[') stack.push(']');
+    else if (ch === '}' || ch === ']') {
+      if (stack.pop() !== ch) return null; // mismatched — not a clean truncation
+    }
+  }
+  if (inString) return null; // unterminated string — don't guess content
+  if (stack.length === 0) return null; // already balanced
+  return stack.reverse().join('');
+}
+
+/**
  * The Decision shape as a JSON schema for schema-constrained decode. Expressed
  * as a single object whose `kind` is a required enum — NOT a oneOf union, which
  * many providers reject under `strict`. `kind` being required is the whole point:
@@ -733,6 +849,18 @@ export class LlmBrain implements Brain {
     try {
       return { value: parse(first.content), usage: first.usage };
     } catch (firstErr) {
+      // Before spending a re-ask round-trip, try a cheap structural repair of a
+      // near-miss (trailing comma, truncated tail). If the repaired string parses,
+      // we are done with no extra LLM call. Repair never changes meaning; if it
+      // fails to parse we fall through to the re-ask exactly as before.
+      const repaired = tryRepairJson(first.content);
+      if (repaired !== null) {
+        try {
+          return { value: parse(repaired), usage: first.usage };
+        } catch {
+          // repair did not yield a parseable value — fall through to the re-ask.
+        }
+      }
       // Re-ask: echo the bad response AND the specific parse error so the model
       // can correct the actual problem (e.g. a missing `kind` field), not a
       // mis-diagnosed "invalid JSON".
@@ -778,7 +906,7 @@ export class LlmBrain implements Brain {
       `Goal type:  ${goal.type}\n` +
       `Scope:      ${goal.scope.join(', ') || '(none)'}\n` +
       `Intent:     ${goal.intent}\n` +
-      `Spec:       ${JSON.stringify(goal.spec, null, 2)}`
+      `Spec:\n${renderSpec(goal.spec)}`
     );
   }
 
