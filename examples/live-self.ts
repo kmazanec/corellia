@@ -46,6 +46,12 @@
  * ─────────────────────────────────────────────────────────────────────────────
  *   CORELLIA_REPO_PATH   — path to corellia root (default: resolved from this file)
  *   CORELLIA_MODEL_LOW/MID/HIGH — model tier overrides
+ *   CORELLIA_REFS        — comma-separated files (relative to the corellia root, or
+ *                          absolute) whose CONTENT is attached to the commission as
+ *                          spec.references = [{ path, content }], so the factory
+ *                          works from the real artifacts the intent names rather
+ *                          than rediscovering them (e.g.
+ *                          "GOAL-TYPES.md,docs/issues/factory-manages-issues.md")
  *
  * USAGE
  * ─────────────────────────────────────────────────────────────────────────────
@@ -65,8 +71,8 @@
  *   - Any blockers in the report
  */
 
-import { existsSync } from 'node:fs';
-import { dirname, resolve, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve, join, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -108,6 +114,30 @@ const corelliaRoot = rawCorelliaPath ? resolve(rawCorelliaPath) : resolve(script
 
 assertGitRepo(corelliaRoot, 'live:self');
 
+// Optional: CORELLIA_REFS — a comma-separated list of files (paths relative to
+// the corellia root, or absolute) whose CONTENT is attached to the commission as
+// spec.references = [{ path, content }]. This lets the harness hand the factory
+// the ACTUAL artifacts the intent refers to (GOAL-TYPES.md, an issue, an ADR)
+// rather than making it rediscover them via comprehension. The brain renders each
+// reference as a readable, fenced block (see renderSpec in src/brains/llm.ts) — it
+// is NOT JSON-stringified, so large reference content does not reintroduce the
+// decode-fragility the spec rendering was hardened against. Unknown to the frozen
+// CommissionInput shape: the data rides inside spec (typed `unknown`), so no
+// contract field is added (ADR-026 stays intact).
+const REFS_RAW = process.env['CORELLIA_REFS'] ?? '';
+const references: Array<{ path: string; content: string }> = REFS_RAW
+  .split(',')
+  .map((p) => p.trim())
+  .filter(Boolean)
+  .map((p) => {
+    const abs = isAbsolute(p) ? p : join(corelliaRoot, p);
+    if (!existsSync(abs)) {
+      console.error(`live:self: CORELLIA_REFS file not found: ${p} (resolved ${abs})`);
+      process.exit(1);
+    }
+    return { path: p, content: readFileSync(abs, 'utf-8') };
+  });
+
 // Derive the GitHub repo slug from origin remote.
 const repoSlug = deriveRepoSlug(corelliaRoot);
 if (!repoSlug) {
@@ -120,6 +150,9 @@ console.log(`Target repo:  ${corelliaRoot} (corellia itself — strange loop)`);
 console.log(`Repo slug:    ${repoSlug}`);
 console.log(`Feature:      ${FEATURE}`);
 console.log(`Scope:        ${SCOPE.join(', ')}`);
+if (references.length > 0) {
+  console.log(`References:   ${references.map((r) => r.path).join(', ')}`);
+}
 console.log('');
 
 // ── Strange-loop hygiene pre-check ────────────────────────────────────────────
@@ -222,6 +255,9 @@ const commission: CommissionInput = {
       'Process-clean gate will block any factory-internal language in the diff.',
       'Push and open a PR on the GitHub repo when done.',
     ],
+    // Attached only when CORELLIA_REFS is set; the brain renders each as a
+    // readable fenced block so the goal works from the artifacts' real content.
+    ...(references.length > 0 ? { references } : {}),
   },
   scope: SCOPE,
   budget: {

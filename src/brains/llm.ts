@@ -550,9 +550,25 @@ function renderSpec(spec: unknown): string {
           constraints.map((c) => `    - ${String(c)}`).join('\n'),
       );
     }
+    // Referenced artifacts: files the commissioner attached so the goal works from
+    // their ACTUAL content rather than discovering them via comprehension. Each is
+    // `{ path, content }`. Rendered as a labeled, fenced block — NOT JSON.stringify
+    // (which would reintroduce the brace/quote soup renderSpec exists to avoid).
+    const references = s['references'];
+    if (Array.isArray(references) && references.length > 0) {
+      const blocks = references
+        .map((r) => {
+          const ref = (r ?? {}) as Record<string, unknown>;
+          const path = typeof ref['path'] === 'string' ? ref['path'] : '(unnamed)';
+          const content = typeof ref['content'] === 'string' ? ref['content'] : '';
+          return `  --- ${path} ---\n${indentBlock(content, 4)}`;
+        })
+        .join('\n\n');
+      parts.push(`  Referenced artifacts (their actual content):\n${blocks}`);
+    }
     // Surface any other top-level keys we did not special-case, as labeled text,
     // so an unanticipated field is never silently dropped from the prompt.
-    const known = new Set(['description', 'scope', 'constraints']);
+    const known = new Set(['description', 'scope', 'constraints', 'references']);
     for (const [k, v] of Object.entries(s)) {
       if (known.has(k)) continue;
       parts.push(`  ${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`);

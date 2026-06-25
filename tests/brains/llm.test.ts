@@ -334,6 +334,35 @@ describe('LlmBrain.decide', () => {
     expect(userMsg).not.toContain('\\"');
   });
 
+  it('renders spec.references (attached artifacts) as readable fenced blocks, not JSON', async () => {
+    // The harness can attach the actual files the intent names (CORELLIA_REFS).
+    // They must reach the prompt as labeled, readable content — never JSON.stringify'd
+    // (which would reintroduce the brace/quote soup renderSpec exists to avoid).
+    const goalWithRefs: Goal = {
+      ...baseGoal,
+      type: 'deliver-intent',
+      spec: {
+        description: 'Design issue/iteration self-hosting; decide the goal-type granularity.',
+        references: [
+          { path: 'GOAL-TYPES.md', content: 'A type earns existence iff its harness differs materially.' },
+          { path: 'docs/issues/factory-manages-issues.md', content: '---\ntype: issue\n---\nProblem: ...' },
+        ],
+      },
+    };
+    const { fetch, calls } = stubFetch(chatResponse(JSON.stringify({ kind: 'satisfy' })));
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    await brain.decide(goalWithRefs, ctxSonnet);
+    const body = JSON.parse(calls[0]?.options.body as string);
+    const userMsg: string = body.messages.find((m: { role: string }) => m.role === 'user').content;
+    expect(userMsg).toContain('Referenced artifacts');
+    expect(userMsg).toContain('--- GOAL-TYPES.md ---');
+    expect(userMsg).toContain('A type earns existence iff its harness differs materially.');
+    expect(userMsg).toContain('--- docs/issues/factory-manages-issues.md ---');
+    // Not a JSON blob of the references array (the spec's references are rendered
+    // as fenced text, never JSON.stringify'd — `"content":` would be the tell).
+    expect(userMsg).not.toContain('"content":');
+  });
+
   it('includes memories quoted as data in the user message', async () => {
     const { fetch, calls } = stubFetch(chatResponse(JSON.stringify({ kind: 'satisfy' })));
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
