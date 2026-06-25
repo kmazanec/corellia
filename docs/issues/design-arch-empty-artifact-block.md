@@ -11,6 +11,16 @@ severity: medium
 
 # design-arch leaf emits an empty artifact and terminally blocks at the highest tier
 
+> **Partial mitigation (2026-06-25, commit 37e898b).** `artifact-present` now
+> passes an empty/absent artifact when the leaf actually WROTE files to the
+> worktree within scope — so a tool-driven `implement` leaf that delivers via
+> `write_file` but returns empty text is no longer wrongly blocked (the failure
+> that stranded the `file_issue` tool in build run live-self-bd479522). **Still
+> open** for a `design-arch`/doc leaf that produces NOTHING (no worktree write and
+> empty artifact): it still blocks with a generic "no actionable repair" instead of
+> surfacing WHY it is empty (truncation / refusal / parse-drop), and the
+> dependency-cascade degraded-path half remains.
+
 ## Problem
 A `design-arch` leaf can loop to a terminal block by repeatedly emitting an
 **empty** artifact. The deterministic gate correctly rejects it

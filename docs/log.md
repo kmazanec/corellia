@@ -16,6 +16,18 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-25
 
+- **PR [#7](https://github.com/kmazanec/corellia/pull/7) merged — the factory's
+  `file_issue` tool shipped.** Build run #5 (`live-self-bd479522`, $2.46) opened
+  the first real factory PR. It built a complete, sound 319-line `file_issue` tool
+  (ADR-034) but its `implement` leaf emitted an EMPTY artifact, failed
+  `artifact-present`, blocked, and the code was stranded uncollected. The tool was
+  folded onto main (commit 37e898b) with the missing `docs.issues.write` grant on
+  `investigate`, 11 tests, and **a fix to the gate that stranded it**:
+  `artifact-present` now passes an empty artifact when the leaf actually WROTE
+  files within scope (a tool-driven implement delivers via `write_file`, not
+  returned text). 1506 tests green. Note: only the `file_issue` mechanism of
+  ADR-034/035 is built; the engine integration steps, issue→CommissionInput
+  reader, and OKF docs lint remain unbuilt.
 - **ADR-034/035 build run #4** (`live-self-63daa9cf`, $3.21, 2.4M tokens) — went
   furthest yet: split into ~13 children, the **milestone loop ran 3 rounds**
   trying to converge, 8 of 12 dives succeeded. Blocked on the refined root cause:
