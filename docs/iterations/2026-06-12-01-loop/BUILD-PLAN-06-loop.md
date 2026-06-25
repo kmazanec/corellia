@@ -1,3 +1,10 @@
+---
+type: reference
+title: "Build plan — The loop closes: self-hosting"
+description: Status: Approved · Approved by: Keith (conversation, 2026-06-12) · Iteration goal: the PRD's Desired Outcome, both halves — a Corellia feature ships via a Corel
+tags: [iteration, build-plan]
+timestamp: 2026-06-12
+---
 # Build plan — The loop closes: self-hosting
 
 **Status:** Approved · **Approved by:** Keith (conversation, 2026-06-12) · **Iteration goal:** the PRD's Desired Outcome, both halves — a Corellia feature ships via a Corellia-opened PR (AC-2) and the same holds on cats (AC-3), through a hosted front door, with the improvement loop live (AC-21). · **Iteration slug:** `06-loop`

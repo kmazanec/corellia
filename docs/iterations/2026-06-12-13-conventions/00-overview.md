@@ -1,3 +1,10 @@
+---
+type: reference
+title: "Iteration 07 — Layered conventions: the factory honours how each repo wants its code"
+description: Status: Draft (brief) · Iteration slug: 07-conventions
+tags: [iteration, feature-plan]
+timestamp: 2026-06-12
+---
 # Iteration 07 — Layered conventions: the factory honours how each repo wants its code
 
 **Status:** Draft (brief) · **Iteration slug:** `07-conventions`

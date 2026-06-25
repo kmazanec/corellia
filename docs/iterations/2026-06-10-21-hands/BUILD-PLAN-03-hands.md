@@ -1,3 +1,10 @@
+---
+type: reference
+title: "Build plan — 03-hands"
+description: Status: Approved · Approved by: Keith (conversation, 2026-06-11) · Iteration goal: After this iteration, a live sonnet-class implement leaf can build a small mo
+tags: [iteration, build-plan]
+timestamp: 2026-06-12
+---
 # Build plan — 03-hands
 
 **Status:** Approved · **Approved by:** Keith (conversation, 2026-06-11) · **Iteration goal:** After this iteration, a live sonnet-class implement leaf can build a small module test-first in a tree worktree — its declared test script runs red then green, a scope-violating write is refused and visible in the transcript, and the run report prints real token and dollar totals from provider-reported usage. · **Iteration slug:** `03-hands`

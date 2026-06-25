@@ -1,3 +1,10 @@
+---
+type: reference
+title: "Build plan — Layered conventions"
+description: Status: Built · Approved by: Keith (conversation, 2026-06-12) · Iteration goal: a code-writing
+tags: [iteration, build-plan]
+timestamp: 2026-06-12
+---
 # Build plan — Layered conventions
 
 **Status:** Built · **Approved by:** Keith (conversation, 2026-06-12) · **Iteration goal:** a code-writing

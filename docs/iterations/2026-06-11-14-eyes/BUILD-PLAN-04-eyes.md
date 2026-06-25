@@ -1,3 +1,10 @@
+---
+type: reference
+title: "Build plan — 04-eyes"
+description: Status: Approved · Approved by: Keith (conversation, 2026-06-11) · Foreign repo for the done-when: ~/dev/gauntlet/cats · Iteration goal: After this iteration,
+tags: [iteration, build-plan]
+timestamp: 2026-06-12
+---
 # Build plan — 04-eyes
 
 **Status:** Approved · **Approved by:** Keith (conversation, 2026-06-11) · **Foreign repo for the done-when:** `~/dev/gauntlet/cats` · **Iteration goal:** After this iteration,

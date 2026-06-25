@@ -1,3 +1,10 @@
+---
+type: reference
+title: "Build plan — 05-taste"
+description: Status: Approved · Approved by: Keith (conversation, 2026-06-11) · Iteration goal: After this iteration the
+tags: [iteration, build-plan]
+timestamp: 2026-06-12
+---
 # Build plan — 05-taste
 
 **Status:** Approved · **Approved by:** Keith (conversation, 2026-06-11) · **Iteration goal:** After this iteration the
