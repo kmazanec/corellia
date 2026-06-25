@@ -133,6 +133,23 @@ spawned only once that result exists. The build/investigate distinction is
 emergent from the dependency graph, the way roles are emergent from which types
 get spawned.
 
+**The milestone loop makes the discovery-loop shape explicit at the composite
+root (ADR-031).** The append-until-satisfied chain above is emergent at the *leaf*
+level (a parent appends one more probe until its eval is satisfied). A composite
+goal could not do the analogue — decide → split → integrate → *look at the
+assembled result* → decide again — because a SPLIT node was single-pass: it
+decided once, integrated once, emitted. A goal-type carrying the `iterative` trait
+(today only `deliver-intent`) now routes its split arm through `runMilestone`,
+which wraps the existing single-pass split body (`runRound`) in a real loop: it
+re-decides round after round against a frozen, deterministic acceptance-criteria
+done-condition, each round's plan informed by what the previous round actually
+built (read back through per-round worktree commits — ADR-032). This is not a new
+mechanism bolted on: it is the same split/integrate body, made re-enterable, so
+that "build the increment, observe it, re-plan, build more" is expressible at the
+root the way the probe loop already was at the leaf. The `Decision` union stays
+frozen — iteration is goal-type behavior through the existing `split` arm, not a
+fourth decision kind.
+
 ### Shared shapes freeze first — the contract barrier
 
 A shape multiple children will touch — a tagged union, a wire schema, a shared

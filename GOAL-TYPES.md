@@ -133,18 +133,29 @@ human:
   # any declared touchpoint MUST carry on_timeout: deny | park | bounce
 ```
 
-## The starter set — nineteen types, ten families
+## The starter set — twenty-two types, ten families
 
-### make — six types
+### make — eight types
 
 | Type (family) | Input → output | Proof | Grant (summary) | Eval | Tier | leaf_only |
 | --- | --- | --- | --- | --- | --- | --- |
 | **`deliver-intent`** (deliver) · **core** | commissioned intent (the *only* type that accepts free text) → integrated product increment as PR(s) + typed completion report | PR-View projection; full suite green at root | retrieval API, `classify_risk`, spawn — **no code tools**: the root literally cannot satisfy directly; the grant enforces it | `judge-integration` against the parsed intent | opus → human | no |
+| **`author-acceptance-criteria`** (author) | a milestone goal's intent → a SHA-anchored acceptance-criteria checklist `[{id, claim, check}]` where every `check` names a runnable predicate (script command or file/anchor assertion) | `criteriaWellFormed`: rejects any criterion whose only check is a judge rubric line — the deterministic floor under the loop's done-condition (ADR-032) | retrieval API | `criteriaWellFormed` (deterministic; no judge) | opus → human | yes |
 | **`write-prd`** (author) | typed intent + injected research findings → numbered, behavior-focused PRD | every requirement traceable to intent or a finding | doc read/write in workspace; retrieval API | schema/completeness lints → `critique-doc` (testability, no solutioning) | sonnet → opus | yes |
 | **`design-arch`** (author) | PRD slice + knowledge artifacts → design/ADR set | each decision lists alternatives considered + the requirement it serves — the scan's losing candidates, explored rather than retrofitted | doc read/write; retrieval API | **terraced scan by default**: k candidate architectures at a cheap tier, `critique-doc` ranks, winner deepened at full tier; then coverage lints (every requirement addressed) → `critique-doc` | opus → human | yes |
 | **`implement`** (build) | spec + scope + memories → diff within scope | impacted slice green; tests for new behavior; screenshots for UI | see exemplar above | deterministic gate → `critique-code` | sonnet → opus | no |
 | **`freeze-contract`** (build) | reconciled shared-shape spec (signature + every sibling's additive extension + exhaustive consumers) → the landed minimum-viable shape, committed **before any sibling fan-out** | scoped contract tests green; the diff contains **no feature behavior** — shapes and their exhaustive consumers only | fs read/write (worktree); scoped test runner | deterministic (scoped tests green; no-feature-behavior check; every consumer exhaustive over every case) → `critique-code` | opus → human | yes |
 | **`characterize`** (build) | thinly-covered region + coverage facts → baseline tests pinning current behavior (`intent: characterization`, fixed) | new tests run green against *unmodified* code; zero production-code diff (its scope is test dirs) | fs read; test-dir write; test runner | deterministic (green on untouched code) → `critique-code` judged on capture fidelity, not mimicry | sonnet → opus | yes |
+
+> **`deliver-intent` iterates (ADR-031).** It carries the `iterative` trait, so its
+> SPLIT dispatch routes through the milestone loop (`runMilestone`): it mints an
+> `author-acceptance-criteria` checklist round-0, then re-decides round after round
+> (decide → split → integrate → assess) until a round is DONE — all deterministic
+> criteria pass **AND** `judge-acceptance` passes. Termination is budget-bounded:
+> the per-tree dollar ceiling and a no-progress halt (deterministic `passingCount`
+> failing to strictly increase for two consecutive rounds), with `maxRounds`
+> (default 50, per-commission overridable) as a runaway-backstop. Each round commits
+> the worktree so verify-on-read anchors across rounds (ADR-032).
 
 ### learn — four types
 
@@ -159,12 +170,13 @@ human:
 goals for drift-fired categories. There is no separate bootstrap type —
 discovery is just-in-time, and the split gate spawns these as dependencies.
 
-### judge — five types
+### judge — six types
 
 | Type (family) | Input → output | Grant (summary) | Calibration | Tier | leaf_only |
 | --- | --- | --- | --- | --- | --- |
 | **`judge-split`** (arbiter) · **core** | parent goal + proposed children + dependency structure (+ split-memo if consulted) → verdict `{sound, complete, dependency-correct}` + rationale | read-only: retrieval API | golden replays — where decomposition diverged from the human PR | sonnet → opus | yes |
 | **`judge-integration`** (arbiter) · **core** | original parent goal + assembled result + children reports → verdict + rationale | read-only: worktree, retrieval API | golden replays at pinned SHA | sonnet → opus | yes |
+| **`judge-acceptance`** (critique) | cumulative merged artifact + frozen acceptance criteria + this round's deterministic check RESULTS → gating verdict (its `pass` is load-bearing in the milestone ship gate, ADR-031) + quality findings that become next-round decide hints | read-only; no write grant | acceptance golden sets | sonnet → opus | yes |
 | **`critique-code`** (critique) | diff + spec + convention/exemplar pointers → verdict + findings (the mimicry bar: *could a team member have written this?*) | read code; `find_symbol`, `find_exemplar` | code golden sets | sonnet → opus | yes |
 | **`critique-ui`** (critique) | running UI / screenshots + spec + design-system pointers → verdict + findings | drive browser; screenshot; read token files | UI golden sets | sonnet → opus | yes |
 | **`critique-doc`** (critique) | PRD/ADR + upstream contract → verdict + findings | read docs; retrieval API | doc golden sets | sonnet → opus | yes |

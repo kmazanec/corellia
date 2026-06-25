@@ -1,7 +1,15 @@
 # ADR-019: Knowledge artifacts are event-projected project memory with SHA-anchored freshness
 
 **Status:** Accepted · **Date:** 2026-06-11 · **Stretch:** no · **Contract:** yes
-**Supersedes:** none · **Superseded by:** none
+**Supersedes:** none · **Superseded by:** none · **Amended by:** ADR-032
+
+> **Amendment (ADR-032).** The SHA-anchored freshness check below assumes HEAD
+> advances between an artifact's generation and its re-read. Within a single tree
+> that was not true: `collectTree` committed the worktree only once at tree-end, so
+> `generatedAtSha === headSha` held trivially and verify-on-read was a no-op
+> *across rounds*. ADR-032's milestone loop commits the worktree **per round**
+> (`commitRound`), advancing HEAD each round, which makes this freshness check real
+> across a goal's iterations. See ADR-032 for the per-round-commit mechanism.
 
 ## Context
 
