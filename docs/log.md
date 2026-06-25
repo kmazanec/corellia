@@ -16,6 +16,16 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-25
 
+- **Build run #7** (`live-self-744d415d`, $2.51, 80% cache) — **the hollow-emit gate
+  worked.** Commissioned the 3 remaining ADR-034/035 mechanisms; this time the
+  slices did REAL write_file work (slice A: 6 writes + 20 script runs; slice B: 12 +
+  10) instead of run #6's fake "pass" (slice A then did 0 writes). The judges caught
+  slice C's absence honestly ("hollow emit — no actual code files written"). Salvaged
+  + verified + landed **2 of 3 mechanisms** (commit 4ae7ced): the OKF **docs lint**
+  (`scripts/lint-docs.ts`, wired into `npm run lint`, runs clean on our real docs/)
+  and the **issue→CommissionInput reader** (`parseIssueToCommissionSeed`). 31
+  factory-written tests pass; fixed 2 strictness gaps the blocked leaf left. Slice C
+  (engine integration steps) was not built — still to do. Worktree torn down.
 - **Hollow-emit gate added** (`src/engine/engine.ts`, commit 9bd1037) — the
   parent-eval gap Keith flagged: a make root could "succeed" while its children
   emitted plausible text / called open_pr without building anything (run #6's slice
