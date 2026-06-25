@@ -45,6 +45,30 @@ goal (`Goal.spendCeilingUsd`, default `$15` via `DEFAULT_SPEND_CEILING_USD`,
 the commission (see the template). The ceiling is the **primary budget bound**;
 treat it as the real envelope.
 
+## Three ways in
+
+This skill accepts intent from three sources. Pick by what the user gives you:
+
+1. **From nothing** — the user just wants to commission something. Run the full
+   interview below.
+2. **From a free-text intent** — the user hands you a description/idea. Use it as
+   the starting point; interview only to fill the gaps (scope, constraints, budget).
+3. **From an existing issue** — the user points you at a
+   [`docs/issues/<slug>.md`](../../docs/issues/index.md) (or asks to "commission
+   issue X"). **Read the issue file** and seed the commission from it: the issue's
+   `title`/`Problem`/`Proposed direction` become the `spec.description`; its
+   `Acceptance hint` becomes a constraint; its `tags` hint at scope. Then interview
+   ONLY for what the issue doesn't pin down — almost always the `scope[]` prefixes
+   and the budget/ceiling, sometimes a sharper done-condition. Do **not** re-ask
+   what the issue already answers.
+
+   **On issue lifecycle:** issues are *ephemeral* — destroyed once implemented. You
+   are producing a plan, not building, so **do NOT delete the issue now.** Instead,
+   note in the commission artifact (a comment) which issue it came from
+   (`// from docs/issues/<slug>.md`), and tell the user that once the commission is
+   run and the work lands as an iteration/ADR/code, the issue should be deleted (the
+   build step or a follow-up closes the loop). Capture → plan → build → delete.
+
 ## The interview — gather, in the factory's vocabulary
 
 Ask only what you need; infer sensible defaults and state them. Cover:
