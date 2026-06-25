@@ -29,6 +29,7 @@ Each issue is one OKF `type: issue` file with `kind` (bug | idea | future-work),
 
 | Issue | Kind | Tags |
 |---|---|---|
+| [design-arch-empty-artifact-block](design-arch-empty-artifact-block.md) | bug | engine, brain, design-arch, robustness |
 | [salvage-on-repeated-failure](salvage-on-repeated-failure.md) | bug | in-run-stall, engine, salvage |
 | [error-signature-repair-hints](error-signature-repair-hints.md) | bug | in-run-stall, engine, repair |
 | [repair-integration-rung](repair-integration-rung.md) | idea | in-run-stall, engine, integration |

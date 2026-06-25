@@ -16,6 +16,19 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-25
 
+- **Design-first self-build via `live:self`** (intent `live-self-8ac028ee`, $0.70,
+  62% cache) — the factory designed its own issue/iteration OKF participation. It
+  cleared the decide-json wall (dense intent + 5 attached references decided and
+  split cleanly), then split into two `design-arch` ADRs. `a1` converged:
+  **[ADR-034](adrs/ADR-034-issue-and-iteration-records-not-new-goal-types.md)** —
+  `file-issue`/`author-iteration-record` do NOT earn goal-type status (granularity
+  rule); mechanisms are a brokered `file_issue` tool + engine integration steps +
+  improve-factory content. `a2` terminally blocked on an empty artifact → no PR;
+  ADR-034 was salvaged to `main` and its sibling
+  **[ADR-035](adrs/ADR-035-okf-conformance-and-routing-rules.md)** hand-built to
+  complete the design. The empty-artifact block was filed as
+  [issue](issues/design-arch-empty-artifact-block.md). Proves the decide-json fix
+  live; surfaces a real partial-delivery robustness gap.
 - **decide-json-robustness fixed** (`src/brains/llm.ts`). A large free-text root
   intent no longer blocks the tree at decision #1: the goal spec is rendered as
   readable labeled text in the decide/produce/judge prompt instead of an escaped
