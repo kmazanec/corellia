@@ -20,6 +20,14 @@ severity: medium
 > empty artifact): it still blocks with a generic "no actionable repair" instead of
 > surfacing WHY it is empty (truncation / refusal / parse-drop), and the
 > dependency-cascade degraded-path half remains.
+>
+> **Hollow-emit gate added (2026-06-25, commit 9bd1037).** The inverse failure — a
+> make root that *successfully emits* (plausible text or an open_pr call) while
+> having built NOTHING — now blocks at tree emission with an actionable "hollow
+> emit" reason, instead of claiming a false success (run #6's slice A: 0 write_file,
+> only open_pr). This catches the no-real-work case at the PARENT level (the eval
+> Keith flagged as insufficient). Still distinct and open: a leaf that blocks with
+> no diagnosis of WHY its artifact is empty, and degraded delivery.
 
 ## Problem
 A `design-arch` leaf can loop to a terminal block by repeatedly emitting an

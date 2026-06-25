@@ -16,6 +16,14 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-25
 
+- **Hollow-emit gate added** (`src/engine/engine.ts`, commit 9bd1037) — the
+  parent-eval gap Keith flagged: a make root could "succeed" while its children
+  emitted plausible text / called open_pr without building anything (run #6's slice
+  A). The integration judge reads text and can be fooled; now a deterministic gate
+  at tree emission blocks a make root that produced NO real change (no in-scope
+  worktree diff since the tree's base commit AND no files artifact). Counts changes
+  vs. the BASE sha, not the moving HEAD, so committed milestone rounds still count
+  (a first cut wrongly blocked legit convergence). 1506 green.
 - **Build run #6** (`live-self-a2397f0f`, $1.17, 80% cache) — commissioned the 3
   remaining ADR-034/035 mechanisms (docs lint, issue→CommissionInput reader, engine
   integration steps) as explicit slices. **All 8 comprehension dives succeeded** (the
