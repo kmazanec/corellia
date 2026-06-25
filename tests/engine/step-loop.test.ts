@@ -964,13 +964,15 @@ describe('tool-loop ceiling', () => {
 
     const report = await engine.run(goal);
 
-    // The artifact-returning step exceeds the tokens budget → blocked on tokens
-    expect(report.blockers.length).toBeGreaterThan(0);
+    // The step token usage crosses the tokens counter to zero → the
+    // budget-exhausted(tokens) signal fires for observability, but the token
+    // counter never blocks (ADR-033): the goal still emits cleanly.
     const exhaustedEvents = await store.list({ type: 'budget-exhausted' });
     const tokenExhausted = exhaustedEvents.find(
       (e) => (e as { dimension: string }).dimension === 'tokens',
     );
     expect(tokenExhausted).toBeDefined();
+    expect(report.blockers.length).toBe(0);
   }, 10_000);
 });
 
@@ -1154,13 +1156,15 @@ describe('debit equality reads the budget', () => {
     });
 
     const report2 = await engine2.run(boundaryGoal);
-    // The tokens budget is exactly consumed, so it exhausts on the final debit
-    expect(report2.blockers.length).toBeGreaterThan(0);
+    // The tokens counter is exactly consumed, so the final debit crosses it to
+    // zero and the budget-exhausted(tokens) signal fires — observability of the
+    // debit boundary. The counter never blocks (ADR-033): the goal still emits.
     const exhaustedEvents = await store2.list({ type: 'budget-exhausted' });
     const tokensExhausted = exhaustedEvents.find(
       (e) => (e as { dimension: string }).dimension === 'tokens',
     );
     expect(tokensExhausted).toBeDefined();
+    expect(report2.blockers.length).toBe(0);
   }, 10_000);
 });
 

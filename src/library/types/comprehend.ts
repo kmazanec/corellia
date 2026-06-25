@@ -86,8 +86,8 @@ export function comprehendTypes(): GoalTypeDef[] {
      *   - Read the region at `spec.repoRoot`/`spec.region`.
      *   - DECIDE first (ADR-029): a `deep-dive-region` goal obeys the recursion
      *     law. If the region is too large to dive FAITHFULLY in one node — too
-     *     much load-bearing behavior to anchor without dropping facts or
-     *     exhausting the budget — return a SPLIT. The split partitions the region
+     *     much load-bearing behavior to anchor in one context without dropping
+     *     facts — return a SPLIT. The split partitions the region
      *     into DISJOINT sub-regions whose UNION COVERS the parent (no overlap, no
      *     gaps); each child is itself a `deep-dive-region` goal scoped to one
      *     sub-region. Otherwise SATISFY and emit the facts directly.

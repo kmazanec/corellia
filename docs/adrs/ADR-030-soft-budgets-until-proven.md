@@ -1,7 +1,15 @@
 # ADR-030: Budgets are soft signals until a real run justifies a hard bound
 
-**Status:** Accepted · **Date:** 2026-06-23 · **Stretch:** no · **Contract:** no
-**Supersedes:** none · **Superseded by:** none · **Amends:** ADR-007
+**Status:** Accepted; firmed by ADR-033 · **Date:** 2026-06-23 · **Stretch:** no · **Contract:** no
+**Supersedes:** none · **Superseded by:** none · **Amends:** ADR-007 · **Firmed by:** ADR-033
+
+> **Firmed by ADR-033.** This ADR softened the count budgets "until a real run
+> justifies a hard bound." ADR-033 removes the hedge: a count that blocks a build
+> is budget steering the build, so the count dimensions (`attempts`, `tokens`,
+> `toolCalls`) **never** block — there is no re-arming them. Where the decisions
+> below say a count "remains an honest loop terminator" or is a "candidate for
+> warn-only," read: it is non-blocking, permanently. The only hard bounds are the
+> dollar ceiling and wall-clock.
 
 ## Context
 

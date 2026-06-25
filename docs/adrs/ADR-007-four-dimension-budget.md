@@ -1,7 +1,15 @@
 # ADR-007: Budgets are four-dimensional, subdivided, and all four dimensions gate
 
-**Status:** Accepted · **Date:** 2026-06-10 (decided iteration 1 + review fixes; recorded retroactively) · **Stretch:** no · **Contract:** yes
-**Supersedes:** none · **Superseded by:** none
+**Status:** Superseded by ADR-033 · **Date:** 2026-06-10 (decided iteration 1 + review fixes; recorded retroactively) · **Stretch:** no · **Contract:** yes
+**Supersedes:** none · **Superseded by:** ADR-033 (budget is a non-steering backstop: count dimensions never block, cap fan-out, or shape the build)
+
+> **Superseded by ADR-033.** Budget is a non-steering backstop: the count
+> dimensions (`attempts`, `tokens`, `toolCalls`) never block work, cap fan-out,
+> or shape the build — they are tracked for observability only. The only hard
+> bounds are the per-tree dollar ceiling and wall-clock. The count-gating,
+> fan-out cap (`children.length ≤ attempts`), and "tool-call budget teaches the
+> batching rhythm" claims below are **no longer in force.** This ADR is retained
+> only for the record that the four counters exist.
 
 ## Context
 
@@ -15,8 +23,9 @@ let many tiny-share children sum past their parent.
 
 - Four dimensions `{attempts, tokens, toolCalls, wallClockMs}`, every one
   enforced, child count capped by attempts — chosen.
-- Attempts-only gating (others advisory) — rejected: an advisory budget is a
-  prompt-hope, and tool-call budgeting is what teaches the batching rhythm.
+- Attempts-only gating (others advisory) — rejected at the time. (Superseded:
+  ADR-033 makes all four counters non-gating; the dollar ceiling and wall-clock
+  are the only hard bounds.)
 - Dollar-denominated budget as a fifth dimension — deferred to iteration 3
   (PRD R5 requires a per-tree spend ceiling; lands with real token
   accounting).
@@ -31,10 +40,10 @@ that ends the goal (block/summon), never a hang or silent overrun.
 
 ## Rationale
 
-Each dimension bounds a different failure: attempts bound thrashing, tokens
-bound spend, tool calls bound the per-edit loop (the dominant agentic cost),
-wall clock bounds external stalls. The kmaz field data is explicit that
-"run until green" without a tool budget invites the 30-test-run loop.
+At the time, each dimension was meant to bound a different failure. ADR-033
+retired that framing: a count that blocks a build is budget steering the build.
+The counters remain for observability; the dollar ceiling and wall-clock are
+the bounds grounded in real runaway cost.
 
 ## Tradeoffs & risks
 

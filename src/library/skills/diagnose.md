@@ -15,10 +15,10 @@ must be independently followable. A reader must be able to re-run the probe
 and obtain the same observation. Vague links ("I looked at the logs and
 something seemed off") are not evidence.
 
-Budget discipline. Each spawned child consumes budget. A child spawned without
-a hypothesis it tests is budget without return. Terminate the chain when the
-confidence threshold is met — not when all hypotheses are exhausted. The base
-case is confidence, not completeness.
+Stop at confidence. Spawn a child only to test a hypothesis; a child spawned
+without one buys nothing. Terminate the chain when the confidence threshold is
+met — not when all hypotheses are exhausted. The base case is confidence, not
+completeness.
 
 ## investigate
 
@@ -38,7 +38,7 @@ supports the root cause at the required confidence level, synthesize — do not
 keep probing for completeness. The finding must state what evidence would change
 the conclusion; a finding that is not falsifiable is not a finding.
 
-Budget termination is not failure. If the budget is exhausted before confidence
+Running out of time is not failure. If the wall-clock runs out before confidence
 is achieved, synthesize the best current finding with the confidence honestly
 stated. Surface the gap as an open question for the next investigate goal; do
 not emit false confidence to meet the threshold.

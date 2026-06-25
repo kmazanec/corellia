@@ -61,7 +61,7 @@ downward:
 | `intent` | `production \| spike \| characterization \| …` — inherited down the subtree unless a child overrides; modulates judges, never deterministic gates (see "The three evals") |
 | `risk_class` | computed, not declared — instance risk from scope × sensitivity (see "The human enters…") |
 | `scope` | the impact set — files/regions this goal may touch, from the architecture artifact |
-| `budget` | `{attempts, tokens, wall_clock, tool_calls}` — **inherited and subdivided**: a parent splits its allowance among its children. Tool calls are budgeted because the agentic round-trip, not the model, dominates execution cost — a budget teaches *rhythm* (batch the edits, run once, fix all, run once); "run until green" without a budget invites the per-edit loop |
+| `budget` | `{attempts, tokens, tool_calls, wall_clock}` — a **backstop against runaway recursion and spend, never a steer on what or how a goal builds** (ADR-033). The only hard bounds are the per-tree dollar ceiling and `wall_clock`, tied to real runaway cost; `attempts`/`tokens`/`tool_calls` are tracked for observability and never block, cap fan-out, or shape the build. A goal plans, splits, and builds identically at any budget |
 | `memories` | parent-retrieved memory, injected as pointers with **provenance labels** (`provisional \| trusted`) — a provisional memory reads as suggestion, not fact (see "Memory") |
 
 And the child's return is not a bare artifact — it is a typed report, each
@@ -393,7 +393,7 @@ selects the next resource:
 - **finding flagged `escalated`** — the fix needs a frozen-contract change or a
   re-architecture, not a localized edit — → straight to **block**: that
   decision is the human's, not a bigger model's.
-- **budget exhausted** → summon the **human** (last resort).
+- **non-convergence** — failed at the highest tier with no actionable repair → summon the **human** (last resort). Budget is never a reason to summon: it is a runaway backstop, not a steer (ADR-033).
 
 The eval is therefore not only a quality gate — it drives the resource decision.
 Performance measurement and model selection collapse into this one loop:
@@ -436,7 +436,7 @@ participant. There are exactly three entry points, each closing a different gap:
 
 | Gap | Trigger | Path |
 | --- | --- | --- |
-| **Competence** | budget exhausted across rising tiers, or a block (insufficient information) | escalation to human (last resort) |
+| **Competence** | non-convergence: failed across rising tiers with no actionable repair, or a block (insufficient information) | escalation to human (last resort) |
 | **Authority** | an act whose consequences outrun any eval — by **type** (spend, deploy, delete, sign, **trust-a-pattern**) *or* by **instance** (`classify_risk`: this goal's scope touches migrations, auth, secrets-adjacent files, compliance surfaces — sensitivity read from project knowledge) | mandatory gate before the act, regardless of confidence |
 | **Physical** | an act no agent can perform (speak aloud, tap a real device, sign) | human-as-tool (invoked mid-task, like web-search) |
 
@@ -927,7 +927,7 @@ factory **code**) are versioned artifacts needing review.
 | Eval contract | split gate (pre, with batched ambiguity harvest) + split (decomposition + dependency honesty + contract discipline) + goal-type + integration; deterministic before judge; impacted slice at leaves, full suite at root; judges calibrated by pinned-SHA replay against exogenous ground truth (merged PRs, production, human verdicts — never another eval); **verdicts rendered at the parent's integrate edge** (delegable to eval-typed children — the child only ever claims) |
 | Scope enforcement | deterministic `diff ⊆ scope` at emission + risk re-check on the actual diff; escape bounces to the parent (expand scope or re-split, consuming an attempt) — findings-become-tickets is structural, not normative |
 | Cost / quality / human | one control loop: eval → **repair** (the judge prescribes, a cheap fixer applies) → tier escalation → human last-resort; `escalated` findings skip straight to block; retries carry the prior failure (re-splits are perturbations); isomorphic failures jump out early; ladder policies instrumented per type, not decreed |
-| Termination | shrinking splits + `leaf_only` floors; chains bounded by the **subdivided budget**; exhaustion is an event, not a hang |
+| Termination | shrinking splits + `leaf_only` floors; chains bounded by the **dollar ceiling and wall-clock** (the only hard bounds — ADR-033), or by non-convergence; count exhaustion is an observability event, never a terminator |
 | Risk | computed per instance (`classify_risk` over scope × sensitivity) layered on type-level gates; re-checked at emission on the actual diff; earned autonomy tuned from traces |
 | Human paths (all rare) | competence (escalation/block), authority (**consequences outrun any eval** — type ∨ instance gates, incl. pattern-trust), physical (human-as-tool); every touchpoint a decision brief with **required `on_timeout`** (deny \| park \| bounce); park releases scope + TTL; plus two standing acts: admission, pattern-trust signoff; gate briefs batched and teaching, mid-tree briefs lean; every boundary handoff carries `learned` |
 | Roles | emergent — no org chart, only a library of goal-types |

@@ -816,8 +816,8 @@ describe('fix 3 — wallClockMs budget exhaustion', () => {
   });
 });
 
-describe('fix 3 — tokens budget exhaustion', () => {
-  it('emits budget-exhausted(tokens) when tokens runs out after produce', async () => {
+describe('tokens budget is observability-only (ADR-033)', () => {
+  it('emits budget-exhausted(tokens) when tokens runs out after produce, but does NOT block', async () => {
     const store = new MemoryEventStore();
 
     const brain = new ScriptedBrain()
@@ -829,15 +829,19 @@ describe('fix 3 — tokens budget exhaustion', () => {
     const registry = buildRegistry([leafTypeDef({ deterministic: [], judgeType: null })]);
 
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
-    // tokens: 1 → produce reports 1000 tokens, debit exhausts the budget
+    // tokens: 1 → produce reports 1000 tokens, crossing the counter to zero.
+    // The token counter is observability-only: it emits the signal but never
+    // blocks. With no deterministic checks and no judge, the goal still emits.
     const goal = makeGoal({ budget: { attempts: 5, tokens: 1, toolCalls: 50, wallClockMs: 60000 } });
     const report = await engine.run(goal);
 
-    expect(report.blockers.length).toBeGreaterThan(0);
+    // The exhaustion event still fires (we keep learning where a bound matters)…
     const exhausted = await store.list({ type: 'budget-exhausted' });
     expect(exhausted.length).toBeGreaterThan(0);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((exhausted[0] as any).dimension).toBe('tokens');
+    // …but it does NOT terminate the build: budget never steers (ADR-033).
+    expect(report.blockers.length).toBe(0);
   });
 });
 
@@ -1084,24 +1088,31 @@ describe('usage accounting — events carry usage and debit equals reported toke
   });
 
   it('tokens debit equals reported promptTokens + completionTokens (not chars/4)', async () => {
+    // Tokens never block (ADR-033), so the debit is observed at the
+    // budget-exhausted event boundary: at 400 the counter reaches zero and the
+    // event fires; at 401 it does not. Either way the goal emits cleanly.
     const produceUsage: Usage = { promptTokens: 300, completionTokens: 100 };
     const registry = buildRegistry([leafTypeDef({ judgeType: null })]);
 
-    // At 400 tokens budget: 300+100=400 debit → exhausted (≤0)
+    // At 400 tokens budget: 300+100=400 debit → counter crosses zero → event fires
     const store1 = new MemoryEventStore();
     const brain1 = new ScriptedBrain().queueProduceWithUsage(textArtifact('short'), produceUsage);
     const engine1 = new Engine({ registry, brain: brain1, store: store1, memory: new NoopMemoryView() });
     const goal400 = makeGoal({ budget: { attempts: 5, tokens: 400, toolCalls: 50, wallClockMs: 60000 } });
     const report400 = await engine1.run(goal400);
-    expect(report400.blockers.length).toBeGreaterThan(0);
+    expect(report400.blockers).toHaveLength(0);
+    const exhausted400 = await store1.list({ type: 'budget-exhausted' });
+    expect(exhausted400.some((e) => (e as { dimension?: string }).dimension === 'tokens')).toBe(true);
 
-    // At 401 tokens budget: 400 debit leaves 1 remaining → passes
+    // At 401 tokens budget: 400 debit leaves 1 remaining → no exhaustion event
     const store2 = new MemoryEventStore();
     const brain2 = new ScriptedBrain().queueProduceWithUsage(textArtifact('short'), produceUsage);
     const engine2 = new Engine({ registry, brain: brain2, store: store2, memory: new NoopMemoryView() });
     const goal401 = makeGoal({ budget: { attempts: 5, tokens: 401, toolCalls: 50, wallClockMs: 60000 } });
     const report401 = await engine2.run(goal401);
     expect(report401.blockers).toHaveLength(0);
+    const exhausted401 = await store2.list({ type: 'budget-exhausted' });
+    expect(exhausted401.some((e) => (e as { dimension?: string }).dimension === 'tokens')).toBe(false);
   });
 });
 

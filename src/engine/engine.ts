@@ -761,17 +761,21 @@ export class Engine {
       let budget = goal.budget;
       let priorVerdict: Verdict | undefined;
 
-      const maxSplitAttempts = budget.attempts;
-      let splitAttempts = 0;
-
       while (true) {
         const structErr = validateSplit(decision.children);
         if (structErr) {
           // Structural violation of the split → fail verdict, re-decide with
           // priorAttempt carrying the rejection
-          splitAttempts++;
           const consumed = consume(budget, 'attempts');
           budget = consumed.budget;
+          if (consumed.exhausted) {
+            await this.store.append({
+              type: 'budget-exhausted',
+              at: t(),
+              goalId: goal.id,
+              dimension: 'attempts',
+            });
+          }
           const failVerdict: Verdict = {
             pass: false,
             findings: [
@@ -785,26 +789,18 @@ export class Engine {
             ],
             failureSignature: `invalid-split:${structErr}`,
           };
-          priorVerdict = failVerdict;
 
-          if (consumed.exhausted || splitAttempts >= maxSplitAttempts) {
-            await this.store.append({
-              type: 'budget-exhausted',
-              at: t(),
-              goalId: goal.id,
-              dimension: 'attempts',
-            });
+          // Isomorphic failure check: the same structural violation twice in a
+          // row is non-convergence, not budget exhaustion — that is the real
+          // terminator here (ADR-033). The attempts counter never terminates.
+          if (priorVerdict && priorVerdict.failureSignature === failVerdict.failureSignature) {
             const report = blockedReport(
-              `Split structural validation failed: ${structErr}`,
+              `Isomorphic split structural failure (signature: ${failVerdict.failureSignature})`,
             );
-            await this.store.append({
-              type: 'emitted',
-              at: t(),
-              goalId: goal.id,
-              report,
-            });
+            await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
             return report;
           }
+          priorVerdict = failVerdict;
 
           // Re-decide with failure context
           const splitPlanArtifact: Artifact = {
@@ -866,9 +862,11 @@ export class Engine {
           }
 
           if (!splitVerdict.pass) {
-            splitAttempts++;
             const consumed = consume(budget, 'attempts');
             budget = consumed.budget;
+            if (consumed.exhausted) {
+              await this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'attempts' });
+            }
 
             // Isomorphic failure check
             if (
@@ -896,23 +894,6 @@ export class Engine {
             }
 
             priorVerdict = splitVerdict;
-
-            if (consumed.exhausted || splitAttempts >= maxSplitAttempts) {
-              await this.store.append({
-                type: 'budget-exhausted',
-                at: t(),
-                goalId: goal.id,
-                dimension: 'attempts',
-              });
-              const report = blockedReport('Split eval failed, budget exhausted');
-              await this.store.append({
-                type: 'emitted',
-                at: t(),
-                goalId: goal.id,
-                report,
-              });
-              return report;
-            }
 
             // Re-decide carrying the rejected split
             const splitPlanWithFailure: Artifact = {
@@ -1211,20 +1192,19 @@ export class Engine {
         return this.runBlock(goal, exhaustedBrief(goal, 'wallClockMs'));
       }
 
-      // Check attempts budget before producing
-      if (budget.attempts <= 0) {
+      // Attempts is an observability counter, not a terminator (ADR-033). Emit
+      // the budget-exhausted signal once it crosses zero, then keep going — the
+      // dollar ceiling and wall-clock (checked above) are the only hard bounds.
+      const consumed = consume(budget, 'attempts');
+      budget = consumed.budget;
+      if (consumed.exhausted) {
         await this.store.append({
           type: 'budget-exhausted',
           at: t(),
           goalId: goal.id,
           dimension: 'attempts',
         });
-        return this.runBlock(goal, exhaustedBrief(goal, 'attempts'));
       }
-
-      // Consume one attempt
-      const consumed = consume(budget, 'attempts');
-      budget = consumed.budget;
 
       const ctx: BrainContext = priorAttempt
         ? { tier, memories: goal.memories, priorAttempt }
@@ -1274,16 +1254,15 @@ export class Engine {
               gating: false,
             };
           }
-          // debit accumulated step token usage against the tokens budget
-          // dimension, exactly as the classic produce branch does. This gates tool
-          // leaves on the tokens dimension so a tight tokens budget exhausts them.
+          // Track accumulated step token usage on the tokens counter for
+          // observability (ADR-033). Tokens never block work; the dollar ceiling
+          // is the real bound on spend, enforced by the step loop's ceiling check.
           const stepTokens = loopResult.tokensUsed;
           if (stepTokens > 0) {
             const tkConsumed = consumeN(budget, 'tokens', stepTokens);
             budget = tkConsumed.budget;
             if (tkConsumed.exhausted) {
               await this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'tokens' });
-              return this.runBlock(goal, exhaustedBrief(goal, 'tokens'));
             }
           }
         } else {
@@ -1354,14 +1333,15 @@ export class Engine {
         if (await this.checkCeiling(goal, treeState)) {
           return this.ceilingReport(goal, treeState);
         }
-        // Debit reported tokens against the tokens budget dimension.
+        // Track reported tokens on the tokens counter for observability
+        // (ADR-033). Tokens never block work; the dollar ceiling (checked above)
+        // is the real bound on spend.
         const produceTokens = produceResult.usage.promptTokens + produceResult.usage.completionTokens;
         if (produceTokens > 0) {
           const tkConsumed = consumeN(budget, 'tokens', produceTokens);
           budget = tkConsumed.budget;
           if (tkConsumed.exhausted) {
             await this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'tokens' });
-            return this.runBlock(goal, exhaustedBrief(goal, 'tokens'));
           }
         }
 
@@ -1586,14 +1566,15 @@ export class Engine {
           return this.ceilingReport(goal, treeState);
         }
 
-        // Debit reported tokens against the tokens budget dimension.
+        // Track reported tokens on the tokens counter for observability
+        // (ADR-033). Tokens never block work; the dollar ceiling (checked above)
+        // is the real bound on spend.
         const judgeTokens = judgeResult.usage.promptTokens + judgeResult.usage.completionTokens;
         if (judgeTokens > 0) {
           const tkConsumed = consumeN(budget, 'tokens', judgeTokens);
           budget = tkConsumed.budget;
           if (tkConsumed.exhausted) {
             await this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'tokens' });
-            return this.runBlock(goal, exhaustedBrief(goal, 'tokens'));
           }
         }
 
@@ -1749,16 +1730,17 @@ export class Engine {
         if (await this.checkCeiling(goal, treeState)) {
           return { ceiling: true };
         }
-        // Debit reported tokens against the per-attempt tokens budget dimension.
+        // Track reported tokens on the tokens counter for observability
+        // (ADR-033). Tokens never cut the tournament short — the full k
+        // candidates always run; the dollar ceiling (checked above) and
+        // wall-clock are the only bounds. Emit the signal once on crossing zero.
         const produceTokens = produceResult.usage.promptTokens + produceResult.usage.completionTokens;
         if (produceTokens > 0) {
           const tkConsumed = consumeN(budget, 'tokens', produceTokens);
+          const wasExhausted = budget.tokens <= 0;
           budget = tkConsumed.budget;
-          if (tkConsumed.exhausted) {
-            // Budget exhausted mid-tournament: return whatever we have so far.
-            // The outer attempt loop will see a token-exhausted path.
-            // We return the first candidate to avoid losing all work.
-            break;
+          if (tkConsumed.exhausted && !wasExhausted) {
+            await this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'tokens' });
           }
         }
       }
@@ -2648,7 +2630,7 @@ export class Engine {
       const nextTier = tierLadder[nextTierIndex];
       if (nextTier === undefined) {
         // Ladder exhausted
-        return this.blockOnBudgetExhaustion(goal, budget, 'attempts');
+        return this.blockOnNonConvergence(goal);
       }
       await this.store.append({
         type: 'tier-escalated',
@@ -2660,24 +2642,20 @@ export class Engine {
       return { kind: 'escalated', tier: nextTier, budget };
     }
 
-    // Tier ladder exhausted → block
-    return this.blockOnBudgetExhaustion(goal, budget, 'attempts');
+    // Highest tier reached and the failure carried no actionable prescription:
+    // the goal cannot converge. This is a non-convergence terminator (the brain
+    // has nothing left to try), NOT a budget bound — budget never blocks work
+    // (ADR-033).
+    return this.blockOnNonConvergence(goal);
   }
 
-  private async blockOnBudgetExhaustion(
+  private async blockOnNonConvergence(
     goal: Goal,
-    budget: Budget,
-    dim: keyof Budget,
   ): Promise<{ kind: 'blocked'; report: Report }> {
-    const t = this.now;
-    const brief = exhaustedBrief(goal, dim);
-    await this.store.append({
-      type: 'budget-exhausted',
-      at: t(),
-      goalId: goal.id,
-      dimension: dim,
-    });
-    const report = await this.runBlock(goal, brief);
+    const report = await this.runBlock(
+      goal,
+      nonConvergenceBrief(goal),
+    );
     return { kind: 'blocked', report };
   }
 
@@ -3937,11 +3915,10 @@ function renormalizeShares(children: ChildPlan[]): ChildPlan[] {
 function validateSplit(children: ChildPlan[]): string | null {
   if (children.length === 0) return 'Split must have at least one child';
 
-  // No fan-out cap (ADR-030): a node may decompose into as many children as the
-  // brain proposes. Width was keyed to `attempts` (the scarcest, fastest-flooring
-  // dimension), which forbade legal decomposition at depth on no real evidence.
-  // The remaining checks guard correctness (cycles, duplicate ids, shares), not
-  // cost; cost is bounded by the dollar ceiling and wall-clock.
+  // No fan-out cap (ADR-033): budget never shapes the build, so width is never
+  // keyed to a count. A node decomposes into as many children as the brain
+  // proposes. The remaining checks guard correctness (cycles, duplicate ids,
+  // shares), not cost; cost is bounded only by the dollar ceiling and wall-clock.
   const localIds = new Set(children.map((c) => c.localId));
 
   // localIds must be unique
@@ -4082,6 +4059,18 @@ function isomorphicBrief(
 ): import('../contract/decision.js').DecisionBrief {
   return {
     question: `Goal "${goal.title}" is repeating the same failure (signature: "${signature}"). Needs human resolution.`,
+    options: ['deny', 'park', 'bounce'],
+    links: [goal.id],
+    deadlineMs: 30_000,
+    onTimeout: 'deny',
+  };
+}
+
+function nonConvergenceBrief(
+  goal: Goal,
+): import('../contract/decision.js').DecisionBrief {
+  return {
+    question: `Goal "${goal.title}" failed at the highest tier with no actionable repair — it cannot converge. How should it be handled?`,
     options: ['deny', 'park', 'bounce'],
     links: [goal.id],
     deadlineMs: 30_000,

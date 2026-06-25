@@ -6,9 +6,9 @@ export function diagnoseTypes(): GoalTypeDef[] {
     /**
      * `investigate` — synthesize a root-cause finding with evidence chain from
      * an anomaly or question. Non-leaf: probes are children (`deep-dive-region`,
-     * `research-external`, `implement` with `intent: spike`). Budget-bounded:
-     * the dependent-chain base case terminates when the confidence threshold
-     * is met or the budget is exhausted.
+     * `research-external`, `implement` with `intent: spike`). The dependent-chain
+     * base case is CONFIDENCE: it terminates when the confidence threshold is met
+     * (or the wall-clock runs out, the only hard bound — ADR-033).
      *
      * Eval: confidence threshold via judge (critique-doc judges the evidence
      * chain quality; the confidence field gates pass/fail).

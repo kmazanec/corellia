@@ -40,22 +40,21 @@ export type Intent = 'production' | 'spike' | 'characterization';
 export type Tier = 'low' | 'mid' | 'high';
 
 /**
- * The resource allowance a goal may spend, inherited from its parent and
- * subdivided among its children. A retry-at-higher-tier and a re-split each
- * consume an attempt; everything consumes tokens. Tool calls are budgeted
- * because the agentic round-trip — not the model — dominates execution cost, so
- * a budget teaches rhythm (batch the edits, run once, fix all, run once).
- * Subdivision bounds total tree spend: a wide fan-out cannot multiply costs past
- * what its root was granted.
+ * A backstop against runaway recursion and spend. Budget never influences what
+ * or how anything is built: a goal plans, splits, and builds identically at any
+ * budget. The only hard bounds are the ones tied to real runaway cost — the
+ * per-tree dollar ceiling and `wallClockMs`. The count dimensions below are
+ * tracked and reported for observability; they never block, cap, or steer work
+ * (ADR-033).
  */
 export interface Budget {
-  /** Bounds thrashing at one level: retries and re-splits each spend one. */
+  /** Retry/re-split counter. Tracked for observability; never blocks or caps fan-out. */
   attempts: number;
-  /** Total model tokens this goal and its subtree may consume. */
+  /** Model-token counter. Tracked for observability; never blocks work. */
   tokens: number;
-  /** Agentic round-trips allowed — the cost driver a budget teaches rhythm against. */
+  /** Agentic round-trip counter. Tracked for observability; never blocks work. */
   toolCalls: number;
-  /** Wall-clock ceiling in milliseconds before exhaustion summons the human. */
+  /** Wall-clock backstop in milliseconds — a hard bound on runaway external time. */
   wallClockMs: number;
 }
 

@@ -61,9 +61,17 @@ Ask only what you need; infer sensible defaults and state them. Cover:
    work confined to declared scope, no factory-internal language in the diff).
 4. **Intent dial (`intent`)** — `production` (full judge strictness, the default),
    `spike` (exploratory), or `characterization` (capture current behavior).
-5. **Budget envelope** — translate the human's appetite into `{ attempts, tokens,
-   toolCalls, wallClockMs }` AND a `ceilingUsd`. Use the reference envelopes below;
-   the **ceiling is the real bound**, counts are generous backstops.
+5. **Budget** — translate the human's appetite into `{ attempts, tokens,
+   toolCalls, wallClockMs }` AND a `ceilingUsd`, reasoning from *this* job, not a
+   canned tier. The **`ceilingUsd` is the real bound** — set it as the most you'd
+   let this run spend before you'd want it killed, with headroom; the counts are
+   runaway backstops. There are no reference envelopes: size each field to the
+   intent's actual shape (how many leaves, how much reading, how long a hard change
+   plausibly takes) and **state your reasoning** so the human can check it. Note
+   that real spend runs far under the ceiling (proven self-build/foreign runs have
+   landed at $0.13–$0.59 against multi-dollar ceilings); the ceiling is a backstop,
+   not an estimate. When you genuinely have no signal, ask rather than reach for a
+   default tier.
 6. **declaredScripts** (optional) — if the commission promises specific script
    entry points (build/test/run commands), declare them so the listener
    capability-checks them at receive (missing entries bounce with zero spend).
@@ -71,18 +79,6 @@ Ask only what you need; infer sensible defaults and state them. Cover:
 If the intent is ambiguous in a way that changes the artifact, **ask** — do not
 guess the scope or the done-condition. A vague commission is the failure mode this
 front door exists to prevent.
-
-## Reference budget envelopes (anchor on the ceiling)
-
-| Size | ceilingUsd | attempts | tokens | toolCalls | wallClockMs | mirrors |
-| --- | --- | --- | --- | --- | --- | --- |
-| small / demo | $2–5 | 3 | 200_000 | 200 | 600_000 (10m) | `examples/live.ts` |
-| feature | $15 (default) | 10–20 | 2_000_000 | 300 | 1_200_000 (20m) | typical |
-| MVP / self-build | $15–30 | 60–80 | 5_000_000 | 600 | 1_800_000 (30m) | `examples/live-self.ts` |
-
-These are starting points, not law. The ceiling terminates the run; the counts are
-runaway backstops (ADR-030 keeps attempts/tokens/toolCalls inherited, not divided,
-down the tree).
 
 ## Produce the artifact
 

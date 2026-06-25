@@ -8,7 +8,7 @@
 Iteration 3 gives leaves hands. DESIGN.md requires "the contract is the
 capability" to be true at runtime: goals use only the tools their type grants
 (exact static grants, ADR-013), refusals are recorded not crashed (PRD AC-7),
-and tool calls debit the budget that teaches the batching rhythm (ADR-007).
+and tool calls debit the budget counter tracked for observability (ADR-033).
 Those properties need exactly one enforcement point.
 
 ## Options considered

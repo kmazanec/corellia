@@ -18,9 +18,9 @@ confirms what you already know wastes a tool call. Read AT MOST 6–8 well-chose
 files, then EMIT — for a bounded repo, four to six well-chosen reads beat twenty
 exhaustive ones. If you find yourself on your tenth read, STOP and emit the
 artifact with what you have: a calibrated artifact from six files is better than
-exhausting the wall-clock and producing nothing. Exhausting the budget by
-over-reading is a FAILURE, not thoroughness. An artifact built from twenty files
-is harder to validate and harder to trust than one built from six.
+running out the wall-clock and producing nothing. Over-reading is a FAILURE, not
+thoroughness — an artifact built from twenty files is harder to validate and
+harder to trust than one built from six.
 
 Pointers, not bodies. Artifacts carry `{path, line?, note}` pointers to the
 evidence that supports each claim. Never include file contents in the artifact
@@ -44,12 +44,11 @@ faithfully in one context — many subsystems, hundreds of files, more than one
 node can hold without dropping evidence. A normal repo, a single package, one
 subsystem, or any small/empty region is a SATISFY: read the few representative
 files and emit the artifact. Splitting a region that fits is the most common
-failure — it spawns redundant child comprehensions, never converges, and burns
-budget.
+failure — it spawns redundant child comprehensions and never converges.
 
 BUT a whole-repo `map-repo` over a LARGE repo is the opposite failure: trying to
-read it all in one node exhausts the budget (wall-clock or tokens) before the
-artifact is emitted, and the whole goal fails having produced nothing. Concrete
+read it all in one node runs out the wall-clock before the artifact is emitted,
+and the whole goal fails having produced nothing. Concrete
 rule for `map-repo`: BEFORE reading, size the repo (e.g. count top-level source
 directories / files). If it has MANY top-level subsystems (roughly 8+ source
 packages, or many hundreds of files) — too much to characterize faithfully in one

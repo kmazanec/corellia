@@ -44,8 +44,9 @@ function per step:
 
 ## Rationale
 
-By construction rather than by discipline: no step can run past budget; every
-step is in the log for any brain; the loop is written once; `ScriptedBrain`
+By construction rather than by discipline: no step can run past the hard
+backstops (the dollar ceiling and wall-clock, ADR-033); every step is in the
+log for any brain; the loop is written once; `ScriptedBrain`
 scripts step sequences so the entire broker/loop machinery is deterministically
 testable with zero API calls. This also extends the design's existing edge
 discipline — memory is spawner-mediated, children report rather than write;
