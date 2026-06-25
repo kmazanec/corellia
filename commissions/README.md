@@ -88,5 +88,5 @@ prints the goal tree, blockers, and a cost summary, and writes events under
   constraints? }` convention. Do **not** invent other `spec` fields.
 - Acceptance criteria live as prose in `description`/`constraints` for now;
   structured acceptance-criteria-in-spec is the milestone-loop bridge
-  (ADR-031/032, `docs/milestone-loop-SPEC.md`), added when the engine grows the
-  `iterative` trait.
+  (ADR-031/032, `docs/iterations/2026-06-24-03-milestone-loop/spec.md`), added when
+  the engine grows the `iterative` trait.
