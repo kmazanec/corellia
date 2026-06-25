@@ -868,14 +868,18 @@ export class Engine {
               await this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'attempts' });
             }
 
-            // Isomorphic failure check
-            if (
-              priorVerdict &&
-              splitVerdict.failureSignature &&
-              splitVerdict.failureSignature === priorVerdict.failureSignature
-            ) {
+            // Non-convergence check: the split judge failed again. If it repeats
+            // the same failure signature — or fails twice with no signature to
+            // distinguish the rounds — the re-decide is not converging. This is a
+            // non-convergence terminator, NOT a budget bound (ADR-033): without
+            // it a signature-less repeated failure would loop until wall-clock.
+            const isomorphic =
+              priorVerdict !== undefined &&
+              splitVerdict.failureSignature === priorVerdict.failureSignature;
+            if (isomorphic) {
+              const sig = splitVerdict.failureSignature ?? 'unsignatured';
               const report = blockedReport(
-                `Isomorphic split failure (signature: ${splitVerdict.failureSignature})`,
+                `Isomorphic split failure (signature: ${sig})`,
               );
               await this.store.append({
                 type: 'decided',
