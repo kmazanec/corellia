@@ -14,6 +14,11 @@ export function deliverTypes(): GoalTypeDef[] {
       // The root type that commissions intent accepts only spawn + retrieval
       // grants; no code tools, because satisfying intent directly is not its job.
       grants: ['retrieval.api', 'classify_risk', 'spawn'],
+      // The root literally cannot satisfy — it has no producing tool. A `satisfy`
+      // decision here (e.g. the brain taking the easy exit after a judge-rejected
+      // split) is invalid: the engine coerces it to an actionable block instead of
+      // looping the attempt loop to an empty-artifact `step-loop:failed` dead-end.
+      mustDecompose: true,
       // The milestone loop (ADR-031): the split dispatch arm routes through
       // runMilestone, re-deciding against a frozen acceptance-criteria
       // done-condition each round. maxRounds 50 is a runaway-backstop, NOT a

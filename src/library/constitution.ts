@@ -123,6 +123,27 @@ export function lintLibrary(defs: GoalTypeDef[], opts: LintOptions = {}): string
       }
     }
 
+    // mustDecompose invariant: a type that cannot satisfy must be able to spawn
+    // (a leaf has nowhere to decompose to) and must hold no artifact-producing
+    // grant (declaring "I cannot produce" while granting a producing tool is a
+    // contradiction). This keeps the engine's cannot-satisfy guard honest: the
+    // claim is structural, not a runtime accident.
+    if (def.mustDecompose === true) {
+      if (def.leafOnly) {
+        violations.push(
+          `Type "${def.name}" is mustDecompose but leafOnly — a leaf cannot decompose`,
+        );
+      }
+      const producingGrant = /write/;
+      for (const grant of def.grants) {
+        if (producingGrant.test(grant)) {
+          violations.push(
+            `Type "${def.name}" is mustDecompose but holds a producing grant "${grant}" — a type that cannot satisfy must not be able to produce`,
+          );
+        }
+      }
+    }
+
     // judgeType validity: when judgeType is non-null it must name a registered
     // def whose kind === 'judge'. A judgeType pointing at an unknown name or a
     // non-judge kind is a misconfiguration that would produce silent misbehaviour

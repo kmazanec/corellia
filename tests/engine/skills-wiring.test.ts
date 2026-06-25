@@ -168,7 +168,11 @@ const ALL_TYPES = starterTypes();
  * non-leaf type reaches it on the SATISFY branch of its decide path (ADR-029: the
  * comprehend family is no longer leafOnly yet still drives the step loop when it
  * decides to satisfy rather than split). Skips judge/evolve kinds and types with
- * no step-loop tool grant.
+ * no step-loop tool grant. Also skips `mustDecompose` types (canonically
+ * deliver-intent): they CANNOT satisfy — the engine's cannot-satisfy guard blocks
+ * a satisfy decision from them — so they never reach the step-loop harness via the
+ * satisfy path this sweep drives. Their family is still covered by its other
+ * members (e.g. the deliver family's `open-pr` leaf).
  */
 function stepLoopReps(): GoalTypeDef[] {
   const seen = new Set<string>();
@@ -176,6 +180,7 @@ function stepLoopReps(): GoalTypeDef[] {
   for (const d of ALL_TYPES) {
     if (seen.has(d.family)) continue;
     if (d.kind === 'judge' || d.kind === 'evolve') continue;
+    if (d.mustDecompose) continue;
     if (!isToolGranted(d.grants)) continue;
     seen.add(d.family);
     reps.push(d);

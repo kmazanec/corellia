@@ -66,6 +66,33 @@ describe('lintLibrary violations', () => {
     expect(violations.some((v) => v.includes('memory.write'))).toBe(true);
   });
 
+  it('reports a mustDecompose type that is leafOnly (a leaf cannot decompose)', () => {
+    const defs: GoalTypeDef[] = [
+      {
+        ...baseLeaf,
+        name: 'leaf-must-decompose',
+        leafOnly: true,
+        mustDecompose: true,
+      },
+    ];
+    const violations = lintLibrary(defs, { checkSkills: false });
+    expect(violations.some((v) => v.includes('mustDecompose') && v.includes('leafOnly'))).toBe(true);
+  });
+
+  it('reports a mustDecompose type that holds a producing grant', () => {
+    const defs: GoalTypeDef[] = [
+      {
+        ...baseLeaf,
+        name: 'contradictory-root',
+        leafOnly: false,
+        mustDecompose: true,
+        grants: ['spawn', 'fs.write'],
+      },
+    ];
+    const violations = lintLibrary(defs, { checkSkills: false });
+    expect(violations.some((v) => v.includes('mustDecompose') && v.includes('producing grant'))).toBe(true);
+  });
+
   it('reports an empty tier ladder', () => {
     const defs: GoalTypeDef[] = [
       {

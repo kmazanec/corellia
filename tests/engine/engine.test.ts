@@ -1395,3 +1395,51 @@ describe('comprehend block-without-effort coercion', () => {
     expect(report.blockers.length).toBeGreaterThan(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A mustDecompose type (the deliver-intent root) CANNOT satisfy: it has no
+// producing tool, so a satisfy decision is coerced to an actionable block rather
+// than run through the futile attempt loop (which would emit an empty artifact and
+// dead-end at step-loop:failed). Surfaced by build run live-self-3bf0f5b2.
+// ---------------------------------------------------------------------------
+
+describe('cannot-satisfy guard (mustDecompose types)', () => {
+  it('blocks with an actionable reason when a mustDecompose type decides satisfy', async () => {
+    const store = new MemoryEventStore();
+    // The brain returns satisfy for the root — the invalid "easy exit" the build
+    // run took after its split was judge-rejected.
+    const brain = new ScriptedBrain().queueDecide({ kind: 'satisfy' });
+
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'deliver-intent', family: 'deliver', mustDecompose: true }),
+    ]);
+
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const goal = makeGoal({ type: 'deliver-intent' });
+    const report = await engine.run(goal);
+
+    // It blocks (does not run the attempt loop), and the brief names the reason.
+    expect(report.blockers.length).toBeGreaterThan(0);
+    expect(report.blockers.join(' ')).toMatch(/must decompose|cannot satisfy/i);
+    // The futile attempt loop never ran: no produce was consumed, no empty emit-loop.
+    const stepEvents = await store.list({ type: 'step' });
+    expect(stepEvents).toHaveLength(0);
+  });
+
+  it('does NOT guard a normal non-leaf type that legitimately satisfies', async () => {
+    const store = new MemoryEventStore();
+    const brain = new ScriptedBrain()
+      .queueDecide({ kind: 'satisfy' })
+      .queueProduce(textArtifact('produced'));
+
+    // A plain non-leaf type (no mustDecompose) may satisfy and produce normally.
+    const registry = buildRegistry([nonLeafTypeDef({ name: 'splitter' })]);
+
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const goal = makeGoal({ type: 'splitter' });
+    const report = await engine.run(goal);
+
+    expect(report.blockers).toHaveLength(0);
+    expect(report.artifact).toEqual(textArtifact('produced'));
+  });
+});

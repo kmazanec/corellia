@@ -930,6 +930,29 @@ export class Engine {
       }
     }
 
+    // ── CANNOT-SATISFY GUARD ───────────────────────────────────────────────
+    // A `mustDecompose` type (canonically the deliver-intent root) has no
+    // producing tool and CANNOT satisfy — its only legitimate decisions are split
+    // or block. If decide nonetheless returns satisfy (e.g. the brain took the
+    // easy exit after its split was judge-rejected), running the attempt loop is
+    // futile: it produces an empty artifact and loops to an opaque
+    // `step-loop:failed` isomorphic block with nothing built (surfaced by build
+    // run live-self-3bf0f5b2). Coerce that satisfy into an actionable block that
+    // names the real reason. The invariant is declared on the type
+    // (`mustDecompose`), not inferred from grants — "capability is the type"
+    // (GOAL-TYPES.md) — so it stays lintable and unambiguous.
+    if (decision.kind === 'satisfy' && typeDef.mustDecompose) {
+      const report = blockedReport(
+        `Type "${goal.type}" must decompose and cannot satisfy directly — it has no ` +
+          `tool with which to produce the product. The decision-maker returned ` +
+          `satisfy; re-commission with a clearer, decomposable intent, or the split ` +
+          `must propose typed children.`,
+      );
+      await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision, ...(decideUsage !== undefined ? { usage: decideUsage } : {}) });
+      await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
+      return report;
+    }
+
     await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision, ...(decideUsage !== undefined ? { usage: decideUsage } : {}) });
 
     // ── DISPATCH on decision kind ──────────────────────────────────────────

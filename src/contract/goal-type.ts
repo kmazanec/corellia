@@ -79,6 +79,17 @@ export interface GoalTypeDef {
   /** The exact, static tool grants — the contract is the capability, readable as blast radius. */
   grants: string[];
   /**
+   * When true, this type CANNOT satisfy directly — it has no producing tool and
+   * its only legitimate decisions are split or block (canonically `deliver-intent`,
+   * the composite root: grants are retrieval/classify/spawn, with no way to emit a
+   * product). The engine enforces this: a `satisfy` decision from a `mustDecompose`
+   * type is coerced to an actionable block rather than run through the (futile)
+   * attempt loop, which would emit an empty artifact and dead-end at a
+   * `step-loop:failed` block. Declared on the type so the invariant is lintable —
+   * "capability is the type" (GOAL-TYPES.md) — not inferred from grant-sniffing.
+   */
+  mustDecompose?: boolean;
+  /**
    * Whether this type carries a type-level authority gate: goals of this type
    * route through a human grant/deny decision before their children spawn,
    * regardless of instance risk. Capability-level authority, not reach.
