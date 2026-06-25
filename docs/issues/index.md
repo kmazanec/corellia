@@ -22,6 +22,7 @@ Each issue is one OKF `type: issue` file with `kind` (bug | idea | future-work),
 | Issue | Kind | Tags |
 |---|---|---|
 | [out-of-scope-edit-enforcement](out-of-scope-edit-enforcement.md) | bug | scope-safety, engine, broker |
+| [partial-delivery-on-blocked-dependency](partial-delivery-on-blocked-dependency.md) | bug | partial-delivery, engine, collect, round-commit |
 | [comprehension-region-wallclock-exhaustion](comprehension-region-wallclock-exhaustion.md) | bug | engine, comprehend, wall-clock, recursion |
 | [visual-runtime-verification](visual-runtime-verification.md) | future-work | structural, verification, vision |
 | [milestone-loop-step-7-prove-live](milestone-loop-step-7-prove-live.md) | future-work | milestone-loop, engine, live-proof |
@@ -34,7 +35,6 @@ Each issue is one OKF `type: issue` file with `kind` (bug | idea | future-work),
 | [salvage-on-repeated-failure](salvage-on-repeated-failure.md) | bug | in-run-stall, engine, salvage |
 | [error-signature-repair-hints](error-signature-repair-hints.md) | bug | in-run-stall, engine, repair |
 | [repair-integration-rung](repair-integration-rung.md) | idea | in-run-stall, engine, integration |
-| [partial-delivery-on-blocked-dependency](partial-delivery-on-blocked-dependency.md) | idea | in-run-stall, engine, partial-delivery |
 | [collect-review-manifest](collect-review-manifest.md) | idea | scope-safety, collect, review |
 | [observability-pluggable-tracing](observability-pluggable-tracing.md) | idea | observability, eventlog, cli, langsmith, otel |
 | [external-asset-acquisition](external-asset-acquisition.md) | future-work | structural, asset, tool |

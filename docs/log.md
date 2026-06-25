@@ -16,6 +16,17 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-25
 
+- **Build run #6** (`live-self-a2397f0f`, $1.17, 80% cache) — commissioned the 3
+  remaining ADR-034/035 mechanisms (docs lint, issue→CommissionInput reader, engine
+  integration steps) as explicit slices. **All 8 comprehension dives succeeded** (the
+  wall-clock floor is proven) and **slice A (the OKF docs lint) passed its gate** —
+  but slice B blocked, the root blocked (`judge-acceptance: no shippable verdict`),
+  and on the block the engine **reset the worktree to HEAD, discarding the passing
+  lint slice's round commits** — unrecoverable. 0 of 3 landed, though the lint
+  proved buildable. Sharpened
+  [partial-delivery](issues/partial-delivery-on-blocked-dependency.md) to high
+  severity (a root block must not erase a sibling's verified committed work).
+  Worktree torn down; main undisturbed.
 - **PR [#7](https://github.com/kmazanec/corellia/pull/7) merged — the factory's
   `file_issue` tool shipped.** Build run #5 (`live-self-bd479522`, $2.46) opened
   the first real factory PR. It built a complete, sound 319-line `file_issue` tool
