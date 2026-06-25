@@ -363,6 +363,36 @@ describe('LlmBrain.decide', () => {
     expect(userMsg).not.toContain('"content":');
   });
 
+  it('omits the satisfy shape and instructs split/block when ctx.mustDecompose is set', async () => {
+    // Prevention paired with the engine's cannot-satisfy guard: a mustDecompose
+    // type (deliver-intent) must never be OFFERED satisfy at decide time.
+    const { fetch, calls } = stubFetch(
+      chatResponse(JSON.stringify({ kind: 'split', children: [
+        { localId: 'a', type: 'implement', title: 't', spec: {}, dependsOn: [], scope: ['src/'], budgetShare: 1 },
+      ] })),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    await brain.decide(baseGoal, { tier: 'high', memories: [], mustDecompose: true });
+    const body = JSON.parse(calls[0]?.options.body as string);
+    const userMsg: string = body.messages.find((m: { role: string }) => m.role === 'user').content;
+    expect(userMsg).toContain('CANNOT satisfy directly');
+    expect(userMsg).toContain('Do NOT return satisfy');
+    // The satisfy shape is not offered.
+    expect(userMsg).not.toContain('{"kind":"satisfy"}');
+    // split and block are still offered.
+    expect(userMsg).toContain('"kind":"split"');
+    expect(userMsg).toContain('"kind":"block"');
+  });
+
+  it('offers all three shapes (incl. satisfy) when mustDecompose is absent', async () => {
+    const { fetch, calls } = stubFetch(chatResponse(JSON.stringify({ kind: 'satisfy' })));
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    await brain.decide(baseGoal, ctxSonnet);
+    const body = JSON.parse(calls[0]?.options.body as string);
+    const userMsg: string = body.messages.find((m: { role: string }) => m.role === 'user').content;
+    expect(userMsg).toContain('{"kind":"satisfy"}');
+  });
+
   it('includes memories quoted as data in the user message', async () => {
     const { fetch, calls } = stubFetch(chatResponse(JSON.stringify({ kind: 'satisfy' })));
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });

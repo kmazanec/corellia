@@ -70,6 +70,17 @@ export interface BrainContext {
    * Absent → the brain decides on the goal context alone, exactly as before.
    */
   repoShape?: string;
+  /**
+   * When true, this goal's type CANNOT satisfy (it has no producing tool —
+   * canonically the deliver-intent root). The decide prompt omits the `satisfy`
+   * shape and instructs the brain to choose only split or block, so it never
+   * wastes a decision on a satisfy the engine would have to block anyway. This is
+   * the PREVENTION paired with the engine's cannot-satisfy GUARD: the guard is the
+   * backstop, this stops the brain reaching for satisfy in the first place
+   * (observed: a deliver-intent root deciding satisfy on its first decision).
+   * Absent/false → all three shapes are offered, exactly as before.
+   */
+  mustDecompose?: boolean;
 }
 
 /**

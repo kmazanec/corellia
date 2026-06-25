@@ -683,6 +683,11 @@ export class Engine {
           memories: goal.memories,
           ...(decideSkill ? { skill: decideSkill } : {}),
           ...(repoShape ? { repoShape } : {}),
+          // Tell the brain at decide time that this type cannot satisfy, so it
+          // chooses split/block and never wastes a decision on a satisfy the
+          // cannot-satisfy guard would have to block (prevention paired with that
+          // guard).
+          ...(typeDef.mustDecompose ? { mustDecompose: true } : {}),
           ...(memoStatus === 'provisional' && memo !== null
             ? { patternHint: memo }
             : {}),
