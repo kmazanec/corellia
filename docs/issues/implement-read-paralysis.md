@@ -1,66 +1,76 @@
 ---
 type: issue
-title: "An implement leaf can read-loop without ever writing — no forced-emit backstop like comprehend has"
-description: A make/implement leaf on a hard task reads many files but never transitions to a write, looping to a step-loop:failed isomorphic block; the comprehend over-explore forced-emit backstop is scoped out of implement leaves.
-tags: [engine, step-loop, implement, read-paralysis, forced-emit]
+title: "Implement leaf dies on a truncated tool-call (context bloat → malformed JSON → isomorphic block)"
+description: A make/implement leaf on a hard task accumulates ~117K tokens of file reads; its tool-call response is then truncated by the output limit, JSON.parse throws Unexpected-end-of-JSON, the step fails repeatedly, and the isomorphic detector blocks it with 0 writes.
+tags: [engine, step-loop, llm, truncation, finish-reason, isomorphic-block]
 timestamp: 2026-06-25
 status: open
 kind: bug
 severity: high
 ---
 
-# An implement leaf can read-loop without ever writing — no forced-emit backstop like comprehend has
+# Implement leaf dies on a truncated tool-call (context bloat → malformed JSON → isomorphic block)
+
+> **Corrected root cause (the first cut of this issue was wrong).** Initial read:
+> "an implement leaf read-loops without writing because there's no forced-emit
+> backstop." On reading the full event trace + `JSON.parse` path, that was a
+> symptom, not the cause. The leaf was NOT calmly choosing to keep reading — it was
+> **repeatedly trying to act and getting its tool-call responses truncated** under a
+> bloated context. The real failure is below.
 
 ## Problem
-On a hard multi-file implement task, a make/`implement` leaf can take many
-read-only steps (list_dir / read_file / search) **without ever attempting a single
-`write_file`**, looping until the isomorphic-failure detector blocks it as
-`step-loop:failed` with nothing produced.
+On a hard implement task, a leaf's step-loop context balloons with file reads, and
+its tool-call response gets **truncated by the output-token limit**, producing
+incomplete JSON. `JSON.parse(wc.function.arguments)` throws `Unexpected end of JSON
+input` (`src/brains/llm.ts:366`), the step throws → `runStepLoop` returns
+`kind:'failed'` → the same `step-loop:failed` signature **twice** → the
+isomorphic-failure detector blocks the leaf with **0 writes**. It is neither
+read-paralysis-by-choice nor budget exhaustion: it is a transport/output-size
+crash the engine can't distinguish from a genuine logical failure.
 
-The engine HAS a backstop for this shape — but only for the **comprehend** family.
-`runStepLoop` carries a `COMPREHEND_READ_CEILING = 16`: once a comprehend leaf
-crosses it, the engine FORCES a two-phase emit on the next step (added for the AC-4
-over-explore failures). The comment explicitly excludes implement leaves:
+Two concrete engine gaps make it terminal rather than recoverable:
 
-> "deliver/implement leaves are untouched (they legitimately make many
-> write_file/run_script/re-read calls)."
-
-That assumption holds for a *normal* implement leaf (read → write → test →
-re-read, interleaved) but breaks for a *hard* one that read-paralyzes: pure reads,
-no write, until block. An implement leaf has two legitimate modes and the engine
-only backstops the comprehend version of the failure.
+1. **No `finish_reason` check.** `translateStepResponse` (`llm.ts`) never inspects
+   whether the model stopped on `length` (output truncated → the JSON is cut off,
+   not malformed-by-the-model) vs `stop`. It can't tell "your output was cut off,
+   the context is too big" from "you emitted bad JSON," so it can't respond
+   appropriately (shrink context / re-prompt for a smaller step / force an emit).
+2. **A thrown parse error is terminal, not a clean re-prompt.** `translateStepResponse`
+   is designed to return `null` on malformed tool-calls so the caller re-prompts —
+   but the truncation path surfaces as a *thrown* `JSON.parse` error that escapes to
+   the engine as `kind:'failed'`, and the isomorphic detector then treats two such
+   failures as non-convergence and blocks. The recovery the design intended
+   (re-prompt) is bypassed.
 
 ## Evidence
-Build runs #7 and #8 (slice C — the ADR-034 engine integration steps; the one
-mechanism the factory couldn't build). Run #8 (`live-self-cb6abfc2`, $0.56): the
-implement leaf ran **11 steps, 50 read-class tool calls (16 list_dir + 28 read_file
-+ 6 search), and 0 write_file** — no budget exhaustion, no tier escalation, no
-refused write — then blocked on `step-loop:failed`. Step-by-step trace: every one
-of the 11 steps was read-only. Run #7's slice C: same, `write_file=0`. The leaf
-comprehends the task (it reads the right files) but never commits to producing the
-coordinated multi-file change (modify `engine.ts` + a new module + tests).
-Backstop site: `src/engine/engine.ts` `runStepLoop`, the `COMPREHEND_READ_CEILING`
-forced-emit logic.
+Build run #8 (`live-self-cb6abfc2`, $0.56), slice C (ADR-034 engine integration
+steps). The impl leaf trace: decided `satisfy`; 11 steps, ALL `outputKind:
+tool-calls` (it kept trying to act); **prompt tokens grew 2.8K → 50K → 107K → 117K**
+across steps as reads accumulated; no `budget-exhausted`, no `tier-escalated`, no
+`ceiling`. Final report finding: **`"Step loop failed: Unexpected end of JSON
+input"`**, blocker `"Isomorphic failure detected (signature: step-loop:failed)"`,
+artifact `null`, **0 write_file**. Run #7's slice C: same shape. Origin:
+`src/brains/llm.ts:366` (`JSON.parse(wc.function.arguments)`); the failed-step path
+at `src/engine/engine.ts` ~2258; the isomorphic block ~920.
 
 ## Proposed direction
 (Rough, not committed.)
-- **An implement/make read-paralysis backstop.** Track consecutive *write-free*
-  steps for a make leaf; after a ceiling of pure read-only steps (set well above
-  a normal read→write rhythm, e.g. 5–6 write-free steps), inject a forcing nudge —
-  "you have read enough; make your first edit now (write_file), or emit your
-  artifact" — rather than letting it loop to an isomorphic block. Mirror the
-  comprehend forced-emit, scoped to make leaves and keyed on *write-free* steps
-  rather than a raw read count (so a leaf that IS writing/testing is never cut
-  short).
-- **Or** a skill nudge in `build.md`: an explicit "read at most N files before your
-  first edit; prefer writing a first draft and iterating" — cheaper but softer than
-  an engine backstop.
-- The isomorphic-failure block should perhaps distinguish "repeating a *failure*"
-  from "repeating read-only *progress-shaped* steps that produced nothing" — the
-  latter wants a forced-emit, not a terminal block.
+- **Read `finish_reason`.** When a step response has `finish_reason: 'length'`
+  (or the provider's truncation signal), treat it as a TRUNCATION incident, not a
+  malformed-decision: re-prompt with a "your last output was cut off — make a
+  smaller move / emit now" nudge, and/or shed context. Do not let it count toward
+  the isomorphic-failure signature as if it were a logical failure.
+- **Bound the step-loop context.** ~117K prompt tokens of accumulated reads is the
+  proximate trigger. Cap/summarize the read transcript the leaf carries forward
+  (it already has a duplicate-read guard; add a context-size guard), so a hard
+  implement task does not balloon past the point where outputs truncate.
+- **Make a truncated-tool-call recoverable, not terminal.** Route the thrown
+  `JSON.parse` truncation through the SAME re-prompt path the `null`-return
+  malformed case uses, rather than `kind:'failed'` → isomorphic block.
 
 ## Acceptance hint
-An implement leaf on a hard multi-file task either makes its first write within a
-bounded number of read-only steps (nudged/forced), or emits — instead of
-read-looping to a `step-loop:failed` block with 0 writes. Slice C (the ADR-034
-engine integration steps) becomes buildable by the factory.
+An implement leaf on a hard multi-file task does not die on a truncated tool-call:
+a `finish_reason: length` step is recovered (re-prompt / context-shed / forced
+emit) instead of crashing `JSON.parse` and blocking as `step-loop:failed` with 0
+writes. Slice C (the ADR-034 engine integration steps) becomes buildable by the
+factory.
