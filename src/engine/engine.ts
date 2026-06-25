@@ -27,7 +27,7 @@ import type { RiskClass, SensitivityFact } from '../contract/risk.js';
 import type { PatternStore } from '../contract/pattern.js';
 import type { ToolBroker, ToolDef } from '../contract/tool.js';
 import { GRANT_TOOL_MAP } from '../contract/tool.js';
-import { subdivide, consume } from './budget.js';
+import { subdivide, consume, floorWallClock, COMPREHENSION_WALLCLOCK_FLOOR_MS } from './budget.js';
 import { lintLibrary } from '../library/constitution.js';
 import { loadFamilySkill, loadSharedPreamble } from '../library/skills.js';
 import { loadHostConventions } from './host-conventions.js';
@@ -3140,12 +3140,19 @@ export class Engine {
     // Build child goals, injecting memories via memory.query (spawner-mediated)
     const childGoals: Goal[] = await Promise.all(children.map(async (child, i) => {
       const childMemories = await this.memory.query(child.title, child.scope);
-      const childBudget = budgets[i] ?? {
+      let childBudget = budgets[i] ?? {
         attempts: 1,
         tokens: 1,
         toolCalls: 1,
         wallClockMs: 1,
       };
+      // Comprehension dives are read-heavy work whose time-to-complete is set by
+      // the region's content, not by how many siblings the root fanned out into.
+      // Floor their wall-clock so a wide split does not starve them below a
+      // workable minimum (ADR-030 analogue; build run live-self-63daa9cf).
+      if (child.type === 'map-repo' || child.type === 'deep-dive-region') {
+        childBudget = floorWallClock(childBudget, COMPREHENSION_WALLCLOCK_FLOOR_MS, goal.budget.wallClockMs);
+      }
       return {
         id: `${goal.id}/${child.localId}`,
         type: child.type,

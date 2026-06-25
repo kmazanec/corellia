@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { subdivide, consume } from '../../src/engine/budget.js';
+import { subdivide, consume, floorWallClock, COMPREHENSION_WALLCLOCK_FLOOR_MS } from '../../src/engine/budget.js';
 import type { Budget } from '../../src/contract/goal.js';
 import { Engine } from '../../src/engine/engine.js';
 import {
@@ -68,6 +68,35 @@ describe('subdivide', () => {
     const parts = subdivide(base, shares);
     const totalWall = parts.reduce((s, p) => s + p.wallClockMs, 0);
     expect(totalWall).toBeLessThanOrEqual(base.wallClockMs);
+  });
+});
+
+describe('floorWallClock', () => {
+  // Comprehension dives are starved when a wide split shrinks their proportional
+  // wall-clock below a workable minimum (build run live-self-63daa9cf). The floor
+  // raises a sub-floor child up to the floor, bounded by the parent's wall-clock.
+  const big = 1_800_000; // 30 min parent
+
+  it('raises a below-floor wall-clock up to the floor', () => {
+    const starved: Budget = { attempts: 80, tokens: 5_000_000, toolCalls: 600, wallClockMs: 94_000 };
+    const floored = floorWallClock(starved, COMPREHENSION_WALLCLOCK_FLOOR_MS, big);
+    expect(floored.wallClockMs).toBe(COMPREHENSION_WALLCLOCK_FLOOR_MS);
+    // other dimensions untouched
+    expect(floored.attempts).toBe(80);
+    expect(floored.tokens).toBe(5_000_000);
+  });
+
+  it('leaves an already-sufficient wall-clock unchanged', () => {
+    const ample: Budget = { attempts: 80, tokens: 5_000_000, toolCalls: 600, wallClockMs: 600_000 };
+    expect(floorWallClock(ample, COMPREHENSION_WALLCLOCK_FLOOR_MS, big)).toBe(ample);
+  });
+
+  it('never grants a child more wall-clock than the parent had', () => {
+    // A small parent (2 min) caps the floor: the child cannot get 5 min.
+    const smallParent = 120_000;
+    const starved: Budget = { attempts: 80, tokens: 5_000_000, toolCalls: 600, wallClockMs: 30_000 };
+    const floored = floorWallClock(starved, COMPREHENSION_WALLCLOCK_FLOOR_MS, smallParent);
+    expect(floored.wallClockMs).toBe(smallParent);
   });
 });
 
