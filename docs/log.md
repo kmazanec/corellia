@@ -16,6 +16,13 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-25
 
+- **decide-json-robustness fixed** (`src/brains/llm.ts`). A large free-text root
+  intent no longer blocks the tree at decision #1: the goal spec is rendered as
+  readable labeled text in the decide/produce/judge prompt instead of an escaped
+  JSON blob the model echoed back malformed, plus a meaning-preserving JSON-repair
+  pass before any re-ask. Clears the named blocker on commissioning large
+  factory-self-modification intents through `live:self`. The issue was implemented
+  and deleted (ephemeral); 1482 tests green.
 - **Docs reorganized to OKF.** Iterations became date-prefixed migration-style
   dirs with a catalog ([iterations/index.md](iterations/index.md)); an ephemeral
   [issues/](issues/index.md) backlog was stood up (21 issues seeded from the

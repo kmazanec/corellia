@@ -22,7 +22,6 @@ Each issue is one OKF `type: issue` file with `kind` (bug | idea | future-work),
 | Issue | Kind | Tags |
 |---|---|---|
 | [out-of-scope-edit-enforcement](out-of-scope-edit-enforcement.md) | bug | scope-safety, engine, broker |
-| [decide-json-robustness](decide-json-robustness.md) | bug | engine, brain, transport |
 | [visual-runtime-verification](visual-runtime-verification.md) | future-work | structural, verification, vision |
 | [milestone-loop-step-7-prove-live](milestone-loop-step-7-prove-live.md) | future-work | milestone-loop, engine, live-proof |
 
