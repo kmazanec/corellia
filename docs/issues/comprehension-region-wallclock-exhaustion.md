@@ -4,12 +4,20 @@ title: "a large docs/ region exhausts a deep-dive-region's wall-clock and cascad
 description: A deep-dive of a now-large docs/ tree ran out its per-goal wallClockMs (~112s) instead of splitting; that one comprehension dependency failing then cascade-blocked all six build slices, so nothing was built.
 tags: [engine, comprehend, wall-clock, recursion, partial-delivery, deliver-intent]
 timestamp: 2026-06-25
-status: open
+status: partially-fixed
 kind: bug
 severity: high
 ---
 
 # a large docs/ region exhausts a deep-dive-region's wall-clock and cascades to block every dependent
+
+> **Partially fixed (2026-06-25, commit 22a411e).** The split-signal half is done:
+> `repoShapeHint` now fires for `deep-dive-region` and measures a SCOPED region's
+> actual size, emitting a "SPLIT into sub-region children" hint when large — so a
+> big `docs/` dive should decompose instead of timing out. **Still open:** the
+> dependency-cascade half — one blocked comprehension dependency still hard-blocks
+> every dependent with no degraded path (shared with
+> [partial-delivery-on-blocked-dependency](partial-delivery-on-blocked-dependency.md)).
 
 ## Problem
 Two compounding failures, both real:
