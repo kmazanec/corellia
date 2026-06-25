@@ -16,6 +16,16 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-25
 
+- **improve-factory build of ADR-034/035 via `live:self`** (intent
+  `live-self-3bf0f5b2`, $0.08) — commissioned the full design implementation.
+  Decide cleared (the decide-json fix held under a large reference payload), and
+  `judge-split` correctly rejected the first split for not being vertical slices.
+  But the re-decide **collapsed to `satisfy`** — invalid for a `deliver-intent`
+  root (no code tools), so it looped to a `step-loop:failed` block: no PR, nothing
+  built, worktree at main's SHA. Filed as
+  [issue](issues/deliver-intent-satisfy-coercion-block.md) — a real engine
+  robustness gap (a code-tool-less root must never satisfy). Worktree torn down;
+  primary `main` undisturbed.
 - **Design-first self-build via `live:self`** (intent `live-self-8ac028ee`, $0.70,
   62% cache) — the factory designed its own issue/iteration OKF participation. It
   cleared the decide-json wall (dense intent + 5 attached references decided and
