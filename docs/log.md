@@ -16,6 +16,15 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-25
 
+- **Build run #8** (`live-self-cb6abfc2`, $0.56) — commissioned slice C ALONE (the
+  engine integration steps). The implement leaf **read extensively (11 steps, 50
+  reads) but wrote 0 files** before blocking (`step-loop:failed`) — no budget
+  exhaustion, no salvageable code. Same can't-produce result as run #7's slice C.
+  **Slice C is the genuine stuck point**: real engine surgery in the delivery hot
+  path (modify engine.ts + a new module + tests, all consistent) that the factory
+  comprehends but cannot produce across two attempts. The other 3 of 4 ADR-034/035
+  mechanisms are built; this one is a hand-build candidate per the bootstrap loop.
+  Worktree torn down; main undisturbed.
 - **Build run #7** (`live-self-744d415d`, $2.51, 80% cache) — **the hollow-emit gate
   worked.** Commissioned the 3 remaining ADR-034/035 mechanisms; this time the
   slices did REAL write_file work (slice A: 6 writes + 20 script runs; slice B: 12 +
