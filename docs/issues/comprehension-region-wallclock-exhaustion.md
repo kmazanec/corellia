@@ -13,10 +13,22 @@ severity: high
 
 > **Partially fixed (2026-06-25, commit 22a411e).** The split-signal half is done:
 > `repoShapeHint` now fires for `deep-dive-region` and measures a SCOPED region's
-> actual size, emitting a "SPLIT into sub-region children" hint when large — so a
-> big `docs/` dive should decompose instead of timing out. **Still open:** the
-> dependency-cascade half — one blocked comprehension dependency still hard-blocks
-> every dependent with no degraded path (shared with
+> actual size, emitting a "SPLIT into sub-region children" hint when large.
+>
+> **But run #4 (`live-self-63daa9cf`, $3.21) reframed the root cause — size was
+> NOT the real problem.** With the build scope narrowed and the size-split fix in
+> place, the root split into ~13 children, so ADR-030's wall-clock subdivision gave
+> each `deep-dive-region` only **~94.7s** — and 5 of 12 dives still timed out,
+> INCLUDING `src/contract` at just **14 files** (below the size-split threshold, so
+> no hint even fired). The milestone loop ran 3 rounds trying to recover; the
+> timeouts recurred each round. **The real gap: a thorough deep-dive needs more
+> wall-clock than it gets once the root fans out wide — per-dive starvation, not
+> region size.** Candidate fixes (NOT built): give comprehension dives a wall-clock
+> FLOOR that does not subdivide below a workable minimum (a comprehension carve-out
+> like the ADR-030 attempts/tokens inheritance); or make the root's comprehension
+> fan-out narrower (fewer, coarser dives); or let a dive that is making progress
+> extend its slice. **Still open too:** the dependency-cascade half — one blocked
+> dive hard-blocks every dependent with no degraded path (shared with
 > [partial-delivery-on-blocked-dependency](partial-delivery-on-blocked-dependency.md)).
 
 ## Problem

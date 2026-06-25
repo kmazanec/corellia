@@ -16,6 +16,16 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-25
 
+- **ADR-034/035 build run #4** (`live-self-63daa9cf`, $3.21, 2.4M tokens) — went
+  furthest yet: split into ~13 children, the **milestone loop ran 3 rounds**
+  trying to converge, 8 of 12 dives succeeded. Blocked on the refined root cause:
+  comprehension dives are **wall-clock-starved** — once the root fans out wide,
+  ADR-030's subdivision gives each dive only ~94s, and 5 timed out (incl.
+  `src/contract` at 14 files — NOT a size problem). The region-split fix (22a411e)
+  didn't help because size wasn't the cause. Finding recorded on
+  [the wall-clock issue](issues/comprehension-region-wallclock-exhaustion.md):
+  comprehension needs a non-subdividing wall-clock floor (or narrower fan-out).
+  Worktree torn down; main undisturbed.
 - **ADR-034/035 build run #3** (`live-self-4b84f2d2`, $1.05) — the breakthrough
   run: the satisfy-prevention worked, the root SPLIT (no satisfy), `judge-split`
   PASSED first try into 6 proper vertical slices (4 `implement` + 2
