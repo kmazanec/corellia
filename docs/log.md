@@ -16,6 +16,12 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-25
 
+- **Cannot-satisfy guard added** (`src/engine/engine.ts` + `mustDecompose` on
+  `GoalTypeDef`/`deliver-intent` + a constitution lint). A `mustDecompose` root
+  (deliver-intent) that decides `satisfy` is now coerced to an actionable block
+  instead of dead-ending the attempt loop at `step-loop:failed`. Fixes the
+  blocker the ADR-034/035 build hit; preserves the recursive-planner architecture
+  (the root plans, never does). Issue implemented and deleted; 1487 tests green.
 - **improve-factory build of ADR-034/035 via `live:self`** (intent
   `live-self-3bf0f5b2`, $0.08) — commissioned the full design implementation.
   Decide cleared (the decide-json fix held under a large reference payload), and
