@@ -27,7 +27,12 @@ export function diagnoseTypes(): GoalTypeDef[] {
       tier: { default: 'mid', ladder: ['mid', 'high'] },
       deterministic: [artifactPresent],
       judgeType: 'critique-doc',
-      grants: ['fs.read', 'retrieval.api', 'spawn'],
+      // docs.issues.write (ADR-034): investigate is the natural place to surface
+      // deferred work — when a probe finds a real but out-of-scope problem, it can
+      // file an OKF issue via the brokered file_issue tool. ADR-034 also named
+      // deliver-intent, but that type is mustDecompose (no producing grant — see the
+      // constitution lint), so the capability lands on investigate only.
+      grants: ['fs.read', 'retrieval.api', 'spawn', 'docs.issues.write'],
     },
   ];
 }

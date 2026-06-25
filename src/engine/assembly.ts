@@ -26,6 +26,7 @@ import {
   type DeclaredScripts,
 } from '../library/script-runner.js';
 import { pushBranchTool, openPrTool, type FetchTransport } from './pr-tools.js';
+import { fileIssueTool } from './issue-tools.js';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
@@ -272,6 +273,13 @@ export async function openSandboxAssembly(
       ]
     : [];
 
+  // ── Issue-filing tool (ADR-034) ────────────────────────────────────
+  // The file_issue tool is always registered — it writes within the sandbox
+  // root to docs/issues/ only. Grant enforcement (docs.issues.write) is
+  // handled by the broker via GRANT_TOOL_MAP; the tool impl itself validates
+  // OKF frontmatter and refuses duplicate slugs.
+  const issueTool = fileIssueTool(root);
+
   const broker = new Broker({
     root,
     registry,
@@ -285,6 +293,7 @@ export async function openSandboxAssembly(
       runScriptImpl,
       ...knowledgeTools,
       ...prTools,
+      issueTool,
     ],
   });
 

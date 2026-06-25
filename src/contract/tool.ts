@@ -127,4 +127,7 @@ export const GRANT_TOOL_MAP = {
   // grant map entries are inert until then.
   push_branch: ['repo.branch'],
   open_pr: ['repo.pr'],
+  // The issue-filing capability (ADR-034): a brokered write tool scoped to
+  // docs/issues/, available to any goal type that holds the grant.
+  file_issue: ['docs.issues.write'],
 } as const satisfies Record<string, readonly string[]>;

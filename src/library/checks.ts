@@ -6,6 +6,7 @@
  */
 
 import { normalize, isAbsolute } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import type { DeterministicCheck, CheckContext } from '../contract/goal-type.js';
 import type { Goal } from '../contract/goal.js';
 import type { Artifact } from '../contract/report.js';
@@ -37,13 +38,30 @@ export function isInScope(rawPath: string, scope: string[]): boolean {
  */
 export const artifactPresent: DeterministicCheck = {
   name: 'artifact-present',
-  async run(_goal: Goal, artifact: Artifact | null): Promise<{ ok: boolean; detail: string }> {
+  async run(goal: Goal, artifact: Artifact | null, ctx?: CheckContext): Promise<{ ok: boolean; detail: string }> {
+    // A leaf can deliver in two ways: by RETURNING an artifact, or by WRITING files
+    // to the worktree via tool calls (write_file). For a tool-driven implement leaf
+    // the deliverable IS the file writes — its returned text artifact is often
+    // empty. So before rejecting an empty/absent artifact, check whether the leaf
+    // actually changed the worktree within its scope. (Surfaced by build run
+    // live-self-bd479522: the file_issue implement leaf wrote 14 files via tools but
+    // emitted empty text, failed artifact-present, blocked, and its sound code was
+    // not collected.)
+    const wroteToWorktree = ctx?.sandboxRoot !== undefined
+      && worktreeChangedWithinScope(ctx.sandboxRoot, goal.scope);
+
     if (artifact === null) {
+      if (wroteToWorktree) {
+        return { ok: true, detail: 'No returned artifact, but the leaf wrote files within scope.' };
+      }
       return { ok: false, detail: 'No artifact was produced.' };
     }
     if (artifact.kind === 'files') {
       const files = artifact.files ?? [];
       if (files.length === 0) {
+        if (wroteToWorktree) {
+          return { ok: true, detail: 'Empty files artifact, but the leaf wrote files within scope.' };
+        }
         return { ok: false, detail: 'Artifact has kind "files" but no files were provided.' };
       }
       return { ok: true, detail: `Artifact contains ${files.length} file(s).` };
@@ -51,11 +69,43 @@ export const artifactPresent: DeterministicCheck = {
     // kind === 'text'
     const text = artifact.text ?? '';
     if (text.length === 0) {
+      if (wroteToWorktree) {
+        return { ok: true, detail: 'Empty text artifact, but the leaf wrote files within scope.' };
+      }
       return { ok: false, detail: 'Artifact has kind "text" but the text body is empty.' };
     }
     return { ok: true, detail: 'Artifact contains a non-empty text body.' };
   },
 };
+
+/**
+ * True if the worktree at `root` has any change (tracked or untracked) under one
+ * of the `scope` prefixes. A best-effort, side-effect-free signal that a leaf
+ * delivered by writing files rather than by returning an artifact. Any git error
+ * (no repo, detached state) returns false — the check then falls back to the
+ * artifact-shape rule, exactly as before.
+ */
+function worktreeChangedWithinScope(root: string, scope: string[]): boolean {
+  // Each git query runs independently: in a fresh repo with no commits `git diff
+  // HEAD` errors (no HEAD), but an untracked tool-written file must still count, so
+  // a failure of one query must not suppress the other.
+  const gitLines = (args: string[]): string[] => {
+    try {
+      return execFileSync('git', ['-C', root, ...args], { stdio: 'pipe', encoding: 'utf-8' })
+        .trim().split('\n').filter(Boolean);
+    } catch {
+      return [];
+    }
+  };
+  const paths = [
+    ...gitLines(['diff', '--name-only', 'HEAD']),
+    ...gitLines(['ls-files', '--others', '--exclude-standard']),
+  ];
+  if (paths.length === 0) return false;
+  // No scope → any change counts. Otherwise require a change under a prefix.
+  if (scope.length === 0) return true;
+  return paths.some((p) => isInScope(p, scope));
+}
 
 /**
  * Pass when every file in the artifact starts with at least one of the goal's

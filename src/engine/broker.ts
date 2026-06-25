@@ -50,7 +50,7 @@ export class Broker {
 
   /**
    * Mediate one tool call for a goal: grant-check → scope-check (write_file
-   * only) → append event → dispatch. Returns a refusal result for any
+   * and file_issue) → append event → dispatch. Returns a refusal result for any
    * enforcement failure rather than throwing.
    */
   async execute(goal: Goal, call: ToolCall): Promise<ToolResult> {
@@ -76,9 +76,9 @@ export class Broker {
       return this.#refuse(goal, call, `not granted: ${needed}`);
     }
 
-    // 3. For write_file: check sandbox containment and goal scope before
-    //    touching the event log. An out-of-scope write is logged as 'refused'
-    //    with a reason — not as 'ran' — so the audit trail is honest.
+    // 3. For write_file and file_issue: check sandbox containment and goal scope
+    //    before touching the event log. An out-of-scope write is logged as
+    //    'refused' with a reason — not as 'ran' — so the audit trail is honest.
     if (call.name === 'write_file') {
       const rawPath = typeof call.args['path'] === 'string' ? call.args['path'] : '';
       const full = rawPath ? resolveSandboxPath(this.#root, rawPath) : null;
@@ -87,6 +87,24 @@ export class Broker {
       }
       if (!isInScope(rawPath, goal.scope)) {
         return this.#refuse(goal, call, `write_file: path "${rawPath}" is outside the goal's declared scope`);
+      }
+    }
+
+    // file_issue derives its write path from the slug argument: docs/issues/<slug>.md.
+    // The broker validates the derived path against the goal's scope to enforce the
+    // docs/issues/ prefix boundary (ADR-034).
+    if (call.name === 'file_issue') {
+      const slug = typeof call.args['slug'] === 'string' ? call.args['slug'] : '';
+      if (slug.length === 0) {
+        return this.#refuse(goal, call, 'file_issue: "slug" must be a non-empty string');
+      }
+      const issuePath = `docs/issues/${slug}.md`;
+      const full = resolveSandboxPath(this.#root, issuePath);
+      if (full === null) {
+        return this.#refuse(goal, call, `file_issue: path "${issuePath}" is outside the sandbox root`);
+      }
+      if (!isInScope(issuePath, goal.scope)) {
+        return this.#refuse(goal, call, `file_issue: path "${issuePath}" is outside the goal's declared scope`);
       }
     }
 

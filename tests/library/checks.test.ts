@@ -3,6 +3,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import {
   artifactPresent,
   filesWithinScope,
@@ -66,6 +70,44 @@ describe('artifactPresent', () => {
   it('passes on text artifact with non-empty content', async () => {
     const r = await artifactPresent.run(baseGoal, textArtifact('hello'));
     expect(r.ok).toBe(true);
+  });
+
+  // A tool-driven implement leaf delivers by WRITING files, and its returned
+  // artifact is often empty. artifact-present must not fail it when the worktree
+  // changed within scope (build run live-self-bd479522: file_issue wrote 14 files
+  // via tools, emitted empty text, and was wrongly blocked + not collected).
+  it('passes on an empty artifact when the leaf wrote files within scope', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'corellia-artpresent-'));
+    try {
+      execFileSync('git', ['-C', root, 'init', '-q'], { stdio: 'pipe' });
+      execFileSync('git', ['-C', root, 'config', 'user.email', 't@t'], { stdio: 'pipe' });
+      execFileSync('git', ['-C', root, 'config', 'user.name', 't'], { stdio: 'pipe' });
+      mkdirSync(join(root, 'src'), { recursive: true });
+      // An untracked file under the goal's scope (src/) — the leaf's tool write.
+      writeFileSync(join(root, 'src', 'new-tool.ts'), 'export const x = 1;\n');
+
+      const ctx: CheckContext = { sandboxRoot: root };
+      const goalInSrc: Goal = { ...baseGoal, scope: ['src/'] };
+
+      // Empty text artifact + a scoped worktree change → passes.
+      expect((await artifactPresent.run(goalInSrc, textArtifact(''), ctx)).ok).toBe(true);
+      // Null artifact + a scoped worktree change → also passes.
+      expect((await artifactPresent.run(goalInSrc, null, ctx)).ok).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('still fails on an empty artifact when the worktree has no scoped change', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'corellia-artpresent-empty-'));
+    try {
+      execFileSync('git', ['-C', root, 'init', '-q'], { stdio: 'pipe' });
+      const ctx: CheckContext = { sandboxRoot: root };
+      // No file written → empty artifact still fails.
+      expect((await artifactPresent.run({ ...baseGoal, scope: ['src/'] }, textArtifact(''), ctx)).ok).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

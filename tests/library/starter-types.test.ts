@@ -538,11 +538,14 @@ describe('starterTypes', () => {
       expect(grants).toContain('spawn');
     });
 
-    it('has read and retrieval grants but no write grants', () => {
+    it('has read + retrieval grants and the issue-filing write grant, but no product fs.write', () => {
+      // ADR-034: investigate may file an OKF issue (docs.issues.write) when a probe
+      // surfaces deferred work, but it still cannot write product code (no fs.write).
       const grants = createRegistry(starterTypes()).get('investigate').grants;
       expect(grants).toContain('fs.read');
       expect(grants).toContain('retrieval.api');
-      expect(grants.some((g) => g.includes('write'))).toBe(false);
+      expect(grants).toContain('docs.issues.write');
+      expect(grants).not.toContain('fs.write');
     });
   });
 

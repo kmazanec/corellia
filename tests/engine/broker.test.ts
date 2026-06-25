@@ -14,6 +14,7 @@ import { createRegistry } from '../../src/library/registry.js';
 import { starterTypes } from '../../src/library/starter-types.js';
 import { createFileTools } from '../../src/engine/tools.js';
 import { retrievalTools } from '../../src/library/retrieval.js';
+import { fileIssueTool } from '../../src/engine/issue-tools.js';
 import type { Goal } from '../../src/contract/goal.js';
 import type { ToolCall } from '../../src/contract/tool.js';
 
@@ -426,4 +427,53 @@ describe('retrieval tool grants', () => {
       }
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// file_issue (ADR-034) — grant + scope enforcement at the broker
+// ---------------------------------------------------------------------------
+
+describe('file_issue grant + scope enforcement', () => {
+  let issueBroker: Broker;
+  beforeEach(async () => {
+    await mkdir(join(sandboxRoot, 'docs', 'issues'), { recursive: true });
+    await writeFile(
+      join(sandboxRoot, 'docs', 'issues', 'index.md'),
+      '---\ntype: index\n---\n# Issues\n\n## Medium severity\n\n| Issue | Kind | Tags |\n|---|---|---|\n',
+    );
+    issueBroker = new Broker({
+      root: sandboxRoot,
+      registry,
+      store,
+      tools: [fileIssueTool(sandboxRoot)],
+    });
+  });
+
+  const validArgs = {
+    slug: 'broker-filed', title: 'T', description: 'D', tags: ['x'],
+    kind: 'bug', severity: 'medium', problem: 'P', evidence: 'E',
+    proposedDirection: 'PD', acceptanceHint: 'AH',
+  };
+
+  it('refuses file_issue for a type lacking docs.issues.write (judge-split)', async () => {
+    const goal = makeGoal({ type: 'judge-split', scope: ['docs/issues/'] });
+    const result = await issueBroker.execute(goal, makeCall({ name: 'file_issue', args: { ...validArgs } }));
+    expect(result.ok).toBe(false);
+    expect(result.output).toMatch(/not granted/i);
+  });
+
+  it('grants file_issue to investigate (holds docs.issues.write) and writes the file', async () => {
+    const goal = makeGoal({ type: 'investigate', scope: ['docs/issues/'] });
+    const result = await issueBroker.execute(goal, makeCall({ name: 'file_issue', args: { ...validArgs } }));
+    expect(result.ok).toBe(true);
+    expect(result.output).toMatch(/docs\/issues\/broker-filed\.md/);
+  });
+
+  it('refuses file_issue whose derived path is outside the goal scope', async () => {
+    // Scope does not include docs/issues/ → the derived path is out of scope.
+    const goal = makeGoal({ type: 'investigate', scope: ['src/'] });
+    const result = await issueBroker.execute(goal, makeCall({ name: 'file_issue', args: { ...validArgs } }));
+    expect(result.ok).toBe(false);
+    expect(result.output).toMatch(/scope/i);
+  });
 });
