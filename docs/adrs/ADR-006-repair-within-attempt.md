@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-006: Repair runs inside the attempt that produced the flaw"
+description: A single attempt covers produce, repair, and recheck so the cheap repair rung is not priced like a full retry.
+tags: [adr, repair, attempt, control-loop, budget]
+timestamp: 2026-06-10T21:16:39-05:00
+---
+
 # ADR-006: Repair runs inside the attempt that produced the flaw
 
 **Status:** Accepted · **Date:** 2026-06-10 (decided iteration 1 review, confirmed by operator; recorded retroactively) · **Stretch:** no · **Contract:** no

@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-017: Accounting from provider-reported usage; a dollar ceiling per tree"
+description: Spend is measured from provider-reported usage per call, recorded in events, and a per-tree dollar ceiling is computed from it rather than estimated.
+tags: [adr, accounting, usage, dollar-ceiling, budget]
+timestamp: 2026-06-10T21:40:50-05:00
+---
+
 # ADR-017: Accounting from provider-reported usage; a dollar ceiling per tree
 
 **Status:** Accepted · **Date:** 2026-06-10 · **Stretch:** no · **Contract:** no

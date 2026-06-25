@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-020: impact() runs on a deterministic import-edge scan; dives add semantics"
+description: The impact() query runs on a deterministic import-edge scanner as its fact layer, with LLM dives adding semantics, so edges stay verify-on-read.
+tags: [adr, impact, import-graph, deterministic, comprehension]
+timestamp: 2026-06-11T14:22:39-05:00
+---
+
 # ADR-020: impact() runs on a deterministic import-edge scan; dives add semantics
 
 **Status:** Accepted · **Date:** 2026-06-11 · **Stretch:** no · **Contract:** yes

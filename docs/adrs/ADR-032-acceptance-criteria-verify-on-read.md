@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-032: Acceptance criteria are a verify-on-read, deterministic-floored done-condition; per-round commits make verify-on-read real"
+description: The milestone loop's done-condition is verify-on-read acceptance criteria with a deterministic floor, and per-round worktree commits advance HEAD so the freshness check is real across rounds.
+tags: [adr, acceptance-criteria, done-condition, verify-on-read, per-round-commits]
+timestamp: 2026-06-24T17:49:12-05:00
+---
+
 # ADR-032: Acceptance criteria are a verify-on-read, deterministic-floored done-condition; per-round commits make verify-on-read real
 
 **Status:** Accepted · **Date:** 2026-06-24 · **Stretch:** no · **Contract:** yes

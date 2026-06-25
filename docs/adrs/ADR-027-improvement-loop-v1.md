@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-027: Improvement loop v1 — post-run blocker routing under a standing envelope"
+description: Blocker reports become improvement goals routed post-run under a standing budget envelope — never mid-run self-modification — yielding human-reviewed factory-repo PRs.
+tags: [adr, improvement-loop, blockers, self-improvement, envelope]
+timestamp: 2026-06-12T01:39:54-05:00
+---
+
 # ADR-027: Improvement loop v1 — post-run blocker routing under a standing envelope
 
 **Status:** Accepted · **Date:** 2026-06-12 · **Stretch:** no · **Contract:** yes

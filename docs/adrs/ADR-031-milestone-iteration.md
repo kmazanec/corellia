@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-031: A composite goal iterates to an MVP — the milestone loop lives at the deliver-intent root"
+description: The deliver-intent root gains a milestone loop — assess, re-decide, another round — so a composite goal iterates to an MVP instead of running strictly single-pass.
+tags: [adr, milestone-loop, deliver-intent, iteration, composite-goal]
+timestamp: 2026-06-24T17:49:12-05:00
+---
+
 # ADR-031: A composite goal iterates to an MVP — the milestone loop lives at the deliver-intent root
 
 **Status:** Accepted · **Date:** 2026-06-24 · **Stretch:** no · **Contract:** yes
@@ -19,7 +27,8 @@ loops only until a *structurally valid* split is produced and then runs that
 split exactly once. Integration is single-pass over execution.
 
 This is the named cause of the factory's sharpest failure mode. tiutni **Run 1**
-(`docs/gaps-from-tiutni.md:21`): the factory delivered **3 green modules** (engine,
+(see `docs/iterations/2026-06-24-01-gap-audit-tiutni/index.md`): the factory
+delivered **3 green modules** (engine,
 W-2 parser, guardrails — 111 tests green) and then `deliver-intent` **BLOCKED on
 the integration eval.** A failing integration verdict is a **terminal** blocker
 (`engine.ts:3260-3265`) — it pushes `integrationBlockers` and emits; it is not a

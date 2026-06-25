@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-016: Sandbox = one worktree per tree; declared scripts run as bare processes"
+description: The sandbox is one git worktree per tree and only repo-declared entry-point scripts execute, running as bare processes rather than containers in v1.
+tags: [adr, sandbox, worktree, execution, isolation]
+timestamp: 2026-06-12T12:42:27-05:00
+---
+
 # ADR-016: Sandbox = one worktree per tree; declared scripts run as bare processes
 
 **Status:** Accepted · **Date:** 2026-06-10 · **Stretch:** no · **Contract:** no

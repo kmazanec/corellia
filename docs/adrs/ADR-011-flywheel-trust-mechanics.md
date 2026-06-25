@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-011: Split-memo matching by spec-shape signature; trusted walks verbatim; only humans trust"
+description: The structure flywheel matches splits by a deterministic specShape signature, trusted memos replay verbatim, and only a human may promote a memo to trusted.
+tags: [adr, flywheel, split-memo, spec-shape, trust]
+timestamp: 2026-06-10T21:16:39-05:00
+---
+
 # ADR-011: Split-memo matching by spec-shape signature; trusted walks verbatim; only humans trust
 
 **Status:** Accepted · **Date:** 2026-06-10 (decided iteration 2; recorded retroactively) · **Stretch:** no · **Contract:** yes

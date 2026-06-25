@@ -1,3 +1,11 @@
+---
+type: reference
+title: Container runbook (F-66)
+description: Operator runbook for building and running the containerized Corellia front-door daemon image and compose stack.
+tags: [reference, container, runbook, daemon, deployment]
+timestamp: 2026-06-12T03:41:19-05:00
+---
+
 # Container runbook (F-66)
 
 Container-ready packaging for the Corellia front-door daemon. Per ADR-026 this

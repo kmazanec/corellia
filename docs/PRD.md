@@ -1,3 +1,11 @@
+---
+type: prd
+title: Corellia — Product Requirements Document
+description: The locked, behavior-focused product requirements for Corellia, the self-hosting autonomous coding factory.
+tags: [prd, requirements, corellia, autonomous-factory]
+timestamp: 2026-06-12T01:39:54-05:00
+---
+
 # Corellia — Product Requirements Document
 
 **Status:** locked · **Date:** 2026-06-10
@@ -7,7 +15,8 @@
 This PRD owns WHAT and WHY. The HOW lives in DESIGN.md (domain architecture,
 locked) and docs/adrs/ (implementation decisions). It was written after
 iterations 1–2 shipped — it describes the whole v1 product, including what
-already exists; ROADMAP.md tracks what remains.
+already exists; remaining work is tracked as iterations (docs/iterations/) and
+open issues (docs/issues/).
 
 ## 1. Problem Statement
 

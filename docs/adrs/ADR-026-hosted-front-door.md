@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-026: Hosted front door — daemonized listener, webhook ingress, frozen Brief"
+description: The factory is a hosted single-operator application — a daemonized Listener with webhook ingress for its four channels and a frozen Brief contract.
+tags: [adr, front-door, daemon, webhook, hosted]
+timestamp: 2026-06-12T01:39:54-05:00
+---
+
 # ADR-026: Hosted front door — daemonized listener, webhook ingress, frozen Brief
 
 **Status:** Accepted · **Date:** 2026-06-12 · **Stretch:** no · **Contract:** yes

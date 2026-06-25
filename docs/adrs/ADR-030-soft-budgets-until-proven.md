@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-030: Budgets are soft signals until a real run justifies a hard bound"
+description: Budgets soften to non-blocking signals — the fan-out cap is removed and counts inherit rather than floor — until a real run justifies a hard bound (firmed permanently by ADR-033).
+tags: [adr, budget, soft-signals, fan-out, amends-adr-007]
+timestamp: 2026-06-24T22:13:07-05:00
+---
+
 # ADR-030: Budgets are soft signals until a real run justifies a hard bound
 
 **Status:** Accepted; firmed by ADR-033 · **Date:** 2026-06-23 · **Stretch:** no · **Contract:** no

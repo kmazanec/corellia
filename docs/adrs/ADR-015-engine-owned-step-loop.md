@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-015: The engine owns the agentic step loop; the brain is pure per step"
+description: The engine drives the think-call-observe step loop while the brain stays pure per step, keeping the loop's bounds, observability, and testability engine-owned.
+tags: [adr, engine, step-loop, brain, agentic]
+timestamp: 2026-06-24T22:13:07-05:00
+---
+
 # ADR-015: The engine owns the agentic step loop; the brain is pure per step
 
 **Status:** Accepted · **Date:** 2026-06-10 · **Stretch:** no · **Contract:** yes

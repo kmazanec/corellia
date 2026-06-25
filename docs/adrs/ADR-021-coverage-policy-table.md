@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-021: The split gate's coverage check is a per-kind policy table; misses spawn dependencies"
+description: The split gate's coverage check is a mechanical per-kind policy table mapping goal classes to required fresh knowledge categories, and misses spawn JIT comprehension goals as dependencies.
+tags: [adr, split-gate, coverage, policy-table, comprehension]
+timestamp: 2026-06-11T14:22:39-05:00
+---
+
 # ADR-021: The split gate's coverage check is a per-kind policy table; misses spawn dependencies
 
 **Status:** Accepted · **Date:** 2026-06-11 · **Stretch:** no · **Contract:** no

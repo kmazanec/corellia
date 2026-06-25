@@ -1,3 +1,11 @@
+---
+type: architecture
+title: Corellia — Architecture
+description: Living architecture overview tracing Corellia's design and implementation decisions to their sources of truth.
+tags: [architecture, corellia, design, overview]
+timestamp: 2026-06-11T17:57:41-05:00
+---
+
 # Corellia — Architecture
 
 **Status:** living overview · **Date:** 2026-06-10

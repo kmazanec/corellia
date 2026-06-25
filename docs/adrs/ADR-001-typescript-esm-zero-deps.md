@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-001: TypeScript strict ESM with zero runtime dependencies by default"
+description: The factory adopts strict TypeScript ESM/NodeNext with zero runtime dependencies by default, so it is a clean exemplar of what it produces.
+tags: [adr, typescript, esm, zero-dependencies, stack]
+timestamp: 2026-06-10T21:16:39-05:00
+---
+
 # ADR-001: TypeScript strict ESM with zero runtime dependencies by default
 
 **Status:** Accepted · **Date:** 2026-06-10 (decided iteration 1; recorded retroactively) · **Stretch:** no · **Contract:** no

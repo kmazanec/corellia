@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-024: Golden-set capture is an event projection; curation is human"
+description: Golden-set calibration data is captured as a golden-candidate event member and projection, with curation left to humans, so judge calibration data accrues from the start.
+tags: [adr, golden-set, calibration, judges, event-projection]
+timestamp: 2026-06-11T17:57:41-05:00
+---
+
 # ADR-024: Golden-set capture is an event projection; curation is human
 
 **Status:** Accepted · **Date:** 2026-06-11 · **Stretch:** no · **Contract:** yes

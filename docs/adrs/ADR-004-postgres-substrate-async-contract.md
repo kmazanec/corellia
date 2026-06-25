@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-004: Postgres as the durable substrate (and the async contract it forced)"
+description: Postgres is the durable event-log substrate, an operator decision over a SQLite-first path, forcing the async contract it implies.
+tags: [adr, postgres, substrate, async-contract, persistence]
+timestamp: 2026-06-10T21:16:39-05:00
+---
+
 # ADR-004: Postgres as the durable substrate (and the async contract it forced)
 
 **Status:** Accepted · **Date:** 2026-06-10 (decided iteration 2 gate brief; recorded retroactively) · **Stretch:** no · **Contract:** yes

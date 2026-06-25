@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-003: One append-only event log; memory and all views are projections"
+description: The factory is event-sourced — one append-only log is the substrate and memory and every view are projections of it.
+tags: [adr, event-log, event-sourcing, memory, projections]
+timestamp: 2026-06-10T21:16:39-05:00
+---
+
 # ADR-003: One append-only event log; memory and all views are projections
 
 **Status:** Accepted · **Date:** 2026-06-10 (decided in design revision 2; recorded retroactively) · **Stretch:** no · **Contract:** yes

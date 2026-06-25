@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-019: Knowledge artifacts are event-projected project memory with SHA-anchored freshness"
+description: Comprehension knowledge artifacts are event-projected project memory with a SHA-anchored freshness check, giving the factory verify-on-read eyes (amended by ADR-032).
+tags: [adr, knowledge-artifacts, comprehension, freshness, verify-on-read]
+timestamp: 2026-06-24T21:16:56-05:00
+---
+
 # ADR-019: Knowledge artifacts are event-projected project memory with SHA-anchored freshness
 
 **Status:** Accepted · **Date:** 2026-06-11 · **Stretch:** no · **Contract:** yes

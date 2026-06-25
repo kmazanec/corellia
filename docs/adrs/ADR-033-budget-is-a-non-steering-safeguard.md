@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-033: Budget is a non-steering safeguard — it never shapes what or how a goal builds"
+description: Budget becomes a non-steering safeguard — the count dimensions never block, cap fan-out, or shape the build, leaving only the per-tree dollar ceiling and wall-clock as hard bounds.
+tags: [adr, budget, non-steering, safeguard, supersedes-adr-007]
+timestamp: 2026-06-24T22:13:07-05:00
+---
+
 # ADR-033: Budget is a non-steering safeguard — it never shapes what or how a goal builds
 
 **Status:** Accepted · **Date:** 2026-06-24 · **Stretch:** no · **Contract:** yes

@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-013: Families with exact static grants (kinds as lint ceilings)"
+description: Goal types carry exact static tool grants while kinds act as lint-time ceilings, so a type's blast radius is readable without runtime computation.
+tags: [adr, goal-types, grants, families, capabilities]
+timestamp: 2026-06-10T21:16:39-05:00
+---
+
 # ADR-013: Families with exact static grants (kinds as lint ceilings)
 
 **Status:** Accepted · **Date:** 2026-06-10 (decided during GOAL-TYPES design session; recorded retroactively) · **Stretch:** no · **Contract:** no

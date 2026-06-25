@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-023: Artifact-emitting leaves explore, then emit via structured outputs"
+description: Artifact-emitting leaves run a two-phase pattern — a tool loop to explore, then one dedicated emit call with a JSON-schema response format — so large artifacts are packaged reliably.
+tags: [adr, leaves, structured-outputs, emission, two-phase]
+timestamp: 2026-06-11T17:57:41-05:00
+---
+
 # ADR-023: Artifact-emitting leaves explore, then emit via structured outputs
 
 **Status:** Accepted · **Date:** 2026-06-11 · **Stretch:** no · **Contract:** yes

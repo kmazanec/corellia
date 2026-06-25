@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-012: Secrets reach the factory only through the environment"
+description: Secrets reach the factory through the environment via a gitignored .env and a zero-dep loader, with the real environment always winning — vault references, never values, in artifacts.
+tags: [adr, secrets, environment, dotenv, security]
+timestamp: 2026-06-10T21:16:39-05:00
+---
+
 # ADR-012: Secrets reach the factory only through the environment
 
 **Status:** Accepted · **Date:** 2026-06-10 (decided iteration 2; recorded retroactively) · **Stretch:** no · **Contract:** no

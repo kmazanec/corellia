@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-022: Skill bundles are markdown family files, loaded into the harness"
+description: Skill bundles become reviewable markdown family files loaded into the harness at registration, replacing template strings buried in code.
+tags: [adr, skills, markdown, families, harness]
+timestamp: 2026-06-11T17:57:41-05:00
+---
+
 # ADR-022: Skill bundles are markdown family files, loaded into the harness
 
 **Status:** Accepted · **Date:** 2026-06-11 · **Stretch:** no · **Contract:** yes

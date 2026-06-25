@@ -1,0 +1,42 @@
+---
+type: index
+title: ADR catalog
+description: Index of all architecture decision records for Corellia.
+timestamp: 2026-06-25
+---
+
+# Architecture Decision Records
+
+- [ADR-001 — TypeScript strict ESM with zero runtime dependencies by default](ADR-001-typescript-esm-zero-deps.md) — strict TS ESM/NodeNext, no runtime deps, so the factory is a clean exemplar of what it produces.
+- [ADR-002 — `src/contract/` is the frozen contract barrier](ADR-002-frozen-contract-module.md) — shared shapes freeze first in one dedicated module, carrying every consumer's extension before fan-out.
+- [ADR-003 — One append-only event log; memory and all views are projections](ADR-003-event-log-substrate.md) — event sourcing: one append-only log is the substrate, everything else a projection.
+- [ADR-004 — Postgres as the durable substrate (and the async contract it forced)](ADR-004-postgres-substrate-async-contract.md) — Postgres now (operator decision over SQLite-first), and the async contract it implies.
+- [ADR-005 — One Brain interface, provider-agnostic, OpenRouter as default endpoint](ADR-005-provider-agnostic-brain.md) — one Brain interface over an OpenAI-compatible adapter, OpenRouter as default — one brain, many harnesses.
+- [ADR-006 — Repair runs inside the attempt that produced the flaw](ADR-006-repair-within-attempt.md) — one attempt covers produce + repair + recheck, so the cheap rung is not priced like a retry.
+- [ADR-007 — Budgets are four-dimensional, subdivided, and all four dimensions gate](ADR-007-four-dimension-budget.md) — four-dimensional subdivided budgets so a fan-out cannot multiply costs past its root grant (superseded by ADR-033).
+- [ADR-008 — The Listener owns the decision-brief seam](ADR-008-listener-owns-brief.md) — the Listener installs itself as the engine's single brief authority per run.
+- [ADR-009 — Memory promotion/decay is projection policy, not stored state](ADR-009-memory-promotion-projection-policy.md) — trust state is computed by the memory projection from reinforcement events, never a stored field.
+- [ADR-010 — Risk gates fail-safe; 'high' gates, 'medium' records (v1 policy)](ADR-010-risk-gating-policy.md) — high/type-gated risk hits a default-denied authority gate; medium is recorded, not gated.
+- [ADR-011 — Split-memo matching by spec-shape signature; trusted walks verbatim; only humans trust](ADR-011-flywheel-trust-mechanics.md) — deterministic specShape signatures match splits, trusted memos replay verbatim, only humans promote.
+- [ADR-012 — Secrets reach the factory only through the environment](ADR-012-secrets-via-environment.md) — gitignored `.env` + zero-dep loader, real environment always wins; vault references, never values.
+- [ADR-013 — Families with exact static grants (kinds as lint ceilings)](ADR-013-families-exact-grants.md) — types carry exact static tool grants; kinds are lint-time ceilings, so blast radius is readable.
+- [ADR-014 — One Tool contract, one Broker — the single point of grant, scope, debit, and event](ADR-014-tool-interface-broker.md) — a typed Tool contract and one ToolBroker mediate every call as the single enforcement point.
+- [ADR-015 — The engine owns the agentic step loop; the brain is pure per step](ADR-015-engine-owned-step-loop.md) — the engine drives think → call → observe; the brain stays pure per step.
+- [ADR-016 — Sandbox = one worktree per tree; declared scripts run as bare processes](ADR-016-worktree-per-tree-bare-exec.md) — one worktree per tree, only repo-declared scripts execute, as bare processes in v1.
+- [ADR-017 — Accounting from provider-reported usage; a dollar ceiling per tree](ADR-017-provider-usage-accounting.md) — spend measured from provider-reported usage, with a per-tree dollar ceiling computed from it.
+- [ADR-018 — Provider failures resolve at three layers — transport retries, re-prompt, then the attempt ladder](ADR-018-provider-failure-semantics.md) — three-layer failure resolution matched to failure class, so infra noise never burns attempts.
+- [ADR-019 — Knowledge artifacts are event-projected project memory with SHA-anchored freshness](ADR-019-knowledge-artifacts-event-projected.md) — comprehension artifacts are event-projected memory with a SHA-anchored verify-on-read freshness check (amended by ADR-032).
+- [ADR-020 — impact() runs on a deterministic import-edge scan; dives add semantics](ADR-020-hybrid-impact-graph.md) — `impact()` is a deterministic import-edge scanner as the fact layer; LLM dives add semantics.
+- [ADR-021 — The split gate's coverage check is a per-kind policy table; misses spawn dependencies](ADR-021-coverage-policy-table.md) — coverage is a mechanical per-kind policy table; misses spawn JIT comprehension goals as dependencies.
+- [ADR-022 — Skill bundles are markdown family files, loaded into the harness](ADR-022-skill-bundles-markdown-families.md) — skills become reviewable markdown family files loaded at registration, not template strings in code.
+- [ADR-023 — Artifact-emitting leaves explore, then emit via structured outputs](ADR-023-two-phase-structured-emission.md) — two-phase leaves: a tool loop explores, then one emit call with a JSON-schema response format.
+- [ADR-024 — Golden-set capture is an event projection; curation is human](ADR-024-golden-capture-as-events.md) — a golden-candidate event + projection accrues judge-calibration data; curation stays human.
+- [ADR-025 — PR-opening is brokered tools; credentials stay engine-side](ADR-025-pr-boundary-brokered-tools.md) — the model drives the PR boundary through brokered tools while credentials stay engine-side.
+- [ADR-026 — Hosted front door — daemonized listener, webhook ingress, frozen Brief](ADR-026-hosted-front-door.md) — the factory is a hosted single-operator app: daemonized Listener, webhook ingress, frozen Brief contract.
+- [ADR-027 — Improvement loop v1 — post-run blocker routing under a standing envelope](ADR-027-improvement-loop-v1.md) — blockers become improvement goals routed post-run under a standing envelope; never mid-run self-modification.
+- [ADR-028 — Layered conventions — global skills, host AGENTS/CLAUDE files, repo override](ADR-028-layered-conventions-host-files.md) — conventions layer global factory skills, the repo's harness-agnostic AGENTS/CLAUDE files, then overrides.
+- [ADR-029 — Comprehension must recurse — the comprehend family obeys the split law](ADR-029-comprehension-recursion.md) — the comprehend family drops leaf-only and obeys the split law, so it can decompose with repo size.
+- [ADR-030 — Budgets are soft signals until a real run justifies a hard bound](ADR-030-soft-budgets-until-proven.md) — budgets soften to non-blocking signals until a real run justifies a hard bound (firmed by ADR-033).
+- [ADR-031 — A composite goal iterates to an MVP — the milestone loop lives at the deliver-intent root](ADR-031-milestone-iteration.md) — the deliver-intent root gains an assess → re-decide → another-round milestone loop instead of running single-pass.
+- [ADR-032 — Acceptance criteria are a verify-on-read, deterministic-floored done-condition; per-round commits make verify-on-read real](ADR-032-acceptance-criteria-verify-on-read.md) — the loop's done-condition is verify-on-read acceptance criteria with a deterministic floor; per-round commits advance HEAD.
+- [ADR-033 — Budget is a non-steering safeguard — it never shapes what or how a goal builds](ADR-033-budget-is-a-non-steering-safeguard.md) — count dimensions never block or shape the build; only the dollar ceiling and wall-clock are hard bounds.

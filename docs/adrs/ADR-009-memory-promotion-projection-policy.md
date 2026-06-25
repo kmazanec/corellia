@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-009: Memory promotion/decay is projection policy, not stored state"
+description: Memory trust state (provisional-to-trusted hardening and failure-correlated decay) is computed by the projection from reinforcement events, never stored as a mutable field.
+tags: [adr, memory, projection, trust, decay]
+timestamp: 2026-06-10T21:16:39-05:00
+---
+
 # ADR-009: Memory promotion/decay is projection policy, not stored state
 
 **Status:** Accepted · **Date:** 2026-06-10 (decided iteration 1; recorded retroactively) · **Stretch:** no · **Contract:** no

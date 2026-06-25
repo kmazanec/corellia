@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-028: Layered conventions — global skills, host AGENTS/CLAUDE files, repo override"
+description: Code conventions reach a running goal in layers — global factory skills, the target repo's harness-agnostic AGENTS/CLAUDE files, then repo overrides.
+tags: [adr, conventions, skills, agents-md, layering]
+timestamp: 2026-06-12T13:59:00-05:00
+---
+
 # ADR-028: Layered conventions — global skills, host AGENTS/CLAUDE files, repo override
 
 **Status:** Accepted · **Date:** 2026-06-12 · **Stretch:** no · **Contract:** yes

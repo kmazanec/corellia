@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-025: PR-opening is brokered tools; credentials stay engine-side"
+description: The model drives the PR boundary through brokered tools while credentials stay engine-side, keeping the riskiest operations away from model-influenced child processes.
+tags: [adr, pull-request, brokered-tools, credentials, security]
+timestamp: 2026-06-12T01:39:54-05:00
+---
+
 # ADR-025: PR-opening is brokered tools; credentials stay engine-side
 
 **Status:** Accepted · **Date:** 2026-06-12 · **Stretch:** no · **Contract:** yes

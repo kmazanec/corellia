@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-029: Comprehension must recurse — the comprehend family obeys the split law"
+description: The comprehend family stops being leaf-only and obeys the split law, so comprehension goals that scale with repo size can decompose instead of swallowing the whole job in one node.
+tags: [adr, comprehension, recursion, split-law, scaling]
+timestamp: 2026-06-24T01:53:16-05:00
+---
+
 # ADR-029: Comprehension must recurse — the comprehend family obeys the split law
 
 **Status:** Accepted · **Date:** 2026-06-15 · **Stretch:** no · **Contract:** yes

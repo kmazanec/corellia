@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-005: One Brain interface, provider-agnostic, OpenRouter as default endpoint"
+description: A single provider-agnostic Brain interface fronted by an OpenAI-compatible adapter, with OpenRouter as the default endpoint, realizing one brain, many harnesses.
+tags: [adr, brain, provider-agnostic, openrouter, llm]
+timestamp: 2026-06-11T17:19:44-05:00
+---
+
 # ADR-005: One Brain interface, provider-agnostic, OpenRouter as default endpoint
 
 **Status:** Accepted · **Date:** 2026-06-10 (decided iteration 2 gate brief; recorded retroactively) · **Stretch:** no · **Contract:** yes

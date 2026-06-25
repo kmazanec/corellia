@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-002: src/contract/ is the frozen contract barrier"
+description: Shared shapes live in a dedicated src/contract/ module frozen per build wave, realizing DESIGN.md's contract-barrier rule in the repo.
+tags: [adr, contract, barrier, shared-types, parallel-build]
+timestamp: 2026-06-10T21:16:39-05:00
+---
+
 # ADR-002: `src/contract/` is the frozen contract barrier
 
 **Status:** Accepted · **Date:** 2026-06-10 (decided iteration 1; recorded retroactively) · **Stretch:** no · **Contract:** yes

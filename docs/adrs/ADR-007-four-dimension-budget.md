@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-007: Budgets are four-dimensional, subdivided, and all four dimensions gate"
+description: Budgets are four-dimensional and subdivided so a fan-out cannot multiply costs past its root grant (superseded by ADR-033, which makes the count dimensions non-steering).
+tags: [adr, budget, four-dimensions, subdivision, superseded]
+timestamp: 2026-06-24T22:13:07-05:00
+---
+
 # ADR-007: Budgets are four-dimensional, subdivided, and all four dimensions gate
 
 **Status:** Superseded by ADR-033 · **Date:** 2026-06-10 (decided iteration 1 + review fixes; recorded retroactively) · **Stretch:** no · **Contract:** yes

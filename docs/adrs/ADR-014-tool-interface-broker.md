@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-014: One Tool contract, one Broker — the single point of grant, scope, debit, and event"
+description: A typed Tool contract plus one ToolBroker mediates every tool call, making grant enforcement, scope, budget debit, and event recording a single point.
+tags: [adr, tools, broker, enforcement, capabilities]
+timestamp: 2026-06-24T22:13:07-05:00
+---
+
 # ADR-014: One Tool contract, one Broker — the single point of grant, scope, debit, and event
 
 **Status:** Accepted · **Date:** 2026-06-10 · **Stretch:** no · **Contract:** yes

@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-018: Provider failures resolve at three layers — transport retries, re-prompt, then the attempt ladder"
+description: Provider failures resolve in three layers matched to failure class — transport retries, re-prompt, then the attempt ladder — so infrastructure noise never burns attempts or escalations.
+tags: [adr, provider, failures, retries, resilience]
+timestamp: 2026-06-10T21:40:50-05:00
+---
+
 # ADR-018: Provider failures resolve at three layers — transport retries, re-prompt, then the attempt ladder
 
 **Status:** Accepted · **Date:** 2026-06-10 · **Stretch:** no · **Contract:** no

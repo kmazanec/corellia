@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-008: The Listener owns the decision-brief seam"
+description: The Listener installs itself as the engine's single brief authority per run, unifying brief resolution and scope reservation under one actor.
+tags: [adr, listener, decision-brief, human-seam, scope]
+timestamp: 2026-06-10T21:16:39-05:00
+---
+
 # ADR-008: The Listener owns the decision-brief seam
 
 **Status:** Accepted · **Date:** 2026-06-10 (decided iteration 2 review escalation; recorded retroactively) · **Stretch:** no · **Contract:** no

@@ -1,3 +1,11 @@
+---
+type: adr
+title: "ADR-010: Risk gates fail-safe; 'high' gates, 'medium' records (v1 policy)"
+description: High and type-gated risk hits an authority gate that is default-denied without a handler; medium risk is recorded but not gated, keeping the gate from becoming noise.
+tags: [adr, risk, gating, fail-safe, authority]
+timestamp: 2026-06-10T21:16:39-05:00
+---
+
 # ADR-010: Risk gates fail-safe; 'high' gates, 'medium' records (v1 policy)
 
 **Status:** Accepted · **Date:** 2026-06-10 (decided iteration 2; recorded retroactively) · **Stretch:** no · **Contract:** no
