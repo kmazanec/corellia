@@ -108,4 +108,4 @@ them. Decoupled by design.
 This skill is the bootstrap-phase implementation of a permanent role. When Corellia
 is deployed, the same human→commission interface becomes a hosted front end; the
 `CommissionInput` artifact it produces is unchanged. See
-`docs/prototype-build-notes.md` (Iteration 12) for why this exists.
+`docs/iterations/2026-06-24-02-commission-frontdoor/index.md` for why this exists.

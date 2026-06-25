@@ -49,7 +49,7 @@
  *   export CATS_SCOPE="src/cli/"
  *   npm run live:foreign
  *
- * OUTCOME (record in docs/prototype-build-notes.md)
+ * OUTCOME (record in the current docs/iterations/<slug>/index.md (and a line in docs/log.md))
  * ─────────────────────────────────────────────────────────────────────────────
  *   - PR URL on cats (confirm factory has NOT merged it)
  *   - Cost + cache-hit share
@@ -305,7 +305,7 @@ console.log('');
 
 // ── Evidence template ──────────────────────────────────────────────────────────
 
-console.log('── evidence template for prototype-build-notes.md ───────────────────────');
+console.log('── evidence template for the iteration index.md / log.md ───────────────────────');
 console.log('');
 console.log('### AC-4: live:foreign result (cats deliver)');
 console.log('');

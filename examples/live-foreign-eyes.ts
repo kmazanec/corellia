@@ -64,7 +64,7 @@
  * OUTCOME
  * ─────────────────────────────────────────────────────────────────────────────
  * After the run, record the honest result (convergence + comprehension count) in:
- *   docs/prototype-build-notes.md  (iteration-09 section, AC-2 evidence)
+ *   the current docs/iterations/<slug>/index.md (and a line in docs/log.md)  (iteration-09 section, AC-2 evidence)
  *
  * If the intent blocks or comprehension over-fires, root-cause before approving
  * any deliver spend.
@@ -273,20 +273,20 @@ const pass = converged && scoped;
 if (pass) {
   console.log('AC-2 CHECKPOINT: PASSED.');
   console.log('A scoped intent converged with JIT-scoped comprehension (ADR-029 Decision 4).');
-  console.log('Record this result in docs/prototype-build-notes.md and approve deliver spend.');
+  console.log('Record this result in the current docs/iterations/<slug>/index.md (and a line in docs/log.md) and approve deliver spend.');
 } else {
   console.log('AC-2 CHECKPOINT: FAILED.');
   if (!converged) console.log('  The intent did not converge — root-cause the blockers above.');
   if (!scoped) console.log('  Comprehension over-fired — the split gate pulled speculative whole-repo maps.');
-  console.log('  Record the honest result in docs/prototype-build-notes.md before any spend.');
+  console.log('  Record the honest result in the current docs/iterations/<slug>/index.md (and a line in docs/log.md) before any spend.');
 }
 console.log('');
 
 // ── Evidence template (print to stdout for operator to paste into build notes) ─
 
-console.log('── evidence template for prototype-build-notes.md ───────────────────────');
+console.log('── evidence template for the iteration index.md / log.md ───────────────────────');
 console.log('');
-console.log('<!-- paste into docs/prototype-build-notes.md → iteration-09 section -->');
+console.log('<!-- paste into the current docs/iterations/<YYYY-MM-DD-HH-slug>/index.md -->');
 console.log('');
 console.log('### AC-2: live:foreign-eyes scoped checkpoint result');
 console.log('');

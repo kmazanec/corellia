@@ -57,7 +57,7 @@
  *
  * OUTCOME
  * ─────────────────────────────────────────────────────────────────────────────
- * Record in docs/prototype-build-notes.md:
+ * Record in the current docs/iterations/<slug>/index.md (and a line in docs/log.md):
  *   - PR URL
  *   - Total cost + cache-hit share
  *   - Strange-loop isolation behavior (primary checkout clean? worktree listed?)
@@ -331,7 +331,7 @@ console.log('');
 
 // ── Evidence template ──────────────────────────────────────────────────────────
 
-console.log('── evidence template for prototype-build-notes.md ───────────────────────');
+console.log('── evidence template for the iteration index.md / log.md ───────────────────────');
 console.log('');
 console.log('### AC-3: live:self result (corellia delivers to itself)');
 console.log('');

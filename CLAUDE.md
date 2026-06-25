@@ -50,10 +50,12 @@ that state. The loop, when Keith hands you a goal:
    discipline govern *how* you work whether the factory or you are driving.
 2. **When the factory stalls, record the stuck point first.** Before hand-building,
    write down *where* and *why* it stuck into the factory's own durable memory —
-   the per-iteration section of `docs/prototype-build-notes.md` (and `docs/STATUS.md`
-   when it changes the iteration picture; an ADR when it's a design decision; the
-   event log for run-level facts). The stuck point is now tracked factory work,
-   not lost context. This is the whole point: hand-building is the diagnostic.
+   the current iteration's `index.md` under `docs/iterations/<YYYY-MM-DD-HH-slug>/`
+   (and a one-line entry in `docs/log.md` when it changes the iteration picture; a
+   new `docs/issues/<slug>.md` when it is unplanned follow-on work; an ADR when it's
+   a design decision; the event log for run-level facts). The stuck point is now
+   tracked factory work, not lost context. This is the whole point: hand-building
+   is the diagnostic.
 3. **Then hand-build the stuck part the Corellia way** — directly on `main` (this
    is interactive build/cleanup work; the primary checkout stays on `main` and
    undisturbed, per the strange-loop hygiene in `examples/live-self.ts`).
