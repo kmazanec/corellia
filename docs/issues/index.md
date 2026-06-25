@@ -36,6 +36,7 @@ Each issue is one OKF `type: issue` file with `kind` (bug | idea | future-work),
 | [repair-integration-rung](repair-integration-rung.md) | idea | in-run-stall, engine, integration |
 | [partial-delivery-on-blocked-dependency](partial-delivery-on-blocked-dependency.md) | idea | in-run-stall, engine, partial-delivery |
 | [collect-review-manifest](collect-review-manifest.md) | idea | scope-safety, collect, review |
+| [observability-pluggable-tracing](observability-pluggable-tracing.md) | idea | observability, eventlog, cli, langsmith, otel |
 | [external-asset-acquisition](external-asset-acquisition.md) | future-work | structural, asset, tool |
 | [deployment-to-live-url](deployment-to-live-url.md) | future-work | structural, deploy |
 | [greenfield-bootstrap](greenfield-bootstrap.md) | future-work | structural, scaffold |
