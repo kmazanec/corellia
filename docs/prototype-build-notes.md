@@ -2323,4 +2323,47 @@ the loop, the hand-built branch stays isolated so the experiment is uncontaminat
 and we compare. The stall — or the surprise — is the diagnostic that should have
 been produced first.
 
-**Run record:** see below / the event-log cost summary for the live:self outcome.
+**Run record (2026-06-25, intent `live-self-93cbaae0`, $1.01, 73.9% cache).**
+The factory **blocked at the FIRST decide call on the root goal** — it never split,
+never reached the multi-round integration wall we predicted. Event sequence:
+`goal-received → risk-classified → pattern-consulted → decided(block)`. Blocker:
+
+> Decision-maker could not produce a valid decision: Expected double-quoted
+> property name in JSON at position 1546 (line 1 column 1547)
+
+**Root cause (diagnosed from the event log + `src/brains/llm.ts`, not theorized).**
+`brain.decide` embeds the full goal spec into the decide prompt
+(`goalContext`, `llm.ts:781`: `Spec: ${JSON.stringify(goal.spec, null, 2)}`). Our
+`CORELLIA_FEATURE` was a ~1583-char intent dense with `→` arrows, parentheses,
+nested quotes, and code snippets. Asked to emit a JSON decision while that giant
+string sat in context, the model broke its own JSON well-formedness at ~position
+1546 (≈ the embedded spec length) — and did so on BOTH the first call AND
+`callJson`'s schema-constrained re-ask (`llm.ts:725-760`), so it blocked. The block
+is the factory's law working correctly (a node that can't decide responsibly
+blocks) — but the *cause* is a decide-robustness gap, not a reasoning failure.
+
+**The honest finding: this experiment did NOT test "can the factory build the
+loop."** It stalled UPSTREAM of that question, on a transport/prompt-shape bug. The
+diagnostic is real but different from the one predicted:
+
+→ **GAP (decide-robustness): a large, complex root intent makes `brain.decide`
+emit malformed JSON and the tree blocks at decision #1.** This is the same CLASS as
+prior live:self transport bugs (model/transport issues masquerading as logic).
+Likely fixes to consider (NOT yet built): (a) don't inline the full free-text spec
+into the decide prompt — summarize/reference it, or point the model at the spec
+file via comprehension rather than echoing it; (b) a JSON-repair pass before
+declaring a parse failure; (c) more re-ask attempts with a shrinking/escaped spec.
+This belongs in its own iteration — it is orthogonal to the milestone loop.
+
+**Hygiene:** strange-loop isolation HELD. Primary checkout clean after the run
+(the "NO — investigate" warning was the untracked `media/video.zip`, flagged at
+start too); hand-built `build/milestone-loop` untouched; the orphaned blocked
+`.corellia/worktrees/live-self-93cbaae0-*` worktree + its `tree/*` branch were
+torn down by hand (a blocked run does not auto-collect its worktree). Note: the
+`live:self` tree renderer shows ALL goals in `out/events.jsonl` (an accumulating
+JSONL store), so prior-run goals (ADR-029, format-duration, format_usd) appeared in
+the tree output — they are NOT part of this run; only the last `deliver-intent` is.
+
+**Status of the milestone loop:** still hand-built on `build/milestone-loop`
+(steps 1–6, suite green), NOT merged. The factory-first attempt did not reach a
+verdict on the loop itself; it surfaced a separate, real upstream gap instead.
