@@ -2,11 +2,11 @@
 type: issue
 title: "A5. A blocked dependency silently kills its dependents with no degraded path"
 description: Dependency edges are hard gates with no ship-what's-green partial-delivery mode, so a few blocked modules sink an otherwise-good tree.
-tags: [in-run-stall, engine, partial-delivery, collect, round-commit]
+tags: [in-run-stall, engine, partial-delivery, collect]
 timestamp: 2026-06-25
 status: open
-kind: bug
-severity: high
+kind: idea
+severity: medium
 ---
 
 # A5. A blocked dependency silently kills its dependents with no degraded path
@@ -21,30 +21,32 @@ Run 1 (tiutni): filler failed → orchestrator `"Blocked because a dependency fa
 → root blocked, even though 3 of 5 modules were perfect. The operator hand-fished
 the good modules out of the worktree. Source: the gap-audit iteration (docs/iterations/2026-06-24-01-gap-audit-tiutni/index.md).
 
-**Sharpened by build run #6 (`live-self-a2397f0f`, 2026-06-25) — the worst form:
-passing work is DISCARDED, not merely uncollected.** The run split into 3 slices;
-slice A (the OKF docs lint, `scripts/lint-docs.ts`) **passed its gate cleanly**, but
-slice B blocked and the root blocked (`judge-acceptance: no shippable verdict`). On
-the block the engine **reset the worktree back to HEAD** (`reflog: reset: moving to
-HEAD`), discarding the per-round commits (ADR-032 `commitRound`) — so slice A's
-passing lint code was **unrecoverable** (no `lint-docs.ts` on disk, HEAD == main).
-This is strictly worse than run #5, where the blocked file_issue work at least
-survived in the working tree to be hand-salvaged. A root block must NOT erase a
-sibling's verified, committed round work.
+**Build run #6 (`live-self-a2397f0f`, 2026-06-25) — first read was a MISDIAGNOSIS,
+corrected here.** Initial claim: "the engine reset away slice A's passing lint
+commits." On verification that was WRONG: (1) the engine `preserveTree`'d on the
+block (it never resets — `preserveTree` only emits an event); the `reset: moving to
+HEAD` reflog entry was the operator's own teardown command, not the engine. (2) The
+real cause: slice A ("docs lint") **never wrote any code** — its tool calls were
+`{open_pr: 2}`, `write_file: 0`, and it emitted a 70-char text artifact. Its ✓ in
+the tree was a hollow improve-factory/ship wrapper passing, NOT the lint being
+built. Slice B wrote 2 files then blocked (`step-loop:failed`); slice C never ran.
+So almost nothing real was built — there was no passing work to lose. The genuine
+gap run #6 shows is the **empty/no-real-work emit** (a slice "passes" and tries to
+ship without doing the work — same class as
+[design-arch-empty-artifact-block](design-arch-empty-artifact-block.md)), NOT a
+collect/reset bug. The partial-delivery concern (below) stands on the tiutni Run-1
+evidence; run #6 does not add to it.
 
 ## Proposed direction
-**Partial-delivery**: when some children succeed and others block, emit a report
-that (a) collects the green subtree, (b) lists the blocked modules + why, so the
-operator merges the 80% immediately. Two layers, in priority order:
-1. **Don't discard passing round work on a block.** On a root block, preserve the
-   round commits (the worktree should NOT be reset to HEAD when verified work
-   exists) so a passing sibling slice is at least recoverable — the run #6
-   regression. Minimal fix; stops the data loss.
-2. **Ship-what's-green:** collect the verified subtree into the PR and report the
-   blocked slices, instead of an all-or-nothing root block.
+**Partial-delivery / ship-what's-green**: when some children succeed and others
+block, emit a report that (a) collects the green subtree, (b) lists the blocked
+modules + why, so the operator merges the 80% immediately. On a root block the
+engine already `preserveTree`s the worktree (the round commits survive on the
+branch) — so the recovery primitive exists; what's missing is electing to COLLECT
+the verified portion (open a PR for it) rather than treating any blocked child as
+all-or-nothing.
 
 ## Acceptance hint
-A tree with a mix of green and blocked children (a) never resets away a passing
-slice's committed round work, and (b) emits a report that collects the green
-subtree and enumerates the blocked modules with reasons — the operator can merge
-the good part directly.
+A tree with a mix of green and blocked children emits a report that collects the
+green subtree and enumerates the blocked modules with reasons — the operator can
+merge the good part directly, instead of an all-or-nothing root block.

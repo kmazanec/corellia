@@ -19,14 +19,14 @@ standalone roadmap — it lives as open issues.
 - **Build run #6** (`live-self-a2397f0f`, $1.17, 80% cache) — commissioned the 3
   remaining ADR-034/035 mechanisms (docs lint, issue→CommissionInput reader, engine
   integration steps) as explicit slices. **All 8 comprehension dives succeeded** (the
-  wall-clock floor is proven) and **slice A (the OKF docs lint) passed its gate** —
-  but slice B blocked, the root blocked (`judge-acceptance: no shippable verdict`),
-  and on the block the engine **reset the worktree to HEAD, discarding the passing
-  lint slice's round commits** — unrecoverable. 0 of 3 landed, though the lint
-  proved buildable. Sharpened
-  [partial-delivery](issues/partial-delivery-on-blocked-dependency.md) to high
-  severity (a root block must not erase a sibling's verified committed work).
-  Worktree torn down; main undisturbed.
+  wall-clock floor is proven), but **0 of 3 mechanisms were actually built**: slice A
+  ("docs lint") did NO `write_file` calls (only `open_pr` ×2 + a 70-char text emit) —
+  its ✓ was a hollow ship-wrapper, not the lint; slice B wrote 2 files then blocked;
+  slice C never ran. (An initial read claimed the engine "reset away passing lint
+  work" — that was a MISDIAGNOSIS: the engine `preserveTree`'d correctly, and the
+  reflog reset was the operator's own teardown. Corrected on the
+  [partial-delivery issue](issues/partial-delivery-on-blocked-dependency.md).) The
+  real gap is the empty/no-real-work emit. Worktree torn down; main undisturbed.
 - **PR [#7](https://github.com/kmazanec/corellia/pull/7) merged — the factory's
   `file_issue` tool shipped.** Build run #5 (`live-self-bd479522`, $2.46) opened
   the first real factory PR. It built a complete, sound 319-line `file_issue` tool
