@@ -5,7 +5,7 @@
   "type": "module",
   "description": "A recursive software factory — walking-skeleton prototype.",
   "scripts": {
-    "lint": "tsx scripts/lint-library.ts",
+    "lint": "tsx scripts/lint-library.ts && tsx scripts/lint-docs.ts",
     "test": "npm run lint && vitest run",
     "typecheck": "tsc --noEmit",
     "demo": "tsx examples/greeting.ts",

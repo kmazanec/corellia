@@ -25,6 +25,8 @@
  * runtime dependency of the park outcome.
  */
 
+import { readFile } from 'node:fs/promises';
+import { basename } from 'node:path';
 import type { Engine } from '../engine/engine.js';
 import type { EventStore, FactoryEvent } from '../contract/events.js';
 import type { Intent, MemoryPointer } from '../contract/goal.js';
@@ -38,6 +40,176 @@ import type { CommissionInput, StandingEnvelope } from '../contract/brief.js';
 // The commission shape is now a frozen contract (ADR-026). It is re-exported here
 // so existing consumers that import it from the listener keep working.
 export type { CommissionInput } from '../contract/brief.js';
+
+// ── Issue-to-commission seed ───────────────────────────────────────────────────
+
+/** The seed returned by {@link parseIssueToCommissionSeed}: a partial commission
+ *  with a typed `spec` carrying the parsed issue body sections. */
+export interface IssueCommissionSeed {
+  /** Stable identifier derived from the issue slug (filename without .md). */
+  id: string;
+  /** Human-readable title from the issue's `title` frontmatter field. */
+  title: string;
+  /**
+   * Typed spec carrying the parsed body sections. Castable to the `unknown`
+   * slot on {@link CommissionInput} once the caller fills in the remaining fields
+   * (scope, budget, etc.).
+   */
+  spec: {
+    /** Concatenation of the `## Problem` and `## Proposed direction` body sections. */
+    description: string;
+    /** Content of the `## Acceptance hint` body section. */
+    constraints: string;
+  };
+}
+
+/** Required frontmatter fields in an OKF `type: issue` file. */
+const REQUIRED_ISSUE_FIELDS = ['title', 'kind', 'severity', 'status'] as const;
+
+/** Regex that matches the opening `---` of YAML frontmatter at the start of the file. */
+const FRONTMATTER_DELIM = /^---\s*$/m;
+
+/** Strip a single pair of surrounding YAML double-quotes from a value, if present. */
+function stripYamlQuotes(v: string): string {
+  if (v.startsWith('"') && v.endsWith('"') && v.length >= 2) {
+    return v.slice(1, -1);
+  }
+  return v;
+}
+
+/**
+ * Parse an OKF `type: issue` file into an {@link IssueCommissionSeed}.
+ *
+ * Extracts:
+ *  - `id`        — the slug (filename without the `.md` extension).
+ *  - `title`     — from the `title` frontmatter field.
+ *  - `spec.description` — concatenation of the `## Problem` and `## Proposed direction`
+ *                          body sections, separated by a blank line.
+ *  - `spec.constraints`   — content of the `## Acceptance hint` body section.
+ *
+ * Validates that the frontmatter has `type: issue` and that every required field
+ * (`title`, `kind`, `severity`, `status`) is present and non-empty. Throws on
+ * malformed files: missing `type: issue`, missing required fields, or absent body
+ * sections.
+ */
+export async function parseIssueToCommissionSeed(
+  filePath: string,
+): Promise<IssueCommissionSeed> {
+  const raw = await readFile(filePath, 'utf-8');
+
+  // ── Derive slug from filename ──────────────────────────────────────────
+  const fileName = basename(filePath);
+  if (!fileName.endsWith('.md')) {
+    throw new Error(`parseIssueToCommissionSeed: expected .md file, got "${fileName}"`);
+  }
+  const slug = fileName.slice(0, -3);
+
+  // ── Parse frontmatter ──────────────────────────────────────────────────
+  const delimMatch = FRONTMATTER_DELIM.exec(raw);
+  if (!delimMatch) {
+    throw new Error(
+      `parseIssueToCommissionSeed: no frontmatter found in "${filePath}"`,
+    );
+  }
+
+  const fmStart = delimMatch.index + delimMatch[0].length;
+  const afterFirst = raw.slice(fmStart);
+  const closingMatch = FRONTMATTER_DELIM.exec(afterFirst);
+  if (!closingMatch) {
+    throw new Error(
+      `parseIssueToCommissionSeed: unclosed frontmatter in "${filePath}"`,
+    );
+  }
+
+  const fmRaw = afterFirst.slice(0, closingMatch.index);
+  const body = afterFirst.slice(closingMatch.index + closingMatch[0].length);
+
+  // Parse frontmatter into a key→value map.  Lines with no colon are ignored
+  // (empty lines, comment lines).  Leading/trailing whitespace on keys and
+  // values is trimmed.  Surrounding YAML double-quotes are stripped from values.
+  const fm: Record<string, string> = {};
+  for (const line of fmRaw.split('\n')) {
+    const colonIdx = line.indexOf(':');
+    if (colonIdx === -1) continue;
+    const key = line.slice(0, colonIdx).trim();
+    const value = stripYamlQuotes(line.slice(colonIdx + 1).trim());
+    fm[key] = value;
+  }
+
+  // ── Validate frontmatter ───────────────────────────────────────────────
+  if (fm['type'] !== 'issue') {
+    throw new Error(
+      `parseIssueToCommissionSeed: frontmatter type must be "issue", got "${fm['type'] ?? '(missing)'}" in "${filePath}"`,
+    );
+  }
+
+  for (const field of REQUIRED_ISSUE_FIELDS) {
+    if (!fm[field] || fm[field].length === 0) {
+      throw new Error(
+        `parseIssueToCommissionSeed: missing required frontmatter field "${field}" in "${filePath}"`,
+      );
+    }
+  }
+
+  // ── Extract body sections ──────────────────────────────────────────────
+
+  /**
+   * Return the content between a `## <heading>` line and the next `##` heading
+   * (or EOF), with surrounding whitespace trimmed.  Returns `null` when the
+   * heading is absent, and an empty string when the heading exists but has
+   * no content before the next heading.
+   */
+  const extractSection = (heading: string): string | null => {
+    const marker = `## ${heading}`;
+    const startIdx = body.indexOf(marker);
+    if (startIdx === -1) return null;
+
+    // Skip the heading line itself (to the next newline, or EOF).
+    const contentStart = body.indexOf('\n', startIdx);
+    if (contentStart === -1) return ''; // heading at EOF with no content
+
+    // Look for the next `## ` heading after this one.
+    const nextHeadingIdx = body.indexOf('\n## ', contentStart + 1);
+    const endIdx = nextHeadingIdx === -1 ? body.length : nextHeadingIdx;
+
+    return body.slice(contentStart, endIdx).trim();
+  };
+
+  const problemSection = extractSection('Problem');
+  const proposedSection = extractSection('Proposed direction');
+  const acceptanceSection = extractSection('Acceptance hint');
+
+  if (problemSection === null) {
+    throw new Error(
+      `parseIssueToCommissionSeed: missing "## Problem" section in "${filePath}"`,
+    );
+  }
+  if (proposedSection === null) {
+    throw new Error(
+      `parseIssueToCommissionSeed: missing "## Proposed direction" section in "${filePath}"`,
+    );
+  }
+  if (acceptanceSection === null) {
+    throw new Error(
+      `parseIssueToCommissionSeed: missing "## Acceptance hint" section in "${filePath}"`,
+    );
+  }
+
+  const description = `${problemSection}\n\n${proposedSection}`;
+
+  // `title` is guaranteed present + non-empty by the REQUIRED_ISSUE_FIELDS check
+  // above; the local makes that invariant explicit for the type checker.
+  const title = fm['title'] ?? '';
+
+  return {
+    id: slug,
+    title,
+    spec: {
+      description,
+      constraints: acceptanceSection,
+    },
+  };
+}
 
 // ── Improvement-commission mint ───────────────────────────────────────────────
 
