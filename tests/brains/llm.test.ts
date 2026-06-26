@@ -36,6 +36,11 @@ function chatResponse(content: string) {
   return { choices: [{ message: { role: 'assistant', content } }] };
 }
 
+/** A response the provider cut off (finish_reason:length) — content is incomplete. */
+function chatResponseTruncated(content: string) {
+  return { choices: [{ message: { role: 'assistant', content }, finish_reason: 'length' }] };
+}
+
 const baseGoal: Goal = {
   id: 'g1',
   type: 'implement',
@@ -213,6 +218,34 @@ describe('LlmBrain.decide', () => {
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
     const result = await brain.decide(baseGoal, ctxSonnet);
     expect(result.value.kind).toBe('satisfy');
+  });
+
+  it('a TRUNCATED high-tier decide re-asks on the MID model (bigger output budget)', async () => {
+    // Run live-self-084f02bd: the high model (GLM-5.2, ~33K output cap) cut the decide
+    // off mid-string ("Unterminated string at position 3863"). The re-ask falls back
+    // to the mid model (DeepSeek V4 Pro, ~384K) so the same response fits.
+    const { fetch, calls } = stubFetch(
+      chatResponseTruncated('{"kind":"split","children":[{"localId":"a","type":"implement","title":"a really long title that got cut off mid-str'),
+      chatResponse(JSON.stringify({ kind: 'split', children: [{ localId: 'a', type: 'implement', title: 'a', spec: {}, scope: ['src/'], budgetShare: 1 }] })),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, { tier: 'high', memories: [] });
+    expect(result.value.kind).toBe('split');
+    expect(calls).toHaveLength(2);
+    // First call = high model; the truncation re-ask = mid model.
+    expect(JSON.parse(calls[0]!.options.body as string).model).toBe('high-model');
+    expect(JSON.parse(calls[1]!.options.body as string).model).toBe('mid-model');
+  });
+
+  it('a NON-truncation parse error re-asks on the SAME model (no fallback)', async () => {
+    const { fetch, calls } = stubFetch(
+      chatResponse('not json at all'), // parse fails, but not truncated
+      chatResponse(JSON.stringify({ kind: 'satisfy' })),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, { tier: 'high', memories: [] });
+    expect(result.value.kind).toBe('satisfy');
+    expect(JSON.parse(calls[1]!.options.body as string).model).toBe('high-model');
   });
 
   it('normalizes a split child that omits dependsOn/scope to empty arrays', async () => {

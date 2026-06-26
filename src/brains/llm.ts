@@ -93,6 +93,8 @@ interface ChatRequest {
 
 interface ChatChoice {
   message: { role: string; content: string };
+  /** Provider truncation signal: 'length' means the output was cut off mid-stream. */
+  finish_reason?: string;
 }
 
 interface ChatUsage {
@@ -819,7 +821,7 @@ export class LlmBrain implements Brain {
      *   `kind`), which `json_object` mode does nothing to prevent.
      */
     jsonMode: boolean | { schemaName: string; schema: Record<string, unknown> },
-  ): Promise<{ content: string; usage: Usage }> {
+  ): Promise<{ content: string; usage: Usage; truncated?: boolean }> {
     const fetchFn = this.config.fetchImpl ?? globalThis.fetch;
     const responseFormat: ChatRequest['response_format'] =
       jsonMode === false
@@ -866,7 +868,8 @@ export class LlmBrain implements Brain {
         }
         const data = (await response.json()) as ChatResponse;
         const content = data.choices[0]?.message?.content ?? '';
-        return { content, usage: readUsage(data) };
+        const truncated = data.choices[0]?.finish_reason === 'length';
+        return { content, usage: readUsage(data), truncated };
       } catch (err) {
         // Network-level failure (ECONNRESET, timeout) on the fetch or body read.
         // A TransportError we already chose to rethrow above is terminal — let it out.
@@ -917,20 +920,38 @@ export class LlmBrain implements Brain {
       }
       // Re-ask: echo the bad response AND the specific parse error so the model
       // can correct the actual problem (e.g. a missing `kind` field), not a
-      // mis-diagnosed "invalid JSON".
+      // mis-diagnosed "invalid JSON". When the provider signaled truncation
+      // (finish_reason:length — the output was cut off, run live-self-084f02bd:
+      // "Unterminated string at position 3863"), tell the model so explicitly and
+      // demand a TERSER response that fits, rather than letting it truncate again.
       const reason = firstErr instanceof Error ? firstErr.message : String(firstErr);
+      const truncationNote = first.truncated
+        ? `Your previous response was CUT OFF by the output-length limit (it did not ` +
+          `finish). Be much TERSER this time so the whole JSON fits: fewer children, ` +
+          `shorter titles, minimal spec text — but still a complete, valid object.\n`
+        : '';
       const correctionMessages: ChatMessage[] = [
         ...messages,
         { role: 'assistant', content: first.content },
         {
           role: 'user',
           content:
+            truncationNote +
             `Your previous response could not be parsed: ${reason}\n` +
             `Reply with ONLY a valid JSON object matching the required shape — ` +
             `no prose, no markdown fences. Include every required field.`,
         },
       ];
-      const second = await this.callCompletions(model, correctionMessages, mode);
+      // On a TRUNCATION specifically, retry on the MID model — it has a far larger
+      // output budget than the high model (GLM-5.2's 33K cap is what cut the decide
+      // off mid-string; DeepSeek V4 Pro at mid allows ~384K), so the same response
+      // fits. For a non-truncation parse error, retry on the same model. Never
+      // "downgrade" a mid/low call to mid — only a higher-than-mid model falls back.
+      const retryModel =
+        first.truncated && model !== this.config.modelByTier.mid
+          ? this.config.modelByTier.mid
+          : model;
+      const second = await this.callCompletions(retryModel, correctionMessages, mode);
       const usage: Usage = {
         promptTokens: first.usage.promptTokens + second.usage.promptTokens,
         completionTokens: first.usage.completionTokens + second.usage.completionTokens,
