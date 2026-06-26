@@ -122,6 +122,27 @@ export type StepOutput =
   | { kind: 'artifact'; artifact: Artifact; usage: Usage; incidents?: TransportIncident[] };
 
 /**
+ * Thrown by `brain.step` when the model's tool-call output cannot be parsed — its
+ * `function.arguments` is not a JSON object — and a single inline corrective
+ * re-prompt did not fix it. This is a FORMAT incident, NOT a logical failure: the
+ * model tried to act but its output was malformed or truncated (e.g. a large
+ * structured emit cut off by the output-token limit). The engine catches this
+ * `instanceof` to recover (force a clean emit) rather than counting it toward the
+ * `step-loop:failed` isomorphic signature as if it were non-convergence — so a
+ * leaf does not die on a malformed first step with nothing produced. Lives in the
+ * contract (ADR-002) so the engine identifies it without reaching into the adapter.
+ */
+export class MalformedStepError extends Error {
+  /** True when the provider also signaled output truncation (`finish_reason: 'length'`). */
+  readonly truncated: boolean;
+  constructor(message: string, truncated = false) {
+    super(message);
+    this.name = 'MalformedStepError';
+    this.truncated = truncated;
+  }
+}
+
+/**
  * The brain interface. Four classic methods are the LLM-driven moments of the
  * factory — decide, produce, judge, repair — each returning its value paired
  * with provider-reported {@link Metered} usage. The fifth, `step`, is the pure

@@ -21,6 +21,7 @@ import type { Artifact, Report } from '../contract/report.js';
 import type { Verdict, Finding } from '../contract/verdict.js';
 import type { EventStore } from '../contract/events.js';
 import type { Brain, BrainContext, StepTranscript } from '../contract/brain.js';
+import { MalformedStepError } from '../contract/brain.js';
 import type { Registry } from '../contract/goal-type.js';
 import type { MemoryView } from '../contract/memory.js';
 import type { RiskClass, SensitivityFact } from '../contract/risk.js';
@@ -1437,7 +1438,11 @@ export class Engine {
                 gating: true,
               },
             ],
-            failureSignature: `step-loop:${loopResult.kind}`,
+            // A malformation that survived the one forced-emit recovery gets a
+            // DISTINCT signature (`step-loop:malformed`) so it neither collides with
+            // a genuine logical `step-loop:failed` in the isomorphic detector nor
+            // masquerades as non-convergence.
+            failureSignature: `step-loop:${loopResult.kind === 'failed' && loopResult.failKind === 'malformed' ? 'malformed' : loopResult.kind}`,
           };
           const resolution = await this.handleFailure(
             goal,
@@ -2074,7 +2079,7 @@ export class Engine {
   ): Promise<
     | { kind: 'artifact'; artifact: Artifact; budget: Budget; transcript: StepTranscript; tokensUsed: number }
     | { kind: 'exhausted'; budget: Budget; transcript: StepTranscript }
-    | { kind: 'failed'; error: string; budget: Budget; transcript: StepTranscript }
+    | { kind: 'failed'; error: string; failKind?: 'failed' | 'malformed'; budget: Budget; transcript: StepTranscript }
     | { kind: 'ceiling'; budget: Budget; transcript: StepTranscript }
   > {
     const t = this.now;
@@ -2124,6 +2129,10 @@ export class Engine {
     const COMPREHEND_READ_CEILING = 16;
     let comprehendReadCalls = 0;
     let forceEmitNext = false;
+    // One recovery from a malformed/truncated step per attempt: on a MalformedStepError
+    // (two consecutive unparseable tool-calls) we force a clean emit rather than letting
+    // the leaf die on `step-loop:failed`. Consumed once so a malformation cannot loop.
+    let malformRecoveryUsed = false;
     // Accumulate total token usage across all steps for tokens-budget debit.
     let totalTokensUsed = 0;
     // Per-attempt duplicate-call guard (F-64 / ADR-017): tracks (name, stable-args)
@@ -2369,8 +2378,48 @@ export class Engine {
       try {
         stepOutput = await this.brain.step(goal, transcript, tools, ctx);
       } catch (err) {
+        // A malformed/truncated tool-call (MalformedStepError) is a FORMAT incident,
+        // not a logical failure — recover ONCE by forcing a clean emit rather than
+        // letting two `step-loop:failed` signatures isomorphic-block the leaf with
+        // nothing produced (the author-leaf-first-step failure: a structured emit
+        // whose args were unparseable/cut off killed the leaf before any real step).
+        if (err instanceof MalformedStepError && !malformRecoveryUsed) {
+          malformRecoveryUsed = true;
+          await this.store.append({
+            type: 'malformation-reprompt',
+            at: t(),
+            goalId: goal.id,
+            detail: err.truncated
+              ? 'malformed+truncated tool-call — forcing a clean emit'
+              : 'malformed tool-call — forcing a clean emit',
+          });
+          // If the output was truncated by size, shed context first so the forced
+          // emit has room; then drive the emit on the next iteration.
+          if (err.truncated) {
+            syncScratchpadMessage(transcript, scratchpad);
+            const ev = evictTranscript(transcript);
+            if (ev.evicted) {
+              for (const cid of ev.evictedCallIds) releaseGuardForCallId(seenCalls, callKeyByCallId, cid);
+              await this.store.append({
+                type: 'context-evicted', at: t(), goalId: goal.id,
+                detail: `${ev.beforeTokens}→${ev.afterTokens} est. tokens; ${ev.evictedCallIds.length} read(s) stubbed (post-truncation)`,
+              });
+            }
+          }
+          transcript.push({
+            role: 'context',
+            content:
+              `Your previous tool-call output was malformed${err.truncated ? ' or cut off' : ''} ` +
+              `and could not be parsed. Do NOT repeat it. Make a SMALLER move now: ` +
+              `emit the final artifact directly (matching the required schema if one ` +
+              `applies), not a large or partial tool call.`,
+          });
+          forceEmitNext = true;
+          continue;
+        }
         const error = err instanceof Error ? err.message : String(err);
-        return { kind: 'failed', error, budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
+        const failKind = err instanceof MalformedStepError ? 'malformed' : 'failed';
+        return { kind: 'failed', error, failKind, budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
       }
 
       // Emit step event and debit usage

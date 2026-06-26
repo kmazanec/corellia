@@ -23,6 +23,7 @@ import {
 import { FakeBroker } from './stubs.js';
 import type { ToolCall, ToolResult } from '../../src/contract/tool.js';
 import type { StepOutput, Brain, StepTranscript } from '../../src/contract/brain.js';
+import { MalformedStepError } from '../../src/contract/brain.js';
 import { ZERO_USAGE } from '../../src/contract/goal.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -1788,5 +1789,80 @@ describe('working-memory bound (ADR-036)', () => {
     const lastTranscript = JSON.stringify(transcripts[transcripts.length - 1] ?? []);
     expect(lastTranscript).toContain('[evicted:');
     expect(lastTranscript).not.toContain(huge);
+  }, 10_000);
+});
+
+// ── Malformed/truncated step recovery (author-leaf-first-step-failure) ─────────
+// A MalformedStepError (two consecutive unparseable tool-calls) is a FORMAT
+// incident, not a logical failure. The engine recovers ONCE by forcing a clean
+// emit instead of letting two `step-loop:failed` signatures isomorphic-block the
+// leaf with nothing produced. A malformation that survives recovery fails with a
+// DISTINCT `step-loop:malformed` signature.
+describe('malformed step recovery', () => {
+  it('recovers from a first-step MalformedStepError by forcing a clean emit', async () => {
+    const store = new MemoryEventStore();
+    const good = textArtifact('clean emit after malformation');
+
+    let stepCalls = 0;
+    const brain: Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair(_g, a) { return { value: a, usage: ZERO_USAGE }; },
+      async step(_goal, _transcript, _tools, _ctx) {
+        stepCalls++;
+        if (stepCalls === 1) {
+          // first step: the model's tool-call args were unparseable, twice inline.
+          throw new MalformedStepError('two consecutive malformed tool-call responses');
+        }
+        // forced-emit retry: a clean artifact.
+        return { kind: 'artifact', artifact: good, usage: ZERO_USAGE };
+      },
+    };
+
+    const registry = buildRegistry([toolGrantedType()]);
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView(), broker: new FakeBroker([]) });
+    const report = await engine.run(makeGoal({
+      type: 'implement', title: 'recover from malformed step',
+      budget: { attempts: 2, tokens: 10_000, toolCalls: 10, wallClockMs: 60_000 },
+    }));
+
+    // The leaf recovered and emitted — not blocked with 0 produced.
+    expect(report.blockers).toHaveLength(0);
+    expect(report.artifact).toEqual(good);
+    // The recovery was recorded honestly.
+    expect((await store.list({ type: 'malformation-reprompt' })).length).toBeGreaterThanOrEqual(1);
+    // Exactly one malformation → one recovery → one forced emit (2 step calls).
+    expect(stepCalls).toBe(2);
+  }, 10_000);
+
+  it('a malformation that persists after recovery fails with a distinct step-loop:malformed signature (not isomorphic step-loop:failed)', async () => {
+    const store = new MemoryEventStore();
+    const brain: Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair(_g, a) { return { value: a, usage: ZERO_USAGE }; },
+      async step() {
+        // Always malformed — even the forced emit comes back unparseable.
+        throw new MalformedStepError('two consecutive malformed tool-call responses', true);
+      },
+    };
+
+    const registry = buildRegistry([toolGrantedType()]);
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView(), broker: new FakeBroker([]) });
+    const report = await engine.run(makeGoal({
+      type: 'implement', title: 'persistent malformation',
+      budget: { attempts: 2, tokens: 10_000, toolCalls: 10, wallClockMs: 60_000 },
+    }));
+
+    // It blocks, but the failure is the artifact-level finding from a malformed
+    // loop — the leaf did NOT silently succeed.
+    expect(report.blockers.length).toBeGreaterThan(0);
+    // The recovery was attempted (one malformation-reprompt) before it gave up.
+    expect((await store.list({ type: 'malformation-reprompt' })).length).toBeGreaterThanOrEqual(1);
+    // The finding names the malformation (distinct from a plain logical failure).
+    const findingText = JSON.stringify(report.findings) + JSON.stringify(report.blockers);
+    expect(findingText.toLowerCase()).toContain('malformed');
   }, 10_000);
 });

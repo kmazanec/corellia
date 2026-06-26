@@ -18,6 +18,7 @@
  */
 
 import type { Brain, BrainContext, StepOutput, StepTranscript } from '../contract/brain.js';
+import { MalformedStepError } from '../contract/brain.js';
 import type { Goal, Metered, TransportIncident, Usage } from '../contract/goal.js';
 import { ZERO_USAGE } from '../contract/goal.js';
 import type { Tier } from '../contract/goal.js';
@@ -210,6 +211,8 @@ interface StepChoiceMessage {
 
 interface StepChoice {
   message: StepChoiceMessage;
+  /** Provider truncation signal: 'length' means the output was cut off mid-stream. */
+  finish_reason?: string;
 }
 
 interface StepResponse {
@@ -347,6 +350,11 @@ function buildStepRequest(
  * Translate a wire step response into a StepOutput.
  * Returns null when the tool_calls are malformed (caller issues re-prompt).
  */
+/** The provider's `finish_reason` for the first choice, if present. */
+function firstFinishReason(response: StepResponse): string | undefined {
+  return response.choices[0]?.finish_reason;
+}
+
 function translateStepResponse(
   response: StepResponse,
   incidents?: TransportIncident[],
@@ -1291,9 +1299,21 @@ export class LlmBrain implements Brain {
       const repromptResult = translateStepResponse(repromptWire, incidents);
 
       if (repromptResult === null) {
-        throw new Error(
-          `Step failed: two consecutive malformed tool-call responses. ` +
-            `Second parse error: tool call arguments could not be parsed as a JSON object`,
+        // Two consecutive malformed tool-call responses. A FORMAT incident, not a
+        // logical failure — surface it as MalformedStepError so the engine can
+        // recover (force a clean emit) instead of isomorphic-blocking the leaf.
+        // If the provider also signaled truncation (`finish_reason: 'length'`), the
+        // args were cut off mid-stream (a large structured emit overran the output
+        // limit), not garbled by the model — carry that so the engine can shed
+        // context before retrying.
+        const truncated =
+          firstFinishReason(wireResponse) === 'length' ||
+          firstFinishReason(repromptWire) === 'length';
+        throw new MalformedStepError(
+          `Step failed: two consecutive malformed tool-call responses` +
+            (truncated ? ' (output truncated at the token limit)' : '') +
+            `. Tool call arguments could not be parsed as a JSON object`,
+          truncated,
         );
       }
 
