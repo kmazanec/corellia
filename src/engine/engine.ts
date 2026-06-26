@@ -927,7 +927,7 @@ export class Engine {
       let priorVerdict: Verdict | undefined;
 
       while (true) {
-        const structErr = validateSplit(decision.children);
+        const structErr = validateSplit(decision.children, (tp) => (this.registry.has(tp) ? this.registry.get(tp) : undefined));
         if (structErr) {
           // Structural violation of the split → fail verdict, re-decide with
           // priorAttempt carrying the rejection
@@ -3267,7 +3267,7 @@ export class Engine {
     // count past the attempt budget) is a genuine structural error — throw so
     // the caller routes it through the structural-error block path rather than
     // silently proceeding with an invalid fan-out.
-    const augmentedErr = validateSplit(augmentedChildren);
+    const augmentedErr = validateSplit(augmentedChildren, (tp) => (this.registry.has(tp) ? this.registry.get(tp) : undefined));
     if (augmentedErr) {
       throw new Error(`coverage-gate-invalid-split:${augmentedErr}`);
     }
@@ -4024,7 +4024,7 @@ export class Engine {
     if (decision.kind !== 'split') {
       return { halt: true };
     }
-    const structErr = validateSplit(decision.children);
+    const structErr = validateSplit(decision.children, (tp) => (this.registry.has(tp) ? this.registry.get(tp) : undefined));
     if (structErr !== null) {
       return { halt: true };
     }
@@ -4321,7 +4321,10 @@ function renormalizeShares(children: ChildPlan[]): ChildPlan[] {
  * Validate structural constraints on a proposed split.
  * Returns an error message if invalid, or null if valid.
  */
-function validateSplit(children: ChildPlan[]): string | null {
+function validateSplit(
+  children: ChildPlan[],
+  resolveType?: (type: string) => GoalTypeDef | undefined,
+): string | null {
   if (children.length === 0) return 'Split must have at least one child';
 
   // No fan-out cap (ADR-033): budget never shapes the build, so width is never
@@ -4332,6 +4335,23 @@ function validateSplit(children: ChildPlan[]): string | null {
 
   // localIds must be unique
   if (localIds.size !== children.length) return 'Duplicate localIds in split';
+
+  // Scope is load-bearing for the types that DECLARE it (ADR-039): a type carrying
+  // `requiresScope` must be spawned with a non-empty scope — empty scope means "no
+  // region", which leaves the child unbounded (no anchor for "I've read enough",
+  // and isInScope treats empty scope as allow-all). This is a per-type contract
+  // property, not a universal rule: a region-anchored producing leaf
+  // (author-acceptance-criteria, deep-dive-region, implement) declares it; a
+  // whole-repo map or a planner that refines scope downward does not. Checked only
+  // when a type resolver is supplied (the engine's call sites).
+  if (resolveType) {
+    for (const child of children) {
+      const def = resolveType(child.type);
+      if (def && def.requiresScope && child.scope.length === 0) {
+        return `Child "${child.localId}" (type "${child.type}") requires a non-empty scope — it must declare the region it touches (ADR-039)`;
+      }
+    }
+  }
 
   // budgetShares must sum to ≤ 1
   const totalShare = children.reduce((s, c) => s + c.budgetShare, 0);

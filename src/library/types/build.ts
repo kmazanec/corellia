@@ -12,6 +12,8 @@ export function buildTypes(): GoalTypeDef[] {
       deterministic: [artifactPresent, filesWithinScope, processClean],
       judgeType: 'critique-code',
       grants: ['fs.read', 'fs.write', 'test.run_scoped'],
+      // Region-anchored producing leaf — scope is the region it writes within (ADR-039).
+      requiresScope: true,
     },
 
     {
@@ -32,6 +34,8 @@ export function buildTypes(): GoalTypeDef[] {
         'knowledge.conventions_for',
         'knowledge.stack_versions',
       ],
+      // Region-anchored producing leaf — scope is the region it writes within (ADR-039).
+      requiresScope: true,
     },
 
     {
@@ -44,6 +48,8 @@ export function buildTypes(): GoalTypeDef[] {
       judgeType: 'critique-code',
       // Characterize writes only to test directories; no production-code writes.
       grants: ['fs.read', 'fs.write_test_dirs', 'test.run_impacted'],
+      // Region-anchored producing leaf — scope is the region it pins behavior for (ADR-039).
+      requiresScope: true,
     },
   ];
 }

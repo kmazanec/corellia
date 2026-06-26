@@ -125,30 +125,44 @@ string. This mirrors how ADR-036 correctly built eviction as a universal leaf
 mechanism rather than a comprehend flag.
 
 The **read-economy teaching** ("read a few well-chosen files, then EMIT; over-reading
-is a FAILURE, not thoroughness") moves from `comprehend.md` into the shared skill
-preamble (`_shared.md`), since it is cross-subject, outcome-only-validatable craft —
-exactly the kind GOAL-TYPES.md says climbs into shared skill. `comprehend.md` keeps
-only comprehend-specific craft (pointers-not-bodies, anchor validity, the split law).
+is a FAILURE, not thoroughness") moves into a shared `_explore-economy.md`, injected
+by the SAME shape test that earns the ceiling (`isExploreThenEmit`), regardless of
+family/kind. (Note `_shared.md` is injected only for `kind:'make'`, so it could not
+reach the learn-kind comprehend/research leaves — the shape-injected path reaches all
+of them.) `comprehend.md` keeps a pointer plus its comprehend-specific craft
+(pointers-not-bodies, anchor validity, the split law).
 
-### 2. Scope is load-bearing
+### 2. Scope is load-bearing — as a per-type contract property, not a universal rule
 
-- A **make-leaf with empty scope is rejected** at `validateSplit` — a child that
-  will produce a product must declare the region it touches. (Planner/learn/judge
-  types that legitimately have no region are exempt; the check is keyed to the
-  shape that needs it.)
-- The **typed retrieval API honors `goal.scope`**: consumption is biased to the
-  declared region first, so DESIGN.md's "per touched region, never re-learning the
-  repo" becomes real. (Reads outside scope are not forbidden — a leaf may need to
-  read a caller to write correctly within scope — but the region is the leaf's
-  anchor and default surface, which is the self-bounding signal a leaf needs.)
+Scope-requirement is **declared on the type** — a new `requiresScope` field on
+`GoalTypeDef`, alongside `leafOnly` / `mustDecompose` / `outputSchema`. A type that
+declares `requiresScope: true` is rejected at `validateSplit` when its child carries
+an empty scope. This is the design's own pattern ("capability is the type",
+GOAL-TYPES.md): the scope contract is a property of the type, enforced generically by
+the engine — not a hard-coded universal check that guesses which children need scope.
 
-We deliberately do **not** make `isInScope` reject reads outside scope. DESIGN.md
-bounds *writes* by scope (`diff ⊆ scope`) and intends reads to be *biased* to the
-region (the retrieval API "per touched region"), not *forbidden* outside it — a leaf
-may legitimately read a caller or a shared type before writing within scope. The
-bound on reading is the discovery-loop economy (decision 1), not a hard read-scope
-gate. Making reads hard-fail outside scope would re-introduce the "I can't access
-the repo, please paste it" failure the comprehend skill warns against.
+The types that declare it are the **region-anchored producing leaves**:
+`implement`, `freeze-contract`, `characterize` (build leaves that write within a
+region), `deep-dive-region` (a dive of a *region* with no region is a contradiction),
+and `author-acceptance-criteria` (criteria characterize "done" for a region — the
+live failure). The types that do **not** declare it are correctly exempt:
+`map-repo` (whole-repo, no single region), `research-external` (web, no repo region),
+`deliver-intent`/`investigate` (planners that refine scope downward), and every judge.
+
+This is strictly better than a universal `validateSplit` rule: it broke zero existing
+tests (a universal check broke 71 occurrences across 10 files), because each type
+opts in by its own contract — and it is more honest, since "needs a region" genuinely
+varies by type.
+
+We deliberately do **not** make `isInScope` reject reads outside scope, and we do
+**not** bias the retrieval API to scope (an earlier draft of this ADR proposed the
+latter). DESIGN.md bounds *writes* by scope (`diff ⊆ scope`); the bound on *reading*
+is the discovery-loop economy (decision 1) plus `requiresScope` giving the leaf a
+real region to anchor to. Once a leaf has a non-empty scope and the force-emit
+ceiling, it self-bounds — re-keying the retrieval API to filter reads by scope would
+be redundant machinery and risks the "I can't access the repo, please paste it"
+failure the comprehend skill warns against. The canonical fix (a real region + an
+economy bound) makes the retrieval-scope plumbing unnecessary.
 
 ### 3. Collapse the redundant step-loop mechanisms
 
@@ -212,33 +226,32 @@ right cut: a correct root-cause fix makes the surrounding patches unnecessary.
   skill asks for (the current comprehend value is 16); the eviction (ADR-036) means
   bounded reads never balloon; and the cap only *forces the emit*, it does not block —
   a genuinely-incomplete artifact still faces its deterministic + judge gate.
-- **Rejecting empty make-leaf scope could block a legitimate whole-repo make-leaf.**
-  Mitigated: a make-leaf that truly touches the whole repo is almost always a
-  decomposition smell (it should split); and the check is scoped to make-leaves, so
-  planner/learn/judge types are unaffected. If a real whole-repo make-leaf case
-  appears, it declares a broad-but-explicit scope rather than `[]`.
-- **Threading scope into retrieval changes retrieval results.** Mitigated: scope
-  *biases*, not *filters-hard* — out-of-region results still surface when in-region
-  ones are absent, preserving correctness while paying region-first cost.
+- **`requiresScope` could block a legitimate whole-region producing leaf.** Mitigated:
+  the property is *declared per type*, so only types whose contract genuinely needs a
+  region carry it; a type that legitimately spans broadly (map-repo) simply does not
+  declare it. If a real broad case appears for a `requiresScope` type, the brain
+  declares a broad-but-explicit scope rather than `[]`, which is more honest anyway.
 - **The step-loop collapse touches a hot path.** Mitigated: done incrementally, suite
   green at each step; the collapse removes branches rather than adding them.
 
 ## Consequences for the Build
 
 - **`src/engine/engine.ts`**: re-key the read-ceiling guard from `family ===
-  'comprehend'` to a shape test (`outputSchema && no write grant`); fold
-  `malformRecoveryUsed` and `forceEmitNext` into one explore→emit transition; remove
-  the two isomorphic-detector guards that only suppress over-read/malform; reject an
-  empty-scope make-leaf in `validateSplit`.
-- **`src/library/retrieval.ts`**: thread `goal.scope` into `find_symbol`,
-  `conventions_for`, `impact`, etc. — region-first consumption.
-- **`src/library/skills/_shared.md`**: add the read-economy discipline; trim it from
-  `comprehend.md`.
-- **`src/library/types/*`**: no new types, no merges. The granularity rule is
-  satisfied as-is.
+  'comprehend'` to a shape test (`isExploreThenEmitLeaf`: `outputSchema && no write
+  grant`); inject the `_explore-economy.md` block by the same shape test; pass a
+  type resolver into `validateSplit` so a `requiresScope` child with empty scope is
+  rejected; fold `malformRecoveryUsed`/`forceEmitNext` into one explore→emit
+  transition and remove the isomorphic-detector guards that only suppress
+  over-read/malform (the collapse — a later step).
+- **`src/contract/goal-type.ts`**: add the `requiresScope?` contract property.
+- **`src/library/types/*`**: declare `requiresScope: true` on the region-anchored
+  producing leaves (`implement`, `freeze-contract`, `characterize`,
+  `deep-dive-region`, `author-acceptance-criteria`). No new types, no merges.
+- **`src/library/skills/_explore-economy.md`** (new): the read-economy discipline,
+  shape-injected; `comprehend.md` keeps a pointer + comprehend-specific craft.
 - **`docs/issues/author-leaf-first-step-failure.md`**: resolved by this ADR (the
   author-family instance of the shared failure); deleted per the ephemeral-issue rule,
   folded into the iteration record.
-- **Tests**: a shape-keyed read-ceiling test (author leaf forces emit), an
-  empty-scope-make-leaf rejection test, a scope-biased retrieval test, and the
-  existing step-loop suite green through the collapse.
+- **Tests**: a shape-keyed read-ceiling test (author leaf forces emit), the
+  economy-injection tests, the `requiresScope` rejection + exemption tests, and the
+  existing suite green through the collapse.

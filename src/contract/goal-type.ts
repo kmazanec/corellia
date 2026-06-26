@@ -110,6 +110,20 @@ export interface GoalTypeDef {
    */
   outputSchema?: Record<string, unknown>;
   /**
+   * Whether a goal of this type MUST be spawned with a non-empty `scope` (ADR-039).
+   * Scope is load-bearing for a region-anchored producing leaf: it is the region the
+   * leaf is here to touch/characterize, the anchor that bounds its exploration, and
+   * (via `diff ⊆ scope`) the gate on its writes. A type that declares this is
+   * rejected at `validateSplit` when its child carries an empty scope — empty scope
+   * means "no region", which leaves the leaf unbounded (no "I've read enough" anchor;
+   * `isInScope` treats empty scope as allow-all). Declared per type, not a universal
+   * rule: a whole-repo `map-repo`, a planner that refines scope downward, or a judge
+   * legitimately has no single region and does NOT set this. "Capability is the type"
+   * (GOAL-TYPES.md) — the scope contract is a property of the type, like `leafOnly`
+   * and `mustDecompose`, not engine-side grant-sniffing.
+   */
+  requiresScope?: boolean;
+  /**
    * When present, this type's SPLIT dispatch arm routes through the milestone
    * loop (`runMilestone`) instead of the single-pass `runSplit` (ADR-031). The
    * type re-decides against a frozen acceptance-criteria done-condition each

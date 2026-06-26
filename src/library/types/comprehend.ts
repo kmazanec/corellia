@@ -118,6 +118,11 @@ export function comprehendTypes(): GoalTypeDef[] {
       deterministic: [artifactPresent, diveAnchorCheck()],
       judgeType: null,
       grants: ['fs.read', 'retrieval.api'],
+      // A dive is BY DEFINITION region-anchored — "dive a region" with no region is
+      // a contradiction. Empty scope is what let a dive (and author-acceptance-
+      // criteria) read the whole repo (ADR-039). map-repo is exempt: it has no
+      // single region.
+      requiresScope: true,
     },
   ];
 }

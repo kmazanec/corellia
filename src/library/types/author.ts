@@ -31,6 +31,10 @@ export function authorTypes(): GoalTypeDef[] {
       judgeType: null,
       grants: ['retrieval.api'],
       outputSchema: ACCEPTANCE_CRITERIA_SCHEMA,
+      // The criteria characterize "done" for a specific region of work — an empty
+      // scope is what left this leaf with no anchor and let it read 140 files of the
+      // whole repo (run 9e035402; ADR-039).
+      requiresScope: true,
     },
 
     /**

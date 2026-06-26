@@ -1136,6 +1136,68 @@ describe('cyclic dependency detection', () => {
   });
 });
 
+// ── ADR-039: requiresScope is a per-type contract property ───────────────────
+describe('requiresScope split validation (ADR-039)', () => {
+  it('rejects a split whose requiresScope child has empty scope, then re-decides', async () => {
+    const store = new MemoryEventStore();
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'splitter' }),
+      // A region-anchored leaf that DECLARES requiresScope.
+      leafTypeDef({ name: 'anchored', requiresScope: true }),
+      // A plain leaf that does NOT require scope.
+      leafTypeDef({ name: 'free' }),
+    ]);
+
+    const brain = new ScriptedBrain()
+      // First split: the anchored child has empty scope → rejected by validateSplit.
+      .queueDecide({
+        kind: 'split',
+        children: [
+          { localId: 'a', type: 'anchored', title: 'a', spec: {}, dependsOn: [], scope: [], budgetShare: 0.5 },
+        ],
+      })
+      // Re-decide: give it a real scope → passes.
+      .queueDecide({
+        kind: 'split',
+        children: [
+          { localId: 'a', type: 'anchored', title: 'a', spec: {}, dependsOn: [], scope: ['src/x/'], budgetShare: 0.5 },
+        ],
+      })
+      .queueProduce(textArtifact('built within scope'));
+
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const report = await engine.run(makeGoal({ type: 'splitter' }));
+
+    // The re-decide with a real scope succeeded — no blockers.
+    expect(report.blockers).toHaveLength(0);
+    // Two decide calls happened (the empty-scope split was rejected and re-derived).
+    const decided = await store.list({ type: 'decided' });
+    expect(decided.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('does NOT reject an empty scope for a type that does not require it', async () => {
+    const store = new MemoryEventStore();
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'splitter' }),
+      leafTypeDef({ name: 'free' }),
+    ]);
+
+    const brain = new ScriptedBrain()
+      .queueDecide({
+        kind: 'split',
+        children: [
+          { localId: 'a', type: 'free', title: 'a', spec: {}, dependsOn: [], scope: [], budgetShare: 0.5 },
+        ],
+      })
+      .queueProduce(textArtifact('no scope needed'));
+
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const report = await engine.run(makeGoal({ type: 'splitter' }));
+
+    expect(report.blockers).toHaveLength(0);
+  });
+});
+
 // ── Real usage accounting ───────────────────────────────────────────────────
 
 import type { FactoryEvent } from '../../src/contract/events.js';
