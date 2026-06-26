@@ -245,6 +245,44 @@ describe('skills-wiring sweep — step-loop harness carries each family skill', 
   }
 });
 
+// ── ADR-039: explore-then-emit economy reaches the right leaves ──────────────
+describe('explore-then-emit economy injection (ADR-039)', () => {
+  const ECONOMY_MARKER = 'Explore-then-emit economy';
+
+  it('injects the read-economy block into an explore-then-emit leaf (outputSchema, no write)', async () => {
+    const dive = ALL_TYPES.find((d) => d.name === 'deep-dive-region')!;
+    expect(dive.outputSchema).toBeDefined();
+    expect(dive.grants).not.toContain('fs.write');
+
+    const repo = makeTempRepo();
+    const store = new MemoryEventStore();
+    const brain = harnessCaptureBrain();
+    const engine = new Engine({
+      registry: registryOf([dive]), brain, store,
+      memory: new NoopMemoryView(), sandbox: { repoRoot: repo, declaredScripts: {} },
+    });
+    await engine.run(makeGoal({ id: 'eco-dive', type: 'deep-dive-region', scope: ['src/'] }));
+    expect(brain.harness[0]).toContain(ECONOMY_MARKER);
+  });
+
+  it('does NOT inject it into a build leaf (has a write grant)', async () => {
+    const impl = ALL_TYPES.find((d) => d.name === 'implement')!;
+    expect(impl.grants).toContain('fs.write');
+
+    const repo = makeTempRepo();
+    const store = new MemoryEventStore();
+    const brain = harnessCaptureBrain();
+    const defs: GoalTypeDef[] = [impl];
+    if (impl.judgeType) defs.push(leafTypeDef({ name: impl.judgeType, kind: 'judge', family: impl.family, judgeType: null }));
+    const engine = new Engine({
+      registry: registryOf(defs), brain, store,
+      memory: new NoopMemoryView(), sandbox: { repoRoot: repo, declaredScripts: {} },
+    });
+    await engine.run(makeGoal({ id: 'eco-impl', type: 'implement', scope: ['src/'] }));
+    expect(brain.harness[0]).not.toContain(ECONOMY_MARKER);
+  });
+});
+
 // ── SWEEP 2: judge rubric carries the judge family skill ─────────────────────
 
 describe('skills-wiring sweep — judge rubric carries each judge family skill', () => {

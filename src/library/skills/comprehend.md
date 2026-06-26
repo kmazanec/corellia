@@ -12,15 +12,12 @@ for a genuine missing DECISION a human must make (an ambiguous requirement, a
 risk that outranks your authority), never for missing EFFORT you can supply with
 a tool call.
 
-Discovery loop economy — a HARD bound, not a suggestion: probe → learn → decide
-whether to probe further. Each probe must yield new information; a probe that
-confirms what you already know wastes a tool call. Read AT MOST 6–8 well-chosen
-files, then EMIT — for a bounded repo, four to six well-chosen reads beat twenty
-exhaustive ones. If you find yourself on your tenth read, STOP and emit the
-artifact with what you have: a calibrated artifact from six files is better than
-running out the wall-clock and producing nothing. Over-reading is a FAILURE, not
-thoroughness — an artifact built from twenty files is harder to validate and
-harder to trust than one built from six.
+The discovery-loop read economy (read 6–8 well-chosen files then EMIT; over-reading
+is a failure, not thoroughness) is the shared explore-then-emit discipline injected
+into your harness — it governs you as it governs every read-then-emit leaf. For a
+comprehension region specifically: four to six well-chosen reads beat twenty
+exhaustive ones, and a calibrated artifact from six files beats running out the
+wall-clock with nothing emitted.
 
 Pointers, not bodies. Artifacts carry `{path, line?, note}` pointers to the
 evidence that supports each claim. Never include file contents in the artifact

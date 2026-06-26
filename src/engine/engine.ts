@@ -30,7 +30,7 @@ import type { ToolBroker, ToolDef } from '../contract/tool.js';
 import { GRANT_TOOL_MAP } from '../contract/tool.js';
 import { subdivide, consume, floorWallClock, COMPREHENSION_WALLCLOCK_FLOOR_MS } from './budget.js';
 import { lintLibrary } from '../library/constitution.js';
-import { loadFamilySkill, loadSharedPreamble } from '../library/skills.js';
+import { loadFamilySkill, loadSharedPreamble, loadExploreEconomy } from '../library/skills.js';
 import { renderPersonaBlock } from '../library/personas.js';
 import { loadHostConventions } from './host-conventions.js';
 import { classifyRisk } from '../library/risk.js';
@@ -2195,6 +2195,14 @@ export class Engine {
           return parts.length > 0 ? `\n\n---\n${parts.join('\n\n')}` : '';
         })()
       : '';
+    // Explore-then-emit economy (ADR-039). A leaf of this shape (outputSchema + no
+    // write grant) gets the read-economy discipline that was once comprehend-private,
+    // by the SAME shape test that earns it the force-emit ceiling — teaching paired
+    // with the structural backstop. Injected for every such leaf regardless of
+    // family/kind, so author/research leaves are taught too (not just comprehend).
+    const exploreEconomyBlock = isExploreThenEmit
+      ? `\n\n---\n${loadExploreEconomy().trim()}`
+      : '';
     // Expert-persona layer (ADR-038). A tool-using leaf wears the
     // same expert lens as the brain's other roles, selected from the goal alone
     // by the shared selector. Augments the family skill; never overrides it.
@@ -2264,6 +2272,7 @@ export class Engine {
         `content must be exactly the artifact — no preamble, no commentary).` +
         sandboxPathsBlock +
         skillBlock +
+        exploreEconomyBlock +
         personaBlock +
         memoryLines +
         conventionsBlock +

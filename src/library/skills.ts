@@ -115,6 +115,29 @@ export function loadSharedPreamble(): string {
   return sharedPreambleCache;
 }
 
+let exploreEconomyCache: string | undefined = undefined;
+
+/**
+ * Load the explore-then-emit economy teaching from `_explore-economy.md` (ADR-039).
+ * Injected by the engine into the harness of every explore-then-emit leaf
+ * (outputSchema + no write grant) regardless of family/kind — so the read-economy
+ * discipline that was once comprehend-private reaches author/research leaves too.
+ * Returns '' when the file is absent (the engine stays lenient); cached after first
+ * load.
+ */
+export function loadExploreEconomy(): string {
+  if (exploreEconomyCache !== undefined) {
+    return exploreEconomyCache;
+  }
+  const filePath = join(SKILLS_DIR, '_explore-economy.md');
+  if (!existsSync(filePath)) {
+    exploreEconomyCache = '';
+    return '';
+  }
+  exploreEconomyCache = readFileSync(filePath, 'utf8');
+  return exploreEconomyCache;
+}
+
 /**
  * Clear the loader cache. Intended for tests that need isolated loader state.
  * Not part of the production surface.
