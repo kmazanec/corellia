@@ -1297,6 +1297,10 @@ export class LlmBrain implements Brain {
           ...this.config.headers,
         },
         body: JSON.stringify(repromptBody),
+        // The malform re-prompt fetch needs the SAME abort timeout as every other
+        // fetch (lines ~826, ~1199); without it a hung re-prompt wedges the run with
+        // no liveness backstop (observed: a run sat at 0% CPU indefinitely).
+        signal: AbortSignal.timeout(this.config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS),
       });
 
       if (!repromptResponse.ok) {
