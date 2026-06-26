@@ -4,7 +4,7 @@ title: "Implement leaf dies on a truncated tool-call (context bloat → malforme
 description: A make/implement leaf on a hard task accumulates ~117K tokens of file reads; its tool-call response is then truncated by the output limit, JSON.parse throws Unexpected-end-of-JSON, the step fails repeatedly, and the isomorphic detector blocks it with 0 writes.
 tags: [engine, step-loop, llm, truncation, finish-reason, isomorphic-block]
 timestamp: 2026-06-25
-status: fixed-pending-proof
+status: fixed
 kind: bug
 severity: high
 ---
@@ -16,6 +16,14 @@ severity: high
 > + an engine eviction backstop (transcript capped at 60K est. tokens, oldest raw
 > reads stubbed) so it can no longer balloon to truncation. Re-proven by
 > re-commissioning slice C once the next live run confirms it.
+
+> **Proven (run #9, live-self-76943fcd).** The comprehension leaf that ran
+> (`dive-src-engine`, 34 reads) stayed bounded at 74K tokens (vs run #8's 117K),
+> eviction fired 3×, no truncation crash, and it emitted a converged artifact — the
+> exact run-#8 balloon/crash is gone. (Slice C still didn't fully build, but for a
+> different reason — a comprehension over-split + dependency cascade starved the
+> implement leaves before they ran; see the partial-delivery issue. ADR-036's own
+> failure mode is fixed.)
 
 > **Corrected root cause (the first cut of this issue was wrong).** Initial read:
 > "an implement leaf read-loops without writing because there's no forced-emit

@@ -16,6 +16,18 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-25
 
+- **Build run #9** (`live-self-76943fcd`, $0.48) — re-proved ADR-036 on slice C.
+  **ADR-036 held**: the comprehension leaf that DID run (`dive-src-engine`, 34
+  reads) stayed bounded at **74K tokens (run #8 ballooned to 117K), eviction fired
+  3×, no truncation crash, and it EMITTED a converged artifact** — the exact run-#8
+  failure mode is fixed. BUT slice C still didn't build, for a DIFFERENT reason: the
+  root over-split (`tests` → 4 sub-dives), one sub-dive blocked, and the cascade
+  starved the two implement leaves (`impl-steps`/`impl-wire`) before they ever ran
+  (only `emitted` block events, 0 step execution). So `write_file=0` this run is the
+  partial-delivery cascade + comprehension over-split, NOT the balloon. The
+  hollow-emit gate correctly caught the characterization-not-code emit. ADR-036
+  proven on the path it touched; the next wall is the cascade (already filed). Note:
+  the leaf never used the `note` tool (0 notes) — eviction carried the bound alone.
 - **Build run #8** (`live-self-cb6abfc2`, $0.56) — commissioned slice C ALONE (the
   engine integration steps). The implement leaf **read extensively (11 steps, 50
   reads) but wrote 0 files** before blocking (`step-loop:failed`) — no budget
