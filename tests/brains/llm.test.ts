@@ -174,6 +174,35 @@ describe('LlmBrain.decide', () => {
     expect(result.value.kind).toBe('satisfy');
   });
 
+  it('for a mustDecompose type, a childless split is RE-ASKED (not coerced to satisfy)', async () => {
+    // Run live-self-3427be39: the model returned a childless split that parseDecision
+    // coerced to satisfy; for a mustDecompose root that is a dead-end (no producing
+    // tool) and the intent died blocked. Now it throws → callJson re-asks once. The
+    // re-ask supplies real children → a valid split, no dead-end satisfy.
+    const { fetch, calls } = stubFetch(
+      chatResponse(JSON.stringify({ kind: 'split' })), // first: childless → re-ask
+      chatResponse(JSON.stringify({
+        kind: 'split',
+        children: [{ localId: 'c1', type: 'implement', title: 'do it', spec: {}, scope: ['src/'], budgetShare: 1 }],
+      })),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, { tier: 'high', memories: [], mustDecompose: true });
+    expect(result.value.kind).toBe('split');
+    expect(calls.length).toBe(2); // it re-asked rather than coercing to satisfy
+  });
+
+  it('for a mustDecompose type, a TWICE-childless split blocks (never a dead-end satisfy)', async () => {
+    const { fetch } = stubFetch(
+      chatResponse(JSON.stringify({ kind: 'split' })),
+      chatResponse(JSON.stringify({ kind: 'split' })), // re-ask also childless
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, { tier: 'high', memories: [], mustDecompose: true });
+    // Honest block — NOT satisfy (which would dead-end a producing-tool-less root).
+    expect(result.value.kind).toBe('block');
+  });
+
   it('normalizes a split child that omits dependsOn/scope to empty arrays', async () => {
     // Regression: the live model omitted `dependsOn`, and the raw child flowed
     // into the engine's split/integrate machinery where `[...child.dependsOn]`
@@ -375,8 +404,10 @@ describe('LlmBrain.decide', () => {
     await brain.decide(baseGoal, { tier: 'high', memories: [], mustDecompose: true });
     const body = JSON.parse(calls[0]?.options.body as string);
     const userMsg: string = body.messages.find((m: { role: string }) => m.role === 'user').content;
-    expect(userMsg).toContain('CANNOT satisfy directly');
-    expect(userMsg).toContain('Do NOT return satisfy');
+    expect(userMsg).toContain('CANNOT satisfy');
+    expect(userMsg).toContain('NEVER return "satisfy"');
+    // It also forbids a childless split (the run live-self-3427be39 failure).
+    expect(userMsg).toContain('split" with no children');
     // The satisfy shape is not offered.
     expect(userMsg).not.toContain('{"kind":"satisfy"}');
     // split and block are still offered.

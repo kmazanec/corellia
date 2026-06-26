@@ -686,7 +686,7 @@ const VERDICT_SCHEMA: Record<string, unknown> = {
   additionalProperties: true,
 };
 
-function parseDecision(raw: string): Decision {
+function parseDecision(raw: string, mustDecompose = false): Decision {
   const obj = JSON.parse(stripJsonEnvelope(raw)) as Record<string, unknown>;
   const kind = obj['kind'];
   if (kind === 'satisfy') {
@@ -694,13 +694,22 @@ function parseDecision(raw: string): Decision {
   }
   if (kind === 'split') {
     const children = obj['children'];
-    // A split with no (or empty) children is not a malformed decision — it is a
-    // node that wanted to decompose but proposed nothing, i.e. "I cannot break
-    // this down further." Treat it as a satisfy (handle as a leaf) rather than
-    // throwing: the throw previously propagated to the decide-fallback and turned
-    // a recoverable terseness into a hard block (surfaced by an iteration-08
-    // live:self run: `{"kind":"split"}` with no children blocked the whole node).
+    // A split with no (or empty) children is normally not malformed — it is a node
+    // that wanted to decompose but proposed nothing ("I cannot break this down
+    // further"); treat it as a satisfy (handle as a leaf) rather than throwing
+    // (iteration-08: `{"kind":"split"}` with no children once blocked the whole
+    // node). BUT for a `mustDecompose` type that coercion is a DEAD END — the type
+    // has no producing tool, so a satisfy can only be blocked downstream and the
+    // intent dies with nothing built (run live-self-3427be39: two childless splits
+    // → satisfy → blocked). For such a type, THROW instead, so callJson re-asks once
+    // with the parse error — giving the model a chance to actually name children.
     if (!Array.isArray(children) || children.length === 0) {
+      if (mustDecompose) {
+        throw new Error(
+          'split decision had no children, but this type MUST decompose — propose ' +
+            'at least one typed child with a non-empty scope (a satisfy is invalid here)',
+        );
+      }
       return { kind: 'satisfy' };
     }
     // Normalize each child into a structurally-complete ChildPlan. The model
@@ -997,11 +1006,13 @@ export class LlmBrain implements Brain {
             : '') +
           catalogSection +
           (ctx.mustDecompose
-            ? `\nThis goal's type CANNOT satisfy directly — it has no tool with ` +
-              `which to produce the product; its only job is to decompose. Choose ` +
-              `split (the normal case — break the intent into typed children) or, ` +
-              `only if you genuinely cannot decompose, block with a brief. Do NOT ` +
-              `return satisfy.\n` +
+            ? `\nThis goal's type CANNOT satisfy and CANNOT produce anything itself — it ` +
+              `has NO producing tool. Its ONLY job is to decompose the intent into ` +
+              `typed children that do the work. You MUST return a "split" with at least ` +
+              `one child (every producing child carrying a non-empty "scope"), OR — only ` +
+              `if the intent is genuinely too ambiguous to decompose — "block" with a ` +
+              `brief. NEVER return "satisfy", and NEVER return a "split" with no children: ` +
+              `both are invalid here and will be rejected.\n` +
               `\nRespond with exactly one of these JSON shapes:\n` +
               `  {"kind":"split","children":[{"localId":str,"type":str,"title":str,"spec":{},"dependsOn":[str],"scope":[str],"budgetShare":number}]}\n` +
               `  {"kind":"block","brief":{"question":str,"options":[str],"links":[str],"deadlineMs":number,"onTimeout":"deny"|"park"|"bounce"}}\n`
@@ -1021,10 +1032,15 @@ export class LlmBrain implements Brain {
     // decision with no valid `kind` twice, and brain.decide's throw was uncaught
     // at the engine's decide call sites.)
     try {
-      const result = await this.callJson(model, messages, parseDecision, {
-        schemaName: 'decision',
-        schema: DECISION_SCHEMA,
-      });
+      const result = await this.callJson(
+        model,
+        messages,
+        (raw) => parseDecision(raw, ctx.mustDecompose === true),
+        {
+          schemaName: 'decision',
+          schema: DECISION_SCHEMA,
+        },
+      );
       return { value: result.value, usage: result.usage };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
