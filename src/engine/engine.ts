@@ -2381,9 +2381,17 @@ export class Engine {
           typeDef.outputSchema !== undefined
             ? { ...ctx, outputSchema: typeDef.outputSchema }
             : ctx;
+        // Force the emit with NO tools (ADR-039): passing the full tool set let the
+        // model ignore the "emit now" instruction and keep calling read tools — so
+        // the ceiling never actually forced anything (observed run live-self-56492678:
+        // a dive read 30 files past the 16 ceiling, 7 steps all tool-calls, then
+        // blocked "ignored the forced emit"). With an outputSchema the provider's
+        // json_schema response_format guarantees a structured artifact; with no schema
+        // the model must return the artifact as content. Either way, removing the
+        // tools closes the escape hatch so the forced emit is genuinely forced.
         let forcedOutput: import('../contract/brain.js').StepOutput;
         try {
-          forcedOutput = await this.brain.step(goal, transcript, tools, forceCtx);
+          forcedOutput = await this.brain.step(goal, transcript, [], forceCtx);
         } catch (err) {
           const error = err instanceof Error ? err.message : String(err);
           return { kind: 'failed', error, budget: { ...budget, toolCalls: remainingToolCalls }, transcript };

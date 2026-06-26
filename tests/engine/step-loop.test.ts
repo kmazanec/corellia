@@ -1670,6 +1670,55 @@ describe('explore-then-emit over-explore backstop (ADR-039)', () => {
     expect(readsRequested).toBeGreaterThanOrEqual(16);
     expect(readsRequested).toBeLessThanOrEqual(20);
   }, 10_000);
+
+  it('the forced emit is given NO tools, so a defiant model cannot keep reading (ADR-039)', async () => {
+    const store = new MemoryEventStore();
+    const finalArtifact = textArtifact('{"result":"forced"}');
+
+    // A DEFIANT model: it keeps requesting reads whenever it is given tools, ignoring
+    // any "stop reading" instruction. It only emits when handed an EMPTY tool set
+    // (nothing to call). This is run live-self-56492678's failure: the forced emit
+    // passed the full tool set, so the model read 30 files past the 16 ceiling and
+    // blocked "ignored the forced emit". With tools removed, it MUST emit.
+    let readsRequested = 0;
+    let sawEmptyTools = false;
+    const brain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair() { throw new Error('not used'); },
+      async step(_goal, _transcript, tools) {
+        if (tools.length === 0) {
+          sawEmptyTools = true;
+          return { kind: 'artifact', artifact: finalArtifact, usage: ZERO_USAGE };
+        }
+        readsRequested++;
+        return {
+          kind: 'tool-calls',
+          calls: [{ id: `r${readsRequested}`, name: 'read_file', args: { path: `src/f${readsRequested}.ts` } }],
+          usage: ZERO_USAGE,
+        };
+      },
+    };
+
+    const registry = buildRegistry([comprehendType()]);
+    const engine = new Engine({
+      registry, brain, store, memory: new NoopMemoryView(),
+      broker: new FakeBroker([{ callId: 'x', ok: true, output: 'file body' }]),
+    });
+    const report = await engine.run(makeGoal({
+      type: 'deep-dive-region', title: 'Deep-dive region src/small',
+      budget: { attempts: 50, tokens: 10_000_000, toolCalls: 500, wallClockMs: 600_000 },
+    }));
+
+    // The forced emit ran with no tools and the defiant model was forced to emit.
+    expect(sawEmptyTools).toBe(true);
+    expect(report.blockers).toHaveLength(0);
+    expect(report.artifact).toEqual(finalArtifact);
+    // It stopped at the ceiling, not after 500 reads — the escape hatch is closed.
+    expect(readsRequested).toBeGreaterThanOrEqual(16);
+    expect(readsRequested).toBeLessThanOrEqual(20);
+  }, 10_000);
 });
 
 // ── Carried exploration ─────────────────────────────────────────────────────
