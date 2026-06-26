@@ -965,7 +965,12 @@ export class LlmBrain implements Brain {
         ? `\nAVAILABLE GOAL TYPES (children must use one of these exact names):\n` +
           this.typeCatalog.map((t) => `  - ${t}`).join('\n') +
           `\nNote: every child "type" must be one of the names above, and every\n` +
-          `"dependsOn" entry must reference a sibling "localId" from this split.\n`
+          `"dependsOn" entry must reference a sibling "localId" from this split.\n` +
+          `Every producing child (anything that writes code/docs or characterizes a\n` +
+          `region — e.g. implement, freeze-contract, characterize, deep-dive-region,\n` +
+          `author-acceptance-criteria) MUST carry a NON-EMPTY "scope": the files or\n` +
+          `directories it touches (e.g. ["src/engine/","tests/engine/"]). A producing\n` +
+          `child with an empty scope is rejected — give each one the region it works in.\n`
         : '';
     const messages: ChatMessage[] = [
       {
