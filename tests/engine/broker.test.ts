@@ -67,7 +67,7 @@ beforeEach(async () => {
     root: sandboxRoot,
     registry,
     store,
-    tools: [tools.readFile, tools.writeFile, tools.listDir, tools.search],
+    tools: [tools.readFile, tools.writeFile, tools.deleteFile, tools.listDir, tools.search],
   });
 });
 
@@ -137,6 +137,44 @@ describe('granted write_file', () => {
     const events = await store.list({ goalId: goal.id, type: 'tool-call' });
     expect(events).toHaveLength(2);
     expect(events.every((e) => e.type === 'tool-call' && e.outcome === 'ran')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// delete_file (shares fs.write + the path-based scope guard with write_file)
+// ---------------------------------------------------------------------------
+
+describe('granted delete_file', () => {
+  it('deletes an in-scope file and returns ok:true', async () => {
+    // 'implement' type has the fs.write grant delete_file requires.
+    const goal = makeGoal({ type: 'implement', scope: ['src/'] });
+    // Seed a file to remove, then delete it.
+    await broker.execute(goal, makeCall({ id: 'w', name: 'write_file', args: { path: 'src/gone.ts', content: 'x' } }));
+    const result = await broker.execute(goal, makeCall({ id: 'd', name: 'delete_file', args: { path: 'src/gone.ts' } }));
+    expect(result.ok).toBe(true);
+    // A read now fails — the file is gone.
+    const readResult = await broker.execute(goal, makeCall({ id: 'r', name: 'read_file', args: { path: 'src/gone.ts' } }));
+    expect(readResult.ok).toBe(false);
+  });
+
+  it('refuses delete_file for a type that lacks fs.write', async () => {
+    const goal = makeGoal({ type: 'judge-split' });
+    const call = makeCall({ name: 'delete_file', args: { path: 'src/index.ts' } });
+    const result = await broker.execute(goal, call);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('fs.write');
+  });
+
+  it('refuses delete_file for an out-of-scope path', async () => {
+    const goal = makeGoal({ type: 'implement', scope: ['docs/'] });
+    const call = makeCall({ name: 'delete_file', args: { path: 'src/index.ts' } });
+    const result = await broker.execute(goal, call);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("outside the goal's declared scope");
+    // The file is untouched.
+    const readGoal = makeGoal({ type: 'implement', scope: ['src/'] });
+    const readResult = await broker.execute(readGoal, makeCall({ id: 'r', name: 'read_file', args: { path: 'src/index.ts' } }));
+    expect(readResult.ok).toBe(true);
   });
 });
 

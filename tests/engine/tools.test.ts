@@ -272,6 +272,74 @@ describe('write_file', () => {
 });
 
 // ---------------------------------------------------------------------------
+// delete_file
+// ---------------------------------------------------------------------------
+
+describe('delete_file', () => {
+  it('deletes an in-scope file', async () => {
+    const { deleteFile, readFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal({ scope: ['src/'] });
+    const result = await deleteFile.execute(goal, { path: 'src/util.ts' });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain('deleted src/util.ts');
+    // Verify the file is gone.
+    const check = await readFile.execute(goal, { path: 'src/util.ts' });
+    expect(check.ok).toBe(false);
+  });
+
+  it('refuses a path outside the goal scope', async () => {
+    const { deleteFile, readFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal({ scope: ['src/'] });
+    const result = await deleteFile.execute(goal, { path: 'tests/index.test.ts' });
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("outside the goal's declared scope");
+    // Verify the file still exists.
+    const check = await readFile.execute(goal, { path: 'tests/index.test.ts' });
+    expect(check.ok).toBe(true);
+  });
+
+  it('refuses an absolute path', async () => {
+    const { deleteFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal({ scope: ['src/'] });
+    const result = await deleteFile.execute(goal, { path: '/etc/passwd' });
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('outside the sandbox root');
+  });
+
+  it('refuses ../ traversal', async () => {
+    const { deleteFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal({ scope: ['src/'] });
+    const result = await deleteFile.execute(goal, { path: '../escaped.ts' });
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('outside the sandbox root');
+  });
+
+  it('returns ok:false for a missing file', async () => {
+    const { deleteFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal({ scope: ['src/'] });
+    const result = await deleteFile.execute(goal, { path: 'src/nope.ts' });
+    expect(result.ok).toBe(false);
+  });
+
+  it('refuses to delete a directory', async () => {
+    const { deleteFile } = createFileTools(sandboxRoot);
+    // Empty scope so the scope check is not what trips it — the directory guard is.
+    const goal = makeGoal({ scope: [] });
+    const result = await deleteFile.execute(goal, { path: 'src' });
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('is a directory');
+  });
+
+  it('refuses an empty path', async () => {
+    const { deleteFile } = createFileTools(sandboxRoot);
+    const goal = makeGoal({ scope: ['src/'] });
+    const result = await deleteFile.execute(goal, { path: '' });
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('non-empty string');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // search
 // ---------------------------------------------------------------------------
 

@@ -76,17 +76,19 @@ export class Broker {
       return this.#refuse(goal, call, `not granted: ${needed}`);
     }
 
-    // 3. For write_file and file_issue: check sandbox containment and goal scope
-    //    before touching the event log. An out-of-scope write is logged as
-    //    'refused' with a reason — not as 'ran' — so the audit trail is honest.
-    if (call.name === 'write_file') {
+    // 3. For write_file, delete_file, and file_issue: check sandbox containment
+    //    and goal scope before touching the event log. An out-of-scope mutation is
+    //    logged as 'refused' with a reason — not as 'ran' — so the audit trail is
+    //    honest. write_file and delete_file share the identical path-based check
+    //    (both take a relative `path` arg and mutate the repo).
+    if (call.name === 'write_file' || call.name === 'delete_file') {
       const rawPath = typeof call.args['path'] === 'string' ? call.args['path'] : '';
       const full = rawPath ? resolveSandboxPath(this.#root, rawPath) : null;
       if (full === null) {
-        return this.#refuse(goal, call, `write_file: path "${rawPath}" is outside the sandbox root`);
+        return this.#refuse(goal, call, `${call.name}: path "${rawPath}" is outside the sandbox root`);
       }
       if (!isInScope(rawPath, goal.scope)) {
-        return this.#refuse(goal, call, `write_file: path "${rawPath}" is outside the goal's declared scope`);
+        return this.#refuse(goal, call, `${call.name}: path "${rawPath}" is outside the goal's declared scope`);
       }
     }
 

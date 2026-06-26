@@ -8,7 +8,7 @@
  */
 
 import { normalize, isAbsolute, join, relative, dirname } from 'node:path';
-import { readFile, readdir, stat, writeFile as fsWriteFile, mkdir } from 'node:fs/promises';
+import { readFile, readdir, stat, writeFile as fsWriteFile, mkdir, unlink } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import type { Goal } from '../contract/goal.js';
 import type { ToolImpl } from '../contract/tool.js';
@@ -55,6 +55,7 @@ export function resolveSandboxPath(root: string, rawPath: string): string | null
 export function createFileTools(root: string): {
   readFile: ToolImpl;
   writeFile: ToolImpl;
+  deleteFile: ToolImpl;
   listDir: ToolImpl;
   search: ToolImpl;
   headSha: ToolImpl;
@@ -141,6 +142,67 @@ export function createFileTools(root: string): {
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         return { ok: false, output: `write_file: ${message}` };
+      }
+    },
+  };
+
+  // ── delete_file ───────────────────────────────────────────────────────────
+  // The write-side counterpart to write_file: it REMOVES a file. Same path
+  // safety (relative, in-sandbox, in-scope) and the same fs.write grant, because
+  // deleting is a mutation of the product/repo. Refuses directories — it removes
+  // exactly one file (the OKF close-out case: a now-implemented ephemeral issue).
+  // The broker re-checks sandbox containment and goal scope before dispatch, the
+  // same belt-and-braces it applies to write_file.
+
+  const deleteFileImpl: ToolImpl = {
+    def: {
+      name: 'delete_file',
+      description: 'Delete a single file inside the sandbox root, within the goal\'s declared scope. The path must be relative, in-scope, and name a file (not a directory). Use to remove an implemented ephemeral issue file as part of OKF close-out.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Relative path to the file to delete' },
+        },
+        required: ['path'],
+      },
+    },
+
+    async execute(goal: Goal, args: Record<string, unknown>): Promise<{ ok: boolean; output: string }> {
+      const rawPath = args['path'];
+      if (typeof rawPath !== 'string' || rawPath.length === 0) {
+        return { ok: false, output: 'delete_file: path must be a non-empty string' };
+      }
+
+      // Refuse absolute paths and traversal before scope check.
+      const full = resolveSandboxPath(root, rawPath);
+      if (full === null) {
+        return { ok: false, output: `delete_file: path "${rawPath}" is outside the sandbox root` };
+      }
+
+      // Scope check: the path must start with at least one of the goal's scope prefixes.
+      if (!isInScope(rawPath, goal.scope)) {
+        return {
+          ok: false,
+          output: `delete_file: path "${rawPath}" is outside the goal's declared scope`,
+        };
+      }
+
+      try {
+        const info = await stat(full);
+        if (info.isDirectory()) {
+          return { ok: false, output: `delete_file: "${rawPath}" is a directory; delete_file removes a single file only` };
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { ok: false, output: `delete_file: ${message}` };
+      }
+
+      try {
+        await unlink(full);
+        return { ok: true, output: `deleted ${rawPath}` };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { ok: false, output: `delete_file: ${message}` };
       }
     },
   };
@@ -310,6 +372,7 @@ export function createFileTools(root: string): {
   return {
     readFile: readFileImpl,
     writeFile: writeFileImpl,
+    deleteFile: deleteFileImpl,
     listDir: listDirImpl,
     search: searchImpl,
     headSha: headShaImpl,

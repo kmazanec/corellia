@@ -133,6 +133,10 @@ describe('GRANT_TOOL_MAP', () => {
     expect(GRANT_TOOL_MAP.write_file).toContain('fs.write');
   });
 
+  it('maps delete_file to fs.write', () => {
+    expect(GRANT_TOOL_MAP.delete_file).toContain('fs.write');
+  });
+
   it('maps run_script to test.run_scoped and test.run_impacted', () => {
     expect(GRANT_TOOL_MAP.run_script).toContain('test.run_scoped');
     expect(GRANT_TOOL_MAP.run_script).toContain('test.run_impacted');
