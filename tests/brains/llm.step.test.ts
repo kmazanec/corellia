@@ -67,6 +67,26 @@ function toolCallResponse(
   };
 }
 
+/**
+ * Build a wire step response whose tool_call carries a RAW arguments string —
+ * used to inject provider control-token contamination (`<｜DSML｜>`) that a real
+ * JSON.stringify would never produce, mirroring what GLM/DeepSeek leak on the
+ * structured-emit path.
+ */
+function rawArgsToolCallResponse(id: string, name: string, rawArguments: string) {
+  return {
+    choices: [
+      {
+        message: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [{ id, type: 'function', function: { name, arguments: rawArguments } }],
+        },
+      },
+    ],
+  };
+}
+
 /** Build a minimal wire step response with content-only (no tool_calls). */
 function contentResponse(content: string, usage?: { prompt_tokens: number; completion_tokens: number; cost?: number }) {
   return {
@@ -318,6 +338,27 @@ describe('step translation', () => {
     expect(result.calls[0]!.args).toEqual({ path: 'src/main.ts' });
     expect(result.calls[1]!.id).toBe('tc-def');
     expect(result.calls[1]!.name).toBe('write_file');
+  });
+
+  it('strips leaked provider control tokens (<｜…｜>) from tool-call arguments before parsing', async () => {
+    // Run live-self-a6963719 (slice C, run 14): the high model (GLM-5.2) leaked a
+    // `<｜DSML｜>` special token INTO the structured-emit tool-call arguments — not
+    // only the content fallback. The unstripped token rode inside a string value
+    // into the persisted RegionFacts artifact and failed a downstream JSON parse
+    // ("Unexpected token '<', \"<｜DSML｜too\"..."), collapsing the deep-dive to a
+    // null artifact and cascade-blocking its dependent build leaf. The strip must
+    // run on the tool-call args path so a contaminated-but-valid emit still parses.
+    const rawArgs = '<｜DSML｜tool｜>' + JSON.stringify({ region: 'src/engine', claim: 'ok' });
+    const wireBody = rawArgsToolCallResponse('tc-emit', 'emit_facts', rawArgs);
+    const { fetch } = stubFetch({ status: 200, body: wireBody });
+    const brain = new LlmBrain({ baseUrl: BASE, apiKey: KEY, modelByTier, fetchImpl: fetch });
+    const result = await brain.step(baseGoal, [{ role: 'context', content: 'sys' }], tools, ctx);
+
+    expect(result.kind).toBe('tool-calls');
+    if (result.kind !== 'tool-calls') throw new Error('unreachable');
+    expect(result.calls).toHaveLength(1);
+    expect(result.calls[0]!.name).toBe('emit_facts');
+    expect(result.calls[0]!.args).toEqual({ region: 'src/engine', claim: 'ok' });
   });
 
   it('returns {kind:artifact, files} when response is content-only with file blocks', async () => {

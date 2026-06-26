@@ -374,7 +374,14 @@ function translateStepResponse(
     for (const wc of toolCalls) {
       let args: Record<string, unknown>;
       try {
-        args = JSON.parse(wc.function.arguments) as Record<string, unknown>;
+        // Strip provider control-token contamination (see stripControlTokens)
+        // BEFORE parsing: GLM/DeepSeek leak `<｜DSML｜>`-style tokens into the
+        // tool-call arguments too, not only the content fallback below. A
+        // structured emit (e.g. a deep-dive's RegionFacts) arrives as tool-call
+        // args; an unstripped token either breaks this JSON.parse or rides inside
+        // a string value into the persisted artifact, failing a downstream
+        // JSON parse (run live-self-a6963719: `<｜DSML｜…` failed diveAnchorCheck).
+        args = JSON.parse(stripControlTokens(wc.function.arguments)) as Record<string, unknown>;
       } catch (_e) {
         return null;
       }
