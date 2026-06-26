@@ -2337,22 +2337,28 @@ export class Engine {
       // forced flag is consumed (a single forced emit per attempt) so we never loop
       // on it. This GUARANTEES the dive of a bounded region converges to an
       // artifact rather than read-looping to exhaustion.
-      const typeDefForForce = this.registry.get(goal.type);
       if (forceEmitNext) {
         forceEmitNext = false; // consume — one forced emit per attempt
+        // The force can be reached two ways: the read ceiling (after N reads) or
+        // the malform-recovery (possibly at read 0). Only mention the read count
+        // when there actually were reads, so the nudge is honest on either path.
+        const readCountPhrase =
+          exploreReadCalls > 0
+            ? `You have read enough (${exploreReadCalls} read-class calls). STOP reading. `
+            : '';
         transcript.push({
           role: 'context',
           content:
-            `You have read enough (${exploreReadCalls} read-class ` +
-            `calls). STOP reading. Emit the artifact NOW from what you have already ` +
+            readCountPhrase +
+            `Emit the artifact NOW from what you have already ` +
             `read — over-reading a bounded region is a failure, not thoroughness. ` +
-            (typeDefForForce.outputSchema !== undefined
+            (typeDef.outputSchema !== undefined
               ? 'Respond with ONLY the JSON object matching the required schema, no tool calls.'
               : 'Respond with ONLY the artifact as your message content, no tool calls.'),
         });
         const forceCtx: BrainContext =
-          typeDefForForce.outputSchema !== undefined
-            ? { ...ctx, outputSchema: typeDefForForce.outputSchema }
+          typeDef.outputSchema !== undefined
+            ? { ...ctx, outputSchema: typeDef.outputSchema }
             : ctx;
         let forcedOutput: import('../contract/brain.js').StepOutput;
         try {
@@ -2502,7 +2508,6 @@ export class Engine {
         // step), and use THAT call's artifact-kind text as the final artifact.
         // If the emit call returns tool-calls, treat as a failed step into the
         // existing control loop (return kind:'failed').
-        const typeDef = this.registry.get(goal.type);
         if (typeDef.outputSchema !== undefined) {
           // Exploration complete: append the emit instruction message.
           transcript.push({

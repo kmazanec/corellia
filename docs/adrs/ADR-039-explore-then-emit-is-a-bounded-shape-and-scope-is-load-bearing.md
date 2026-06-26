@@ -80,11 +80,12 @@ detector outside the loop. They overlap badly:
   force an emit when the leaf won't self-bound. Each is the engine cleaning up after
   an under-constrained call.
 
-If the explore-then-emit leaf were one *bounded primitive* — a hard, family-agnostic
-read-class cap feeding the existing eviction, then a deterministic transition to the
-emit phase — the seven mechanisms collapse to roughly three (the bounded
-explore→emit primitive; eviction + dup-guard; the dollar ceiling), and the
-isomorphic detector returns to catching genuine logical non-convergence.
+The audit's first read was that, with the bound generalized, the seven mechanisms
+collapse to roughly three. A conservative pre-refactor pass (decision 3) found this
+over-optimistic: the mechanisms each own a distinct behavior (count-bound vs
+byte-bound vs format-incident) and are not made redundant by the upstream fix — what
+the upstream fix removes is the *family-accident*, not the downstream enforcement. The
+big collapse is deferred; see decision 3.
 
 ### Finding 3 — scope was never made load-bearing
 
@@ -164,14 +165,39 @@ be redundant machinery and risks the "I can't access the repo, please paste it"
 failure the comprehend skill warns against. The canonical fix (a real region + an
 economy bound) makes the retrieval-scope plumbing unnecessary.
 
-### 3. Collapse the redundant step-loop mechanisms
+### 3. Simplify the step loop where it is provably behavior-preserving — and DEFER the big collapse
 
-With the bound generalized: `MalformedStepError` recovery and the read-ceiling both
-become the same explore→emit transition; `forceEmitNext` folds into that edge; and
-the two isomorphic-detector guards (which only existed to stop it misfiring on
-over-read/malform) are removed, returning the detector to genuine non-convergence.
-The net is fewer mechanisms doing clearer work — the simplification is part of the
-decision, not a follow-on.
+The original framing of this ADR (and the engine audit) said the seven step-loop
+mechanisms collapse to ~3 once the root cause is fixed. **On close pre-refactor
+inspection, that was too optimistic, and we deliberately did NOT do the big collapse.**
+What looked like "a patch guarding a patch" is, on inspection, three mechanisms each
+owning a *distinct, load-bearing* behavior that the upstream fix does not make dead:
+
+- **The read-ceiling** bounds the *count* of reads (force emit after N).
+- **The malform-recovery** is NOT redundant with it: it does **truncation-pre-eviction**
+  — the only eviction that runs before a forced emit on the size-truncation path,
+  because the forced-emit block runs before the top-of-loop eviction — AND it owns the
+  distinct `step-loop:malformed` failure signature that *prevents* a format incident
+  from colliding with a logical `step-loop:failed` in the isomorphic detector.
+- **The eviction (ADR-036)** bounds the *bytes* already read — orthogonal to the count
+  ceiling.
+
+The isomorphic-detector "guards" cannot be removed without removing the mechanisms
+they live in, and those mechanisms carry unique behavior. The full "one bounded
+explore→emit primitive" rewrite is justified by *readability, not correctness* — the
+mechanisms are correct today — so it is a **RISKY-DEFER**, to be done (if at all) as
+one deliberate, test-green restructure, never piecemeal.
+
+What we DID do, because it is genuinely behavior-preserving: dedup the redundant
+`this.registry.get(goal.type)` re-fetches inside `runStepLoop` to the single bound
+`typeDef`, and fix the forced-emit nudge so it does not claim "you have read enough
+(0 read-class calls)" when the force was reached via the malform path at read 0.
+The lesson recorded here: the root-cause fix bounds the *cause* (unbounded explore),
+but the downstream mechanisms are precisely what *enforce* the bound — they are not
+made redundant by fixing the cause. Deleting them to lower a mechanism count would
+lose real behavior. The deletion of complexity in this ADR is the family-accident
+removal (decision 1) and the per-type scope contract (decision 2), not a step-loop
+rewrite.
 
 ## Alternatives Considered
 
@@ -216,8 +242,13 @@ described ("per touched region, never re-learning the repo"). Keying the bound o
 the type's shape — not a family string — is the same principle as the granularity
 rule itself: behavior follows the material harness property, not the label.
 
-It is also a net *deletion* of complexity, which is the strongest evidence it is the
-right cut: a correct root-cause fix makes the surrounding patches unnecessary.
+It is also a net *deletion* of complexity — but a precise one: the deletion is the
+family-accident (decision 1) and the per-type scope contract replacing a would-be
+universal check (decision 2), NOT a rewrite of the step loop. A conservative pass
+(decision 3) found the step-loop mechanisms are correct and each load-bearing, so the
+discipline was to simplify only what is provably behavior-preserving and leave the
+rest correct — the right cut removes accidental coupling without churning a working
+hot path.
 
 ## Tradeoffs & Risks
 
