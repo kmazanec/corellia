@@ -51,7 +51,7 @@ import {
   criterionToCheck,
   type AcceptanceCriterion,
 } from '../library/acceptance-criteria.js';
-import type { KnowledgeArtifact } from '../contract/knowledge.js';
+import type { KnowledgeArtifact, RegionFacts } from '../contract/knowledge.js';
 import {
   coverageCheck,
   type KnowledgeForCoverage,
@@ -382,6 +382,19 @@ export interface EngineOptions {
      * passing learn leaf emits exactly as before (no knowledge event appended).
      */
     persist?: (goal: Goal, artifact: Artifact) => Promise<void>;
+    /**
+     * The dive→build knowledge handoff (ADR-040). Return the FULL RegionFacts a
+     * deep-dive-region produced for any region overlapping `scope` — the actual
+     * anchored claims, not the existence-only `CoverageRegionFact` that `query`
+     * returns for the coverage gate. The spawner adapts these into MemoryPointers
+     * and injects them into a dependent builder, so a leaf that changes a region
+     * starts WITH the comprehension a dependency dive already produced, instead of
+     * re-reading the region from scratch (run live-self-4793fc14: a builder read 147
+     * files the dives had already understood because nothing fed their facts forward
+     * — DESIGN.md "findings injected by the spawner like any other memory").
+     * Optional: when absent, no dive facts are injected (behavior as before).
+     */
+    factsForRegions?: (repoRoot: string, scope: string[]) => Promise<RegionFacts[]>;
     /**
      * Does a scope region correspond to EXISTING code in the working tree?
      * The coverage gate's relevance signal (ADR-029 Decision 2): a region that
@@ -1347,6 +1360,44 @@ export class Engine {
     const persist = this.knowledge?.persist;
     if (persist === undefined) return;
     await persist(goal, artifact);
+  }
+
+  /**
+   * The dive→build knowledge handoff (ADR-040). Pull the RegionFacts a dependency
+   * deep-dive produced for regions overlapping `scope` and adapt each anchored fact
+   * into a `MemoryPointer` (pointers, not bodies: the claim + its `path:line`
+   * anchors, never file contents). Freshness gates provenance: a fact whose dive
+   * SHA matches HEAD reads as `trusted`; a drifted one reads as `provisional` (a
+   * suggestion to weigh — verify-on-read, ADR-019). Returns [] when the wiring or
+   * repo root is absent (behavior as before this ADR).
+   */
+  private async diveFactsAsMemories(
+    repoRoot: string,
+    scope: string[],
+    headSha: string,
+  ): Promise<MemoryPointer[]> {
+    const factsForRegions = this.knowledge?.factsForRegions;
+    if (factsForRegions === undefined || repoRoot.length === 0) return [];
+    let regionFacts: RegionFacts[];
+    try {
+      regionFacts = await factsForRegions(repoRoot, scope);
+    } catch {
+      return [];
+    }
+    const pointers: MemoryPointer[] = [];
+    for (const rf of regionFacts) {
+      const fresh = headSha.length > 0 && rf.generatedAtSha === headSha;
+      rf.facts.forEach((f, i) => {
+        const anchors = f.anchors.map((a) => `${a.path}:${a.line}`).join(', ');
+        pointers.push({
+          id: `dive:${rf.region}#${i}`,
+          layer: 'project',
+          content: anchors.length > 0 ? `${f.claim} — ${anchors}` : f.claim,
+          provenance: fresh ? 'trusted' : 'provisional',
+        });
+      });
+    }
+    return pointers;
   }
 
   // ── ATTEMPT LOOP (the control loop) ──────────────────────────────────────
@@ -3478,9 +3529,28 @@ export class Engine {
     const shares = children.map((c) => c.budgetShare);
     const budgets = subdivide(goal.budget, shares);
 
-    // Build child goals, injecting memories via memory.query (spawner-mediated)
+    // The dive→build knowledge handoff (ADR-040): resolve the repo root + HEAD SHA
+    // once, so each child's spawn can also pull the RegionFacts a dependency dive
+    // produced for its scope and inject them as memory pointers. repoRoot is derived
+    // the same way as the comprehend-merge checkpoint below.
+    const spawnSpecRepoRoot = (goal.spec as Record<string, unknown>)['repoRoot'];
+    const spawnRepoRoot =
+      this._activeAssembly?.worktree.repoRoot ??
+      (typeof spawnSpecRepoRoot === 'string' ? spawnSpecRepoRoot : '');
+    let spawnHeadSha = '';
+    if (this.knowledge?.headSha !== undefined && spawnRepoRoot.length > 0) {
+      try {
+        spawnHeadSha = await this.knowledge.headSha(spawnRepoRoot);
+      } catch {
+        spawnHeadSha = '';
+      }
+    }
+
+    // Build child goals, injecting memories via memory.query (spawner-mediated) AND
+    // the dive facts a dependency comprehension already produced for the child's scope.
     const childGoals: Goal[] = await Promise.all(children.map(async (child, i) => {
       const childMemories = await this.memory.query(child.title, child.scope);
+      const diveMemories = await this.diveFactsAsMemories(spawnRepoRoot, child.scope, spawnHeadSha);
       let childBudget = budgets[i] ?? {
         attempts: 1,
         tokens: 1,
@@ -3503,7 +3573,7 @@ export class Engine {
         intent: child.intent ?? goal.intent,
         scope: child.scope,
         budget: childBudget,
-        memories: childMemories,
+        memories: [...childMemories, ...diveMemories],
         ...(goal.spendCeilingUsd !== undefined ? { spendCeilingUsd: goal.spendCeilingUsd } : {}),
       };
     }));

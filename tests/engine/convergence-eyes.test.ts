@@ -180,6 +180,9 @@ describe('convergence-eyes — full-stack scripted path', () => {
     const sha = headSha(repo);
     const store = new MemoryEventStore();
     const cursors = makeCursors();
+    // ADR-040: capture the implement leaf's injected memories to prove the dive→build
+    // handoff — the code leaf should receive the dive's RegionFacts as memory.
+    let capturedImplMemories: readonly { content: string }[] = [];
 
     const sandbox: SandboxConfig = { repoRoot: repo, declaredScripts: { test: 'check.mjs' }, knowledge: true };
     const registry = buildRegistry([
@@ -242,6 +245,7 @@ describe('convergence-eyes — full-stack scripted path', () => {
         }
         // implement code leaf: step 0 = impact (BEFORE any write), step 1 =
         // write the fix + run the test (green), step 2 = emit.
+        if (goal.type === 'implement') capturedImplMemories = goal.memories;
         if (i === 0) {
           return { kind: 'tool-calls', calls: [{ id: 'imp', name: 'impact', args: { files: ['src/b.ts'] } }], usage: USAGE };
         }
@@ -326,6 +330,12 @@ describe('convergence-eyes — full-stack scripted path', () => {
     );
     expect(lastKnowledgeIdx).toBeGreaterThanOrEqual(0);
     expect(lastKnowledgeIdx).toBeLessThan(firstWriteIdx);
+
+    // ── ADR-040: the dive→build handoff — the code leaf received the dive's facts ─
+    // as injected memory (so it starts WITH the comprehension, not re-reading it).
+    const diveMem = capturedImplMemories.find((m) => m.content.includes('a imports b'));
+    expect(diveMem).toBeDefined();
+    expect(diveMem!.content).toContain('src/a.ts:1'); // claim + anchor, pointers not bodies
 
     // ── the code leaf consulted impact() BEFORE its first write_file ─────────
     const codeToolCalls = events.filter((e) => e.type === 'tool-call' && e.goalId === 'conv/code');

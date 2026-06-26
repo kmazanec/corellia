@@ -432,6 +432,19 @@ function buildRetrievalDeps(
  * coverage gate consumes: the latest artifact per category for `repoRoot`, every
  * region dive for that repo, and the supplied current HEAD `headSha`.
  */
+/** Does a dived `region` overlap any entry in a child's `scope`? (ADR-040 handoff:
+ *  a dive of `src/engine` is relevant to a builder scoped to `src/engine/foo.ts`,
+ *  and vice versa.) Trailing slashes are normalized; nesting either way counts. */
+function regionOverlapsScope(region: string, scope: string[]): boolean {
+  const norm = (p: string): string => p.replace(/\/+$/, '');
+  const rn = norm(region);
+  if (rn === '') return true; // a whole-repo dive is relevant to everything
+  return scope.some((s) => {
+    const sn = norm(s);
+    return rn === sn || rn.startsWith(`${sn}/`) || sn.startsWith(`${rn}/`);
+  });
+}
+
 function projectCoverageKnowledge(
   events: import('../contract/events.js').FactoryEvent[],
   repoRoot: string,
@@ -632,6 +645,20 @@ export function assembleKnowledgeWiring(
       defaultMintComprehension(config.repoRoot, missing),
     persist: (goal: Goal, artifact: Artifact): Promise<void> =>
       persistLearnArtifact(store, registry, goal, artifact),
+    factsForRegions: async (repoRoot: string, scope: string[]): Promise<RegionFacts[]> => {
+      // The dive→build handoff (ADR-040): return the FULL RegionFacts (anchored
+      // claims, not the existence-only CoverageRegionFact `query` returns) for any
+      // dived region overlapping `scope`. Same projection `projectCoverageKnowledge`
+      // reads (view.diveFacts), but without stripping the facts.
+      const view = projectKnowledge(await store.list());
+      const out: RegionFacts[] = [];
+      for (const [, facts] of view.diveFacts) {
+        if (facts.repoRoot !== repoRoot) continue;
+        if (scope.length > 0 && !regionOverlapsScope(facts.region, scope)) continue;
+        out.push(facts);
+      }
+      return out;
+    },
     regionExists: (repoRoot: string, region: string): boolean => {
       // ADR-029 Decision 2 relevance signal: a region exists if its path is
       // present in the working tree. An empty region (whole-repo intent) is the

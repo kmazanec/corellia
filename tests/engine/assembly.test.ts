@@ -441,6 +441,35 @@ describe('assembly — knowledge wiring', () => {
     expect(after.artifacts.map((a) => a.category)).toContain('conventions');
   });
 
+  it('factsForRegions returns the FULL dive facts for an overlapping scope (ADR-040 handoff)', async () => {
+    const repo = makeTempRepo();
+    const store = new MemoryEventStore();
+    const registry = buildRegistry(rebindKnowledgeScan(starterTypes()));
+    const wiring = assembleKnowledgeWiring({ repoRoot: repo, declaredScripts: {}, knowledge: true }, store, registry);
+    const head = await wiring.headSha(repo);
+
+    // A deep-dive persists RegionFacts for src/engine.
+    const rf: RegionFacts = {
+      repoRoot: repo,
+      region: 'src/engine',
+      generatedAtSha: head,
+      facts: [{ claim: 'collectTree fires at the assembly emit boundary', anchors: [{ path: 'src/engine/engine.ts', line: 638 }], sha: head, confidence: 'high' }],
+    };
+    await wiring.persist!(makeGoal({ id: 'g-dive', type: 'deep-dive-region' }), { kind: 'text', text: JSON.stringify(rf) });
+    expect(await store.list({ type: 'knowledge-facts-written' })).toHaveLength(1);
+
+    // A builder scoped to src/engine/ gets the FULL facts (claim + anchors), unlike
+    // query() which strips to existence-only.
+    const relevant = await wiring.factsForRegions!(repo, ['src/engine/']);
+    expect(relevant).toHaveLength(1);
+    expect(relevant[0]!.facts[0]!.claim).toContain('collectTree');
+    expect(relevant[0]!.facts[0]!.anchors[0]!.path).toBe('src/engine/engine.ts');
+
+    // A builder scoped to an UNRELATED region gets nothing (scope-filtered).
+    const unrelated = await wiring.factsForRegions!(repo, ['docs/issues/']);
+    expect(unrelated).toHaveLength(0);
+  });
+
   it('persist is a no-op for non-learn goals and malformed artifacts', async () => {
     const repo = makeTempRepo();
     const store = new MemoryEventStore();
