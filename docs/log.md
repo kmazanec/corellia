@@ -16,6 +16,19 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-25
 
+- **ADR-037 — degraded dependency does not cascade-block** (the run-#9 fix). The
+  dependency cascade (`src/engine/engine.ts`) gated on "does this dependency have a
+  blocker"; it now gates on the dependency's **artifact**: a dependency that blocked
+  but still produced a usable partial (run #9's `dive-tests` merged a valid
+  `RegionFacts` despite one sub-dive's coverage nit) no longer hard-blocks its
+  dependents — they proceed on the partial, the blocker is carried forward as a
+  finding, and a `dependency-degraded` event records the decision. Only a dependency
+  that produced **nothing** (`artifact === null`) still hard-blocks. Closes the
+  cascade half of [comprehension-oversplit-cascade](issues/comprehension-oversplit-cascade.md)
+  and the upstream half of [partial-delivery-on-blocked-dependency](issues/partial-delivery-on-blocked-dependency.md);
+  unblocks slice C. Tests: `tests/engine/engine.test.ts` (degraded + fatal cases).
+  The comprehension **over-split** itself is deferred (ADR-037 makes it non-fatal,
+  not absent). Next: re-commission slice C through the factory.
 - **Build run #9** (`live-self-76943fcd`, $0.48) — re-proved ADR-036 on slice C.
   **ADR-036 held**: the comprehension leaf that DID run (`dive-src-engine`, 34
   reads) stayed bounded at **74K tokens (run #8 ballooned to 117K), eviction fired

@@ -362,6 +362,125 @@ describe('split with dependency chain', () => {
     // Parent report has blockers from A (and B is blocked by A)
     expect(report.blockers.length).toBeGreaterThan(0);
   });
+
+  // ── ADR-037 — degraded dependency does not cascade-block ──────────────────
+  it('a dependency that blocked but produced a usable artifact does NOT block its dependent — it proceeds on the partial', async () => {
+    const store = new MemoryEventStore();
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'splitter' }),
+      leafTypeDef({ name: 'leaf' }),
+      // A leaf that always fails its deterministic gate → blocks with no artifact.
+      leafTypeDef({
+        name: 'failleaf',
+        deterministic: [alwaysFailCheck()],
+        tier: { default: 'low', ladder: ['low'] }, // single rung → exhausts after one attempt
+      }),
+    ]);
+
+    // A is itself a split: A1 (leaf, produces files → passes) + A2 (failleaf → blocks).
+    // A's merged report therefore carries BOTH a non-null files artifact AND A2's
+    // blocker — the "blocked but usable partial" shape this ADR cares about.
+    // B depends on A and must still run.
+    const executionOrder: string[] = [];
+    const brain = rawBrain({
+      async decide(goal) {
+        if (goal.id === 'root') {
+          return {
+            kind: 'split',
+            children: [
+              { localId: 'a', type: 'splitter', title: 'dive (partial)', spec: {}, dependsOn: [], scope: [], budgetShare: 0.5 },
+              { localId: 'b', type: 'leaf', title: 'builder (depends on dive)', spec: {}, dependsOn: ['a'], scope: [], budgetShare: 0.5 },
+            ],
+          };
+        }
+        if (goal.id === 'root/a') {
+          return {
+            kind: 'split',
+            children: [
+              { localId: 'a1', type: 'leaf', title: 'sub-dive that ran', spec: {}, dependsOn: [], scope: [], budgetShare: 0.5 },
+              { localId: 'a2', type: 'failleaf', title: 'sub-dive that blocked', spec: {}, dependsOn: [], scope: [], budgetShare: 0.5 },
+            ],
+          };
+        }
+        throw new Error(`unexpected decide for ${goal.id}`);
+      },
+      async produce(goal) {
+        executionOrder.push(goal.id);
+        if (goal.id === 'root/a/a1') return filesArtifact([{ path: 'facts.md', content: 'partial region facts' }]);
+        if (goal.id === 'root/a/a2') return textArtifact('will-fail-gate');
+        if (goal.id === 'root/b') return filesArtifact([{ path: 'impl.ts', content: 'built on partial knowledge' }]);
+        throw new Error(`unexpected produce for ${goal.id}`);
+      },
+      async judge() { return passVerdict(); },
+      async repair(_g, a) { return a; },
+    });
+
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const goal = makeGoal({ type: 'splitter', id: 'root', budget: { attempts: 1, tokens: 1000, toolCalls: 5, wallClockMs: 60000 } });
+    const report = await engine.run(goal);
+
+    // The builder B RAN despite its dependency A having a blocker (A2's gate failure).
+    expect(executionOrder).toContain('root/b');
+
+    // A `dependency-degraded` event was emitted for B, naming A as the degraded dep.
+    const degraded = await store.list({ type: 'dependency-degraded' });
+    expect(degraded.length).toBeGreaterThan(0);
+    const ev = degraded[0]!;
+    expect(ev.type === 'dependency-degraded' && ev.goalId).toBe('root/b');
+    expect(ev.type === 'dependency-degraded' && ev.dependency).toBe('root/a');
+
+    // B never emitted the "blocked because a dependency failed" report — it built.
+    // The tree still surfaces A2's blocker honestly (degraded delivery, not silent).
+    expect(report.blockers.length).toBeGreaterThan(0);
+    // B's own files reached the merged artifact (it built on the partial).
+    const files = report.artifact?.kind === 'files' ? report.artifact.files.map((f) => f.path) : [];
+    expect(files).toContain('impl.ts');
+  });
+
+  it('a dependency that blocked with NO artifact still hard-blocks its dependent (fatal, unchanged)', async () => {
+    const store = new MemoryEventStore();
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'splitter' }),
+      leafTypeDef({
+        name: 'leaf',
+        deterministic: [alwaysFailCheck()],
+        tier: { default: 'low', ladder: ['low'] },
+      }),
+    ]);
+
+    const executionOrder: string[] = [];
+    const brain = rawBrain({
+      async decide(goal) {
+        if (goal.id === 'root') {
+          return {
+            kind: 'split',
+            children: [
+              { localId: 'a', type: 'leaf', title: 'dep that produces nothing', spec: {}, dependsOn: [], scope: [], budgetShare: 0.5 },
+              { localId: 'b', type: 'leaf', title: 'dependent', spec: {}, dependsOn: ['a'], scope: [], budgetShare: 0.5 },
+            ],
+          };
+        }
+        throw new Error(`unexpected decide for ${goal.id}`);
+      },
+      async produce(goal) {
+        executionOrder.push(goal.id);
+        return textArtifact('a-broken'); // A's gate fails → A blocks with artifact:null
+      },
+      async judge() { return passVerdict(); },
+      async repair(_g, a) { return a; },
+    });
+
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const goal = makeGoal({ type: 'splitter', id: 'root', budget: { attempts: 1, tokens: 1000, toolCalls: 5, wallClockMs: 60000 } });
+    const report = await engine.run(goal);
+
+    // B never ran — it was hard-blocked because A produced no usable artifact.
+    expect(executionOrder).not.toContain('root/b');
+    // No degraded event — this is the fatal path, not the degraded one.
+    const degraded = await store.list({ type: 'dependency-degraded' });
+    expect(degraded).toHaveLength(0);
+    expect(report.blockers.length).toBeGreaterThan(0);
+  });
 });
 
 // ── 6. Budget subdivision sums + exhaustion → block ──────────────────────

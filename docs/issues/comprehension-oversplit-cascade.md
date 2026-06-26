@@ -4,12 +4,25 @@ title: "Comprehension over-splits a modest region into fragile sub-dives; one bl
 description: A deep-dive of `tests/` split into 4 sub-dives where 1 would do; one sub-dive blocked on a coverage nit, failing the parent dive, which then hard-blocked the implement leaves that depended on it before they ever ran.
 tags: [engine, comprehend, over-split, dependency-cascade, partial-delivery]
 timestamp: 2026-06-26
-status: open
+status: fixed
 kind: bug
 severity: high
 ---
 
 # Comprehension over-splits a modest region into fragile sub-dives; one blocks and cascade-starves the implement leaves
+
+> **Fixed by [ADR-037](../adrs/ADR-037-degraded-dependency-not-cascade-block.md)
+> (the cascade half), pending live re-proof.** The cascade at `engine.ts` now gates
+> on the dependency's *artifact*, not on the mere presence of a blocker: a
+> dependency that blocked but produced a usable partial (`dive-tests`'s merged
+> `RegionFacts`) no longer hard-blocks its dependents — the implement leaves proceed
+> on the partial knowledge, and the blocker is carried forward as a finding + a
+> `dependency-degraded` event. The **over-split** angle (angle 1 below) is *not*
+> fixed here — it is deferred as a separate comprehension-scoping tuning, because
+> ADR-037 makes the over-split non-fatal rather than preventing it. Re-prove by
+> re-commissioning slice C; if a live run shows the over-split is still wasteful
+> (even though no longer fatal), file the scoping tuning then. Covered by
+> `tests/engine/engine.test.ts` (the ADR-037 degraded/fatal cascade cases).
 
 ## Problem
 Two compounding behaviours turn a small comprehension nit into a whole-tree block:

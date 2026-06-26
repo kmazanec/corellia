@@ -78,6 +78,12 @@ export type FactoryEvent =
   | { type: 'malformation-reprompt'; at: number; goalId: string; detail: string }
   /** Raw tool reads were compressed to bound a leaf's working memory (ADR-036). */
   | { type: 'context-evicted'; at: number; goalId: string; detail: string }
+  /**
+   * A dependency blocked but produced a usable partial artifact, so the dependent
+   * proceeds on that partial knowledge instead of cascade-blocking (ADR-037).
+   * The dependency's blocker is carried forward as a finding, not a hard gate.
+   */
+  | { type: 'dependency-degraded'; at: number; goalId: string; dependency: string; blocker: string }
   /** A knowledge artifact was produced and appended — project memory's write path (ADR-019). */
   | { type: 'knowledge-written'; at: number; goalId: string; artifact: KnowledgeArtifact }
   /** A deep-dive's anchored region facts were appended — keeps dive output evented (ADR-003/ADR-019). */

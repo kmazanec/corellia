@@ -3328,7 +3328,8 @@ export class Engine {
       const child = children[i]!;
       const childGoal = childGoals[i]!;
 
-      const depPromises = child.dependsOn.map((depLocalId) => {
+      const depLocalIds = child.dependsOn.slice();
+      const depPromises = depLocalIds.map((depLocalId) => {
         const p = reportMap.get(depLocalId);
         if (!p) throw new Error(`Dependency "${depLocalId}" not found — this should have been caught in validateSplit`);
         return p;
@@ -3340,11 +3341,28 @@ export class Engine {
           // Await all dependencies
           const depReports = await Promise.all(depPromises);
 
-          // If any dependency failed or blocked, this child is blocked too
-          const failedDep = depReports.find((r) => r.blockers.length > 0);
-          if (failedDep) {
+          // Dependency cascade with degraded delivery (ADR-037).
+          //
+          // A dependency that BLOCKED hard-blocks this child ONLY when it produced
+          // NOTHING (`artifact === null`) — a builder that truly needs a
+          // comprehension/result that never materialised must not run blind. But a
+          // dependency that blocked yet still produced a USABLE artifact (a partial
+          // comprehension, a green subtree) is degraded, not absent: this child
+          // proceeds on that partial knowledge. The dependency's blocker is carried
+          // forward as a FINDING (so it surfaces honestly at the root, never
+          // silently dropped) rather than propagated as a hard gate.
+          //
+          // Why this is the fix for the over-split cascade (run #9): one sub-dive
+          // blocked on a coverage nit, but `dive-tests` still merged a valid
+          // RegionFacts artifact from the sub-dive that ran. Under the old rule the
+          // implement leaves were hard-blocked before executing a single step;
+          // under this rule they proceed on the partial dive knowledge.
+          const fatalDep = depReports.find(
+            (r) => r.blockers.length > 0 && r.artifact === null,
+          );
+          if (fatalDep) {
             const report = blockedReport(
-              `Blocked because a dependency failed: ${failedDep.blockers[0] ?? 'unknown'}`,
+              `Blocked because a dependency failed without producing any usable artifact: ${fatalDep.blockers[0] ?? 'unknown'}`,
             );
             await this.store.append({
               type: 'emitted',
@@ -3355,8 +3373,33 @@ export class Engine {
             return report;
           }
 
+          // Record each degraded dependency (blocked but produced a partial) so the
+          // proceed-on-partial decision is observable in the event log, and thread
+          // its blocker forward as a finding on this child.
+          const degradedFindings: string[] = [];
+          for (let d = 0; d < depReports.length; d++) {
+            const dep = depReports[d]!;
+            if (dep.blockers.length > 0 && dep.artifact !== null) {
+              const blocker = dep.blockers[0] ?? 'unknown';
+              await this.store.append({
+                type: 'dependency-degraded',
+                at: t(),
+                goalId: childGoal.id,
+                dependency: `${goal.id}/${depLocalIds[d]!}`,
+                blocker,
+              });
+              degradedFindings.push(
+                `Proceeded on a degraded dependency (${depLocalIds[d]!}) that blocked but produced a usable partial: ${blocker}`,
+              );
+            }
+          }
+
           // Run the child through the engine (shares the tree-scoped accumulator)
-          return await this._run(childGoal, treeState);
+          const ran = await this._run(childGoal, treeState);
+          if (degradedFindings.length > 0) {
+            return { ...ran, findings: [...ran.findings, ...degradedFindings] };
+          }
+          return ran;
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           const report = blockedReport(`child threw: ${msg}`);

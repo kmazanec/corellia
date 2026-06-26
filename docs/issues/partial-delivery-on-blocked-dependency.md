@@ -11,6 +11,16 @@ severity: medium
 
 # A5. A blocked dependency silently kills its dependents with no degraded path
 
+> **Upstream half fixed by [ADR-037](../adrs/ADR-037-degraded-dependency-not-cascade-block.md).**
+> A dependency that blocked but produced a usable partial artifact no longer
+> hard-blocks its dependents — they proceed on the partial (the run-#9 cascade
+> source). What **remains open** is the *downstream* half (the original tiutni
+> Run-1 evidence): when children genuinely block and produce nothing, the root
+> still has no "collect the green subtree and open a PR for it" ship-what's-green
+> mode. That root-level collect behavior is this issue's remaining scope; ADR-037
+> only stopped manufacturing blocked dependents from partials. Severity dropped to
+> the remaining downstream concern.
+
 ## Problem
 Dependency edges are hard gates; there is no "ship what's green, report the rest"
 partial-delivery mode. A blocked dependency takes down its dependents and the root,
