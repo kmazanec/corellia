@@ -18,7 +18,7 @@
  */
 
 import type { Brain, BrainContext, StepOutput, StepTranscript } from '../contract/brain.js';
-import { MalformedStepError } from '../contract/brain.js';
+import { MalformedStepError, StepTransportError } from '../contract/brain.js';
 import type { Goal, Metered, TransportIncident, Usage } from '../contract/goal.js';
 import { ZERO_USAGE } from '../contract/goal.js';
 import type { Tier } from '../contract/goal.js';
@@ -1215,7 +1215,16 @@ export class LlmBrain implements Brain {
             attempt++;
             continue;
           }
-          throw networkErr;
+          // Retries exhausted on a transport incident (canonically a timeout that
+          // aborted MAX_RETRIES times). Surface it as a typed StepTransportError so
+          // the engine does NOT misclassify a flaky/slow endpoint as a logical
+          // step-loop:failed and isomorphic-block the leaf (observed run
+          // live-self-6060bbf1: an author leaf's step timed out → terminal block).
+          throw new StepTransportError(
+            isTimeout
+              ? `Step request timed out and did not recover after ${MAX_RETRIES} retries`
+              : `Step request failed as a transport error after ${MAX_RETRIES} retries: ${String(networkErr)}`,
+          );
         }
 
         if (response.ok) {

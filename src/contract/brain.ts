@@ -143,6 +143,25 @@ export class MalformedStepError extends Error {
 }
 
 /**
+ * Thrown by `brain.step` when a step's provider request fails as a TRANSPORT
+ * incident that survived the adapter's own retries — canonically a request that
+ * timed out (the abort fired) MAX_RETRIES times, or a retryable network error that
+ * never recovered. This is NOT a logical failure: the leaf's work is fine; the
+ * endpoint was unreachable/slow. The engine catches it `instanceof` so a transport
+ * incident does not count toward the `step-loop:failed` isomorphic signature as if
+ * it were non-convergence (which would terminal-block a leaf on a flaky provider).
+ * It gets a distinct `step-loop:transport` signature and is left for the attempt
+ * ladder to retry on a (possibly healthier) endpoint. Lives in the contract
+ * (ADR-002) so the engine identifies it without reaching into the adapter.
+ */
+export class StepTransportError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StepTransportError';
+  }
+}
+
+/**
  * The brain interface. Four classic methods are the LLM-driven moments of the
  * factory — decide, produce, judge, repair — each returning its value paired
  * with provider-reported {@link Metered} usage. The fifth, `step`, is the pure

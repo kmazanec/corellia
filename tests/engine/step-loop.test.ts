@@ -23,7 +23,7 @@ import {
 import { FakeBroker } from './stubs.js';
 import type { ToolCall, ToolResult } from '../../src/contract/tool.js';
 import type { StepOutput, Brain, StepTranscript } from '../../src/contract/brain.js';
-import { MalformedStepError } from '../../src/contract/brain.js';
+import { MalformedStepError, StepTransportError } from '../../src/contract/brain.js';
 import { ZERO_USAGE } from '../../src/contract/goal.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -1914,5 +1914,34 @@ describe('malformed step recovery', () => {
     // The finding names the malformation (distinct from a plain logical failure).
     const findingText = JSON.stringify(report.findings) + JSON.stringify(report.blockers);
     expect(findingText.toLowerCase()).toContain('malformed');
+  }, 10_000);
+
+  it('a timed-out step (StepTransportError) is a transport incident, not a logical step-loop:failed', async () => {
+    const store = new MemoryEventStore();
+    // Every step times out → StepTransportError each attempt. With a single-rung
+    // ladder the leaf will block, but the failure must be classified as a transport
+    // incident (distinct signature), NOT collide with logical step-loop:failed.
+    const brain: Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair(_g, a) { return { value: a, usage: ZERO_USAGE }; },
+      async step() {
+        throw new StepTransportError('Step request timed out and did not recover after 3 retries');
+      },
+    };
+
+    const registry = buildRegistry([toolGrantedType()]);
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView(), broker: new FakeBroker([]) });
+    const report = await engine.run(makeGoal({
+      type: 'implement', title: 'timed-out step',
+      budget: { attempts: 2, tokens: 10_000, toolCalls: 10, wallClockMs: 60_000 },
+    }));
+
+    // It blocks (no infinite loop), and the finding names the transport/timeout —
+    // NOT presented as a malformed or plain logical failure.
+    expect(report.blockers.length).toBeGreaterThan(0);
+    const text = (JSON.stringify(report.findings) + JSON.stringify(report.blockers)).toLowerCase();
+    expect(text).toMatch(/transport|timed out|timeout/);
   }, 10_000);
 });

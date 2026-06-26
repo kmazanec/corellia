@@ -21,7 +21,7 @@ import type { Artifact, Report } from '../contract/report.js';
 import type { Verdict, Finding } from '../contract/verdict.js';
 import type { EventStore } from '../contract/events.js';
 import type { Brain, BrainContext, StepTranscript } from '../contract/brain.js';
-import { MalformedStepError } from '../contract/brain.js';
+import { MalformedStepError, StepTransportError } from '../contract/brain.js';
 import type { Registry, GoalTypeDef } from '../contract/goal-type.js';
 import type { MemoryView } from '../contract/memory.js';
 import type { RiskClass, SensitivityFact } from '../contract/risk.js';
@@ -1481,11 +1481,11 @@ export class Engine {
                 gating: true,
               },
             ],
-            // A malformation that survived the one forced-emit recovery gets a
-            // DISTINCT signature (`step-loop:malformed`) so it neither collides with
-            // a genuine logical `step-loop:failed` in the isomorphic detector nor
-            // masquerades as non-convergence.
-            failureSignature: `step-loop:${loopResult.kind === 'failed' && loopResult.failKind === 'malformed' ? 'malformed' : loopResult.kind}`,
+            // A non-logical step incident gets a DISTINCT signature (`step-loop:malformed`
+            // for a format incident, `step-loop:transport` for a timed-out/flaky-endpoint
+            // incident) so it neither collides with a genuine logical `step-loop:failed`
+            // in the isomorphic detector nor masquerades as non-convergence.
+            failureSignature: `step-loop:${loopResult.kind === 'failed' && loopResult.failKind && loopResult.failKind !== 'failed' ? loopResult.failKind : loopResult.kind}`,
           };
           const resolution = await this.handleFailure(
             goal,
@@ -2122,7 +2122,7 @@ export class Engine {
   ): Promise<
     | { kind: 'artifact'; artifact: Artifact; budget: Budget; transcript: StepTranscript; tokensUsed: number }
     | { kind: 'exhausted'; budget: Budget; transcript: StepTranscript }
-    | { kind: 'failed'; error: string; failKind?: 'failed' | 'malformed'; budget: Budget; transcript: StepTranscript }
+    | { kind: 'failed'; error: string; failKind?: 'failed' | 'malformed' | 'transport'; budget: Budget; transcript: StepTranscript }
     | { kind: 'ceiling'; budget: Budget; transcript: StepTranscript }
   > {
     const t = this.now;
@@ -2484,8 +2484,19 @@ export class Engine {
           forceEmitNext = true;
           continue;
         }
+        // A transport incident that survived the adapter's retries (canonically a
+        // timed-out step on a slow/flaky endpoint) is NOT a logical failure — give it
+        // a distinct `step-loop:transport` signature so two of them don't
+        // isomorphic-block the leaf as `step-loop:failed`, and leave it for the
+        // attempt ladder to retry on a healthier endpoint (run live-self-6060bbf1: an
+        // author leaf's step timed out and was terminal-blocked as non-convergence).
         const error = err instanceof Error ? err.message : String(err);
-        const failKind = err instanceof MalformedStepError ? 'malformed' : 'failed';
+        const failKind: 'failed' | 'malformed' | 'transport' =
+          err instanceof MalformedStepError
+            ? 'malformed'
+            : err instanceof StepTransportError
+              ? 'transport'
+              : 'failed';
         return { kind: 'failed', error, failKind, budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
       }
 
