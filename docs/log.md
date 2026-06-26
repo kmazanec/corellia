@@ -34,6 +34,16 @@ standalone roadmap — it lives as open issues.
   former `author-leaf-first-step-failure` issue is resolved + deleted. Slice C still
   unbuilt — knocked out by a slow provider endpoint, not a design pathology.
 
+- **Provider control tokens stripped from tool-call args, not only content** (`ba4a9d1`).
+  GLM/DeepSeek leak `<｜DSML｜>`-style tokens into the structured-emit tool-call
+  arguments, not just the message-content fallback; `stripControlTokens` now runs on
+  `tool_calls[].function.arguments` before parse. Found in slice-C run 14
+  (`live-self-a6963719`): a contaminated `RegionFacts` emit collapsed `dive-src-engine`
+  to a null artifact, starving the dependent build leaf. The run's *dominant* wall —
+  a dive hallucinating `path:line` anchors the dive-anchor check rightly rejects — is
+  filed as [dive-anchor-hallucination-blocks-region](issues/dive-anchor-hallucination-blocks-region.md);
+  slice C remains unbuilt.
+
 ## 2026-06-25
 
 - **Expert-persona layer for minted subagents** ([ADR-038](adrs/ADR-038-expert-persona-layer.md)).
