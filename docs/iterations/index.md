@@ -31,5 +31,6 @@ Newest last (chronological).
 | [2026-06-24-01](2026-06-24-01-gap-audit-tiutni/index.md) | 11 — Gap audit from driving tiutni (external greenfield) | backlog captured |
 | [2026-06-24-02](2026-06-24-02-commission-frontdoor/index.md) | 12 — The human→commission front door | shipped |
 | [2026-06-24-03](2026-06-24-03-milestone-loop/index.md) | 13 — Building the milestone loop (steps 1–6 + ADR-033) | landed on main |
+| [2026-06-25-21](2026-06-25-21-cascade-and-decide-fixes/index.md) | 14 — Cascade + decide-robustness fixes from driving slice C (ADR-037 + mustDecompose re-decide) | landed on main |
 
 Open follow-on work from these iterations lives in [../issues/](../issues/index.md).

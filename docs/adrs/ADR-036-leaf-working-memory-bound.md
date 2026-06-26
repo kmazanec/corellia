@@ -32,9 +32,10 @@ integration steps): the leaf read ~50 files; its prompt grew 2.8K → 50K → 10
 **117K tokens** across 11 steps; at that size its tool-call response was **truncated
 by the output-token limit**, `JSON.parse(wc.function.arguments)` threw
 `Unexpected end of JSON input`, the step failed, repeated, and the
-isomorphic-failure detector blocked it with **0 writes** (see
-[implement-read-paralysis](../issues/implement-read-paralysis.md)). Runs #7 and #8
-both failed this way on the one mechanism the factory could not build.
+isomorphic-failure detector blocked it with **0 writes** (the former
+implement-read-paralysis issue, resolved by this ADR; narrative in
+[iteration 14](../iterations/2026-06-25-21-cascade-and-decide-fixes/index.md)). Runs
+#7 and #8 both failed this way on the one mechanism the factory could not build.
 
 **The factory's design has no leaf working-memory bound.** It governs *cross-goal*
 memory richly — eval-gated promotion, decay, eviction, consolidation (DESIGN.md
@@ -170,6 +171,7 @@ modify the engine overflows the leaf. Bounding working memory is the unlock.
   then `note` what matters; you do not need to keep whole files in mind — re-read on
   demand." Teaches the curate habit the scratchpad enables.
 - **No new goal type, no CommissionInput change.** This is engine + skill content,
-  landable as factory-repo work. Closes
-  [implement-read-paralysis](../issues/implement-read-paralysis.md) and unblocks
-  slice C (the ADR-034 engine integration steps).
+  landable as factory-repo work. Closed the former implement-read-paralysis issue (its
+  *ballooning* half; a first-step-truncation remainder is tracked in
+  [author-leaf-first-step-failure](../issues/author-leaf-first-step-failure.md)) and
+  unblocks slice C (the ADR-034 engine integration steps).

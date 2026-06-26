@@ -39,8 +39,9 @@ emitted a report with `artifact: non-null, blockers: [coverage nit]`. The cascad
 a single step** (0 step runs, `write_file: 0`). A run that was otherwise healthy
 produced **zero writes** purely because a comprehension coverage nit on a sibling
 cascade-starved the builders — even though usable partial knowledge of `tests/`
-existed the whole time. (See
-[comprehension-oversplit-cascade](../issues/comprehension-oversplit-cascade.md) and
+existed the whole time. (Narrative in
+[iteration 14](../iterations/2026-06-25-21-cascade-and-decide-fixes/index.md); the
+remaining downstream half is tracked in
 [partial-delivery-on-blocked-dependency](../issues/partial-delivery-on-blocked-dependency.md).)
 
 The original tiutni Run-1 evidence is the same class: a blocked dependency took down
@@ -188,5 +189,6 @@ green/partial tree.
 - **No new goal type, no CommissionInput change, no skill change.** This is engine +
   contract work, landable as factory-repo work. Closes the upstream half of
   [partial-delivery-on-blocked-dependency](../issues/partial-delivery-on-blocked-dependency.md)
-  and [comprehension-oversplit-cascade](../issues/comprehension-oversplit-cascade.md);
+  and the former comprehension-oversplit-cascade issue (now folded into
+  [iteration 14](../iterations/2026-06-25-21-cascade-and-decide-fixes/index.md));
   unblocks slice C (the ADR-034 engine integration steps).

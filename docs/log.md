@@ -16,6 +16,18 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-25
 
+- **Iteration 14 — cascade + decide-robustness fixes from driving slice C**
+  ([iteration 14](iterations/2026-06-25-21-cascade-and-decide-fixes/index.md)). Bundles
+  ADR-037 + the mustDecompose re-decide (below) and the live runs that surfaced them.
+  Fixed issues deleted per the ephemeral-issue rule (comprehension-oversplit-cascade,
+  mustdecompose-satisfy-terminal-block, implement-read-paralysis — folded into the
+  iteration record + ADRs). Re-run `live-self-481afacb` ($0.78, isolated store): the
+  root **cleared and split correctly** into a slice-C decomposition (5 dives → author →
+  2 implement → open-pr), ADR-037's fatal branch fired correctly — but
+  `author-acceptance-criteria` **died at its first step** (`step-loop:failed`, 0 steps /
+  0 tools / 0 produced), cascade-blocking the builders. New wall filed as
+  [author-leaf-first-step-failure](issues/author-leaf-first-step-failure.md). Slice C is
+  one wall further along, still unbuilt.
 - **Build run `live-self-2e2ece33`** ($1.56, polluted shared store) — re-commissioned
   slice C to prove ADR-037. It did **not** reach ADR-037: the `deliver-intent` root
   returned `satisfy` on its **first** decision (8 completion tokens, defying the
@@ -24,8 +36,8 @@ standalone roadmap — it lives as open issues.
   committed but unproven live. (Orphaned worktrees from this + an interrupted attempt
   cleaned up; primary `main` undisturbed. Aside: `out/events.jsonl` is a shared store
   across runs — pollutes the tree view/cost; noted for a per-run-store cleanup.)
-- **mustDecompose guard re-decides once instead of terminal-blocking** (fixes
-  [mustdecompose-satisfy-terminal-block](issues/mustdecompose-satisfy-terminal-block.md)).
+- **mustDecompose guard re-decides once instead of terminal-blocking**
+  ([iteration 14](iterations/2026-06-25-21-cascade-and-decide-fixes/index.md)).
   A `mustDecompose` root that returns `satisfy` is now **re-decided once** with a
   corrective nudge (`BrainContext.decideCorrection`); only a *repeated* satisfy
   terminal-blocks. The guard moved before the SPLIT EVAL so a corrected split is
@@ -40,7 +52,8 @@ standalone roadmap — it lives as open issues.
   dependents — they proceed on the partial, the blocker is carried forward as a
   finding, and a `dependency-degraded` event records the decision. Only a dependency
   that produced **nothing** (`artifact === null`) still hard-blocks. Closes the
-  cascade half of [comprehension-oversplit-cascade](issues/comprehension-oversplit-cascade.md)
+  cascade half of the former comprehension-oversplit-cascade issue (folded into
+  [iteration 14](iterations/2026-06-25-21-cascade-and-decide-fixes/index.md))
   and the upstream half of [partial-delivery-on-blocked-dependency](issues/partial-delivery-on-blocked-dependency.md);
   unblocks slice C. Tests: `tests/engine/engine.test.ts` (degraded + fatal cases).
   The comprehension **over-split** itself is deferred (ADR-037 makes it non-fatal,
