@@ -2577,11 +2577,16 @@ export class Engine {
                 : `tool-call budget exceeded; emit the final artifact now`,
           });
 
-          // Make the emit call with outputSchema set.
+          // Make the emit call with outputSchema set AND no tools (ADR-039): the
+          // dedicated two-phase emit must produce the structured artifact, not more
+          // tool calls. Passing the tool set let the model return tool-calls instead
+          // of the artifact (run live-self-c15e0c98: "emit call returned tool-calls
+          // instead of an artifact"). With no tools the json_schema response_format
+          // is the only valid output — the same escape-hatch fix as the forced emit.
           const emitCtx: BrainContext = { ...ctx, outputSchema: typeDef.outputSchema };
           let emitOutput: import('../contract/brain.js').StepOutput;
           try {
-            emitOutput = await this.brain.step(goal, transcript, tools, emitCtx);
+            emitOutput = await this.brain.step(goal, transcript, [], emitCtx);
           } catch (err) {
             const error = err instanceof Error ? err.message : String(err);
             return { kind: 'failed', error, budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
