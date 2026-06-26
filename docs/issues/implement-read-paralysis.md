@@ -4,12 +4,18 @@ title: "Implement leaf dies on a truncated tool-call (context bloat → malforme
 description: A make/implement leaf on a hard task accumulates ~117K tokens of file reads; its tool-call response is then truncated by the output limit, JSON.parse throws Unexpected-end-of-JSON, the step fails repeatedly, and the isomorphic detector blocks it with 0 writes.
 tags: [engine, step-loop, llm, truncation, finish-reason, isomorphic-block]
 timestamp: 2026-06-25
-status: open
+status: fixed-pending-proof
 kind: bug
 severity: high
 ---
 
 # Implement leaf dies on a truncated tool-call (context bloat → malformed JSON → isomorphic block)
+
+> **Fixed by ADR-036 (commit d90c4a8), pending live proof.** The root cause —
+> unbounded leaf working memory — is addressed: a leaf now has a `note` scratchpad
+> + an engine eviction backstop (transcript capped at 60K est. tokens, oldest raw
+> reads stubbed) so it can no longer balloon to truncation. Re-proven by
+> re-commissioning slice C once the next live run confirms it.
 
 > **Corrected root cause (the first cut of this issue was wrong).** Initial read:
 > "an implement leaf read-loops without writing because there's no forced-emit
