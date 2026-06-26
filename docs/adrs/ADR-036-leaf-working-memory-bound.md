@@ -172,6 +172,6 @@ modify the engine overflows the leaf. Bounding working memory is the unlock.
   demand." Teaches the curate habit the scratchpad enables.
 - **No new goal type, no CommissionInput change.** This is engine + skill content,
   landable as factory-repo work. Closed the former implement-read-paralysis issue (its
-  *ballooning* half; a first-step-truncation remainder is tracked in
-  [author-leaf-first-step-failure](../issues/author-leaf-first-step-failure.md)) and
-  unblocks slice C (the ADR-034 engine integration steps).
+  *ballooning* half; the first-step-truncation remainder was resolved by ADR-039 and
+  [iteration 15](../iterations/2026-06-26-00-explore-then-emit-consolidation/index.md))
+  and unblocks slice C (the ADR-034 engine integration steps).

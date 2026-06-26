@@ -14,6 +14,26 @@ the [iteration](iterations/index.md) or [ADR](adrs/index.md) that owns the detai
 This file replaces the former `STATUS.md`. Forward strategy is no longer a
 standalone roadmap — it lives as open issues.
 
+## 2026-06-26
+
+- **Iteration 15 — explore-then-emit consolidation** ([ADR-039](adrs/ADR-039-explore-then-emit-is-a-bounded-shape-and-scope-is-load-bearing.md);
+  [iteration 15](iterations/2026-06-26-00-explore-then-emit-consolidation/index.md)).
+  Three independent audits traced a string of slice-C stalls to ONE root cause — an
+  explore-then-emit leaf reads the repo forever because its force-emit ceiling and
+  read-economy teaching were comprehend-private by accident, compounded by scope never
+  being load-bearing. Fixed at the design's altitude: ceiling keyed off SHAPE
+  (`isExploreThenEmitLeaf`), read-economy shape-injected (`_explore-economy.md`), scope
+  load-bearing via a per-type `requiresScope` property (zero test churn), safe step-loop
+  dedup with the big collapse deferred (the mechanisms are each load-bearing). Plus five
+  robustness fixes from driving slice C live: re-decided-satisfy no longer bypasses the
+  mustDecompose guard, the decide prompt scopes producing children, the malform-reprompt
+  fetch got its abort timeout, and a timed-out step is a transport incident
+  (`StepTransportError`/`step-loop:transport`) not a logical `step-loop:failed`. **Proven
+  live** (`live-self-6060bbf1`, $0.92): the author leaf that read 140 files to a timeout
+  now bounds at exactly 16 reads; the root decomposes with scoped children; no wedge. The
+  former `author-leaf-first-step-failure` issue is resolved + deleted. Slice C still
+  unbuilt — knocked out by a slow provider endpoint, not a design pathology.
+
 ## 2026-06-25
 
 - **Expert-persona layer for minted subagents** ([ADR-038](adrs/ADR-038-expert-persona-layer.md)).
@@ -35,8 +55,9 @@ standalone roadmap — it lives as open issues.
   2 implement → open-pr), ADR-037's fatal branch fired correctly — but
   `author-acceptance-criteria` **died at its first step** (`step-loop:failed`, 0 steps /
   0 tools / 0 produced), cascade-blocking the builders. New wall filed as
-  [author-leaf-first-step-failure](issues/author-leaf-first-step-failure.md). Slice C is
-  one wall further along, still unbuilt.
+  author-leaf-first-step-failure (later resolved by
+  [iteration 15](iterations/2026-06-26-00-explore-then-emit-consolidation/index.md)).
+  Slice C is one wall further along, still unbuilt.
 - **Build run `live-self-2e2ece33`** ($1.56, polluted shared store) — re-commissioned
   slice C to prove ADR-037. It did **not** reach ADR-037: the `deliver-intent` root
   returned `satisfy` on its **first** decision (8 completion tokens, defying the
