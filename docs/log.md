@@ -16,6 +16,18 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-26
 
+- **The deep-dive size-split signal measures bytes, not only file count.**
+  `repoShapeHint` fired only on `files >= 40`, missing a few-but-huge region:
+  `tests/engine` (33 files but ~642KB / ~17K lines) deep-dived as one node, ballooned,
+  evicted, and `step-loop:failed`, cascade-blocking every build leaf (slice-C run 15,
+  $2.02, no code written). `countRegion` now sums bytes (cheap statSync) and the hint
+  fires on EITHER bar (`files >= 40` OR `bytes >= ~450KB`) — the byte bound sits above
+  `src/engine` (332KB, dives fine) and below `tests/engine`. Advances
+  [comprehension-region-wallclock-exhaustion](issues/comprehension-region-wallclock-exhaustion.md).
+  Also (run 15): the bare control-token form `<｜DSML｜` (no closing `>`) now strips
+  (`884e8d9`), and the dive-anchor repair rung was proven — `dive-src-engine` repaired
+  its hallucinated anchor in-attempt and emitted REAL (run-14's killer).
+
 - **A mechanically-repairable deterministic failure routes through the repair rung
   instead of escalating the tier.** `DeterministicCheck.run` gained an optional
   `prescription`; `diveAnchorCheck` supplies one on a bad anchor, so a hallucinated

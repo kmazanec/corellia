@@ -325,6 +325,43 @@ describe('repoShapeHint — scoped region size signal (live-self-4b84f2d2)', () 
     expect(hint).toMatch(/SPLIT it/i);
   });
 
+  it('emits a SPLIT hint for FEW-but-HUGE files (under the file bar but over the byte bar)', () => {
+    // Run live-self-14794116: tests/engine is 33 files (< the 40-file bar) but
+    // ~642KB / ~17K lines — too large to deep-dive in one node, yet the file-count
+    // check missed it, so the dive satisfied, ballooned, evicted, and step-loop:failed.
+    // The byte bound (~450KB) must catch a few-but-huge region the file count misses.
+    const root = makeTmp();
+    mkdirSync(join(root, 'tests', 'engine'), { recursive: true });
+    const big = 'x'.repeat(60_000) + '\n'; // ~60KB per file
+    for (let i = 0; i < 12; i++) {
+      writeFileSync(join(root, 'tests', 'engine', `big-${i}.test.ts`), big); // 12 files, ~720KB
+    }
+
+    const seam = engineWithRoot(root);
+    const goal = makeGoal({ type: 'deep-dive-region', scope: ['tests/engine/'] });
+    const hint = seam.repoShapeHint(goal);
+
+    expect(hint).toBeDefined();
+    expect(hint).toMatch(/region size/i);
+    expect(hint).toMatch(/KB/); // the byte measure is surfaced in the hint
+    expect(hint).toMatch(/SPLIT it/i);
+  });
+
+  it('stays silent for a moderate region under BOTH bars (few files, modest bytes)', () => {
+    // The complement of the byte test: a region below the file bar AND the byte bar
+    // (src/engine is 11 files / ~332KB and deep-dives in one node fine) stays silent.
+    const root = makeTmp();
+    mkdirSync(join(root, 'src', 'engine'), { recursive: true });
+    const modest = 'x'.repeat(20_000) + '\n'; // ~20KB per file
+    for (let i = 0; i < 10; i++) {
+      writeFileSync(join(root, 'src', 'engine', `mod-${i}.ts`), modest); // 10 files, ~200KB
+    }
+
+    const seam = engineWithRoot(root);
+    const goal = makeGoal({ type: 'deep-dive-region', scope: ['src/engine/'] });
+    expect(seam.repoShapeHint(goal)).toBeUndefined();
+  });
+
   it('stays silent for a SMALL scoped region (no needless split pressure)', () => {
     const root = makeTmp();
     mkdirSync(join(root, 'src', 'util'), { recursive: true });

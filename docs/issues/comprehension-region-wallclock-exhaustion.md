@@ -30,6 +30,18 @@ severity: high
 > extend its slice. **Still open too:** the dependency-cascade half — one blocked
 > dive hard-blocks every dependent with no degraded path (shared with
 > [partial-delivery-on-blocked-dependency](partial-delivery-on-blocked-dependency.md)).
+>
+> **Update (2026-06-26, run `live-self-14794116`).** The size-split signal was
+> file-count-only and under-measured a few-but-huge region: `dive-tests-engine`
+> (`tests/engine`, **33 files but ~642KB / ~17K lines**) fell *below* the 40-file
+> bar, so no SPLIT hint fired — it `satisfy`-ied as one dive, ballooned working
+> memory, evicted repeatedly, and `step-loop:failed` → cascade-blocked every build
+> leaf (no code was written; $2.02). Fixed: `countRegion` now also sums bytes
+> (cheap `statSync`, no content read) and `repoShapeHint` fires on EITHER bar —
+> `files >= 40` OR `bytes >= ~450KB`. The byte bound sits above `src/engine`
+> (332KB, which deep-dives in one node fine and now passes by repairing its anchors)
+> and below `tests/engine`. **Still open:** the per-dive wall-clock starvation above,
+> and the cascade half (a step-loop-failed dive still hard-blocks its dependents).
 
 ## Problem
 Two compounding failures, both real:

@@ -14,7 +14,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { readdirSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import type { Goal, Tier, MemoryPointer, Budget, Usage } from '../contract/goal.js';
 import type { Decision, ChildPlan } from '../contract/decision.js';
 import type { Artifact, Report } from '../contract/report.js';
@@ -3137,16 +3137,24 @@ export class Engine {
     // after the OKF reorg blew its wall-clock; live-self-4b84f2d2). Measure the
     // region's actual size and, if it is large, emit the same split-or-die hint.
     if (goal.scope.length > 0) {
-      const { dirs, files } = this.countRegion(root, goal.scope);
-      // Small regions need no hint — the dive fits one node. The threshold is a
-      // coarse "this won't fit one wall-clock slice" line, not a contract.
-      if (files < 40) return undefined;
+      const { dirs, files, bytes } = this.countRegion(root, goal.scope);
+      // A region is "too large for one node" by EITHER measure: many files, OR
+      // few-but-huge files. File count alone under-measures the second case —
+      // tests/engine is 33 files (< 40) but ~642KB / ~17K lines, which ballooned a
+      // single dive into repeated eviction and a step-loop:failed block
+      // (live-self-14794116). The byte bound (~450KB ≈ 11-12K lines) sits above
+      // src/engine (332KB, which deep-dives in one node fine) and below
+      // tests/engine. Both are coarse "won't fit one slice" lines, not contracts.
+      const LARGE_FILES = 40;
+      const LARGE_BYTES = 450_000;
+      if (files < LARGE_FILES && bytes < LARGE_BYTES) return undefined;
+      const sizeKb = Math.round(bytes / 1024);
       return (
-        `region size (scope: ${goal.scope.join(', ')}): ~${files} files across ` +
-        `~${dirs} directories. (Rule of thumb: a region of many dozens of files / ` +
-        `directories is too large to deep-dive faithfully in one node — SPLIT it ` +
-        `into sub-region children, one per sub-directory or cohesive area, rather ` +
-        `than attempting the whole region in a single dive.)`
+        `region size (scope: ${goal.scope.join(', ')}): ~${files} files (~${sizeKb}KB) ` +
+        `across ~${dirs} directories. (Rule of thumb: a region of many dozens of ` +
+        `files, OR a few hundred KB of source, is too large to deep-dive faithfully ` +
+        `in one node — SPLIT it into sub-region children, one per sub-directory or ` +
+        `cohesive area, rather than attempting the whole region in a single dive.)`
       );
     }
 
@@ -3191,9 +3199,10 @@ export class Engine {
    * (node_modules, .git, …) are excluded. The walk stops early once it is clearly
    * "large" so a genuinely huge region never makes the hint itself expensive.
    */
-  private countRegion(root: string, scope: string[]): { dirs: number; files: number } {
+  private countRegion(root: string, scope: string[]): { dirs: number; files: number; bytes: number } {
     let dirs = 0;
     let files = 0;
+    let bytes = 0;
     const CAP = 500; // stop counting past this — already unambiguously "large"
     const walk = (abs: string): void => {
       if (files >= CAP) return;
@@ -3210,6 +3219,12 @@ export class Engine {
           walk(`${abs}/${e.name}`);
         } else if (e.isFile()) {
           files++;
+          // Sum bytes as a cheap size proxy (statSync, no content read). File
+          // COUNT alone under-measures a region of few-but-huge files — tests/engine
+          // is 33 files but ~17K lines, slipping under a file-count bar while being
+          // far too large to comprehend in one node (run live-self-14794116:
+          // dive-tests-engine satisfied, ballooned, evicted, step-loop:failed).
+          try { bytes += statSync(`${abs}/${e.name}`).size; } catch { /* skip */ }
         }
         if (files >= CAP) return;
       }
@@ -3218,7 +3233,7 @@ export class Engine {
       const clean = prefix.replace(/\/+$/, '');
       walk(`${root}/${clean}`);
     }
-    return { dirs, files };
+    return { dirs, files, bytes };
   }
 
   private async runCoverageGate(
