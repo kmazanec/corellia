@@ -582,7 +582,7 @@ export function diveAnchorCheck(): DeterministicCheck {
       _goal: Goal,
       artifact: Artifact | null,
       ctx?: CheckContext,
-    ): Promise<{ ok: boolean; detail: string }> {
+    ): Promise<{ ok: boolean; detail: string; prescription?: string }> {
       const parsed = parseArtifactJson(artifact);
       if (!parsed.ok) return { ok: false, detail: parsed.detail };
 
@@ -621,6 +621,21 @@ export function diveAnchorCheck(): DeterministicCheck {
         return {
           ok: false,
           detail: `Dive anchor check failed: ${failures.join('; ')}`,
+          // A bad anchor is mechanically repairable: the detail already names the
+          // exact path:line and the real bound. Hand the model a precise recipe so
+          // the engine repairs in-attempt (ADR-006) instead of escalating the tier
+          // into the same hallucination (run live-self-a6963719). Re-grounding by
+          // the cited symbol beats re-rolling: a line number invented out of range
+          // should become the real location of the claimed content, or — if the
+          // claim cannot be grounded in the file at all — the fact must be dropped.
+          prescription:
+            `These dive-fact anchors do not exist at HEAD: ${failures.join('; ')}. ` +
+            `For each, open the cited file and re-ground the anchor to the REAL ` +
+            `line where the claimed content actually appears (search for the ` +
+            `symbol or text the fact describes — do not guess a line number). ` +
+            `If the claim cannot be found in the file at all, DROP that fact ` +
+            `entirely rather than emit an unfounded anchor. Every remaining anchor ` +
+            `must point at content that exists in the file as it is now.`,
         };
       }
 

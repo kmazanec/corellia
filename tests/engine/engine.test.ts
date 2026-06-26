@@ -10,6 +10,7 @@ import {
   alwaysPassCheck,
   alwaysFailCheck,
   failThenPassCheck,
+  failWithPrescriptionThenPassCheck,
   ScriptedBrain,
   rawBrain,
   makeGoal,
@@ -109,6 +110,42 @@ describe('repair rung', () => {
 
     const escalateEvents = await store.list({ type: 'tier-escalated' });
     expect(escalateEvents).toHaveLength(1);
+  });
+
+  it('repairs in-attempt (no tier escalation) when a deterministic finding carries a prescription', async () => {
+    const store = new MemoryEventStore();
+
+    // A mechanically-repairable deterministic failure (e.g. a bad dive anchor):
+    // the check returns a prescription, so the engine repairs WITHIN the attempt
+    // (ADR-006) instead of escalating the tier into the same failure — the fix for
+    // run live-self-a6963719, where an anchor hallucination escalated and re-rolled.
+    const brain = new ScriptedBrain()
+      .queueProduce(textArtifact('bad-anchors'))   // low attempt fails the check
+      .queueRepair(textArtifact('grounded'));       // repair re-grounds the anchors
+
+    const registry = buildRegistry([
+      leafTypeDef({
+        deterministic: [failWithPrescriptionThenPassCheck('knowledge:dive-anchor')],
+        judgeType: null,
+        tier: { default: 'low', ladder: ['low', 'mid'] },
+      }),
+    ]);
+
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const goal = makeGoal({ budget: { attempts: 5, tokens: 1000, toolCalls: 50, wallClockMs: 60000 } });
+    const report = await engine.run(goal);
+
+    // Converged via repair on the SAME tier — no escalation.
+    expect(report.blockers).toHaveLength(0);
+    expect(report.artifact).toEqual(textArtifact('grounded'));
+
+    const repairEvents = await store.list({ type: 'repair-applied' });
+    expect(repairEvents).toHaveLength(1);
+    expect((repairEvents[0] as { prescriptions: string[] }).prescriptions).toContain(
+      'fix the knowledge:dive-anchor flaw',
+    );
+    const escalateEvents = await store.list({ type: 'tier-escalated' });
+    expect(escalateEvents).toHaveLength(0);
   });
 
   it('applies repair from judge verdict with prescription', async () => {

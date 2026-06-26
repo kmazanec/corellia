@@ -1633,14 +1633,20 @@ export class Engine {
           const result = await check.run(goal, artifact, checkCtx);
           if (!result.ok) {
             allOk = false;
-            // Deterministic checks produce objective failures — detail is an
-            // explanation, not a repair prescription. The repair rung is for
-            // judge findings with explicit prescriptions.
+            // Deterministic checks produce objective failures — detail is usually
+            // an explanation, not a repair prescription, so the repair rung (for
+            // judge findings with prescriptions) is skipped and the tier escalates.
+            // But a check MAY supply a `prescription` when its failure is
+            // mechanically repairable (e.g. a dive anchor past EOF names the exact
+            // fix). When it does, carry it onto the finding so handleFailure routes
+            // through repair-within-attempt (ADR-006) instead of escalating the
+            // tier into the same failure (run live-self-a6963719).
             findings.push({
               title: `${check.name}: ${result.detail}`,
               dimension: 'spec',
               severity: 'high',
               gating: true,
+              ...(result.prescription !== undefined ? { prescription: result.prescription } : {}),
             });
           }
         }

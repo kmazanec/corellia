@@ -36,8 +36,21 @@ export interface DeterministicCheck {
    * construction: deterministic gates are intent-blind. Executing checks read
    * the optional {@link CheckContext} for a sandbox root and a script runner;
    * artifact-only checks ignore it and remain valid unchanged.
+   *
+   * A check MAY return a `prescription` when its failure is mechanically
+   * repairable — i.e. the detail already names the exact correction (e.g. a dive
+   * anchor past end-of-file → "fix or drop these anchors"). Most deterministic
+   * failures are "you didn't do X" with no recipe and omit it; a check that omits
+   * it escalates the tier on failure as before (run live-self-a6963719 escalated
+   * the high tier into the same hallucination because the anchor failure carried
+   * no prescription). When present, the engine routes the failure through the
+   * repair rung (ADR-006, repair-within-attempt) instead of escalating.
    */
-  run(goal: Goal, artifact: Artifact | null, ctx?: CheckContext): Promise<{ ok: boolean; detail: string }>;
+  run(
+    goal: Goal,
+    artifact: Artifact | null,
+    ctx?: CheckContext,
+  ): Promise<{ ok: boolean; detail: string; prescription?: string }>;
 }
 
 /**

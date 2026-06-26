@@ -630,6 +630,8 @@ describe('diveAnchorCheck', () => {
     expect(r.ok).toBe(true);
     expect(r.detail).toContain('1 fact');
     expect(r.detail).toContain('1 anchor');
+    // No prescription on success — prescription is only for a repairable failure.
+    expect(r.prescription).toBeUndefined();
   });
 
   it('fails when an anchor path does not exist', async () => {
@@ -673,6 +675,13 @@ describe('diveAnchorCheck', () => {
     expect(r.ok).toBe(false);
     expect(r.detail).toContain('short.ts:99');
     expect(r.detail).toContain('line');
+    // A bad anchor is mechanically repairable: the check supplies a prescription so
+    // the engine repairs in-attempt (ADR-006) instead of escalating the tier into
+    // the same hallucination (run live-self-a6963719). The prescription names the
+    // failing anchor and tells the model to re-ground it or drop the fact.
+    expect(r.prescription).toBeDefined();
+    expect(r.prescription).toContain('short.ts:99');
+    expect(r.prescription).toMatch(/re-ground|DROP/);
   });
 
   it('fails and names all failing anchors across multiple facts', async () => {

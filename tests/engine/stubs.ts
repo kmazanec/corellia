@@ -164,6 +164,25 @@ export function failThenPassCheck(name = 'fail-once'): DeterministicCheck {
   };
 }
 
+/**
+ * Like {@link failThenPassCheck} but the first failure carries a `prescription`,
+ * so the engine routes through the repair rung (ADR-006) instead of escalating the
+ * tier — the behavior a mechanically-repairable deterministic failure earns (e.g.
+ * diveAnchorCheck naming a bad anchor; run live-self-a6963719).
+ */
+export function failWithPrescriptionThenPassCheck(name = 'fail-once'): DeterministicCheck {
+  let callCount = 0;
+  return {
+    name,
+    async run(_goal: Goal, _artifact: Artifact | null) {
+      callCount++;
+      return callCount <= 1
+        ? { ok: false, detail: `${name} failed`, prescription: `fix the ${name} flaw` }
+        : { ok: true, detail: '' };
+    },
+  };
+}
+
 // ── Brain stubs ───────────────────────────────────────────────────────────
 
 /**

@@ -391,7 +391,13 @@ describe('deep-dive-region leaf — invalid anchors (deterministic gate blocks)'
     const artifact: Artifact = { kind: 'text', text: JSON.stringify(rf) };
 
     const store = new MemoryEventStore();
-    const brain = new ScriptedBrain().queueProduce(artifact);
+    // diveAnchorCheck now supplies a prescription, so a bad anchor routes through
+    // the repair rung (ADR-006) before blocking. The repair re-emits the SAME bad
+    // artifact (model fails to re-ground); the loop then re-produces it, the recheck
+    // fails with the same signature, and the run isomorphic-blocks honestly — the
+    // gate-rejection this test asserts is unchanged; only the path to the block now
+    // passes through one repair attempt. (produce queued twice: initial + re-loop.)
+    const brain = new ScriptedBrain().queueProduce(artifact, artifact).queueRepair(artifact);
     const registry = buildRegistry([
       leafTypeDef({
         name: 'deep-dive-region',
@@ -413,13 +419,17 @@ describe('deep-dive-region leaf — invalid anchors (deterministic gate blocks)'
     });
     const report = await engine.run(goal);
 
-    // Gate blocked
+    // Gate blocked (after the repair attempt failed to re-ground the anchor)
     expect(report.blockers.length).toBeGreaterThan(0);
 
     const detEvents = await store.list({ type: 'deterministic-checked' });
     const det = detEvents[0] as Extract<FactoryEvent, { type: 'deterministic-checked' }>;
     expect(det.verdict.pass).toBe(false);
     expect(det.verdict.findings[0]?.title).toContain('deleted-auth.ts');
+
+    // The repair rung fired (a bad anchor is mechanically repairable).
+    const repairEvents = await store.list({ type: 'repair-applied' });
+    expect(repairEvents).toHaveLength(1);
 
     // Judge never called
     const judgeEvents = await store.list({ type: 'judge-verdict' });
@@ -446,7 +456,10 @@ describe('deep-dive-region leaf — invalid anchors (deterministic gate blocks)'
     const artifact: Artifact = { kind: 'text', text: JSON.stringify(rf) };
 
     const store = new MemoryEventStore();
-    const brain = new ScriptedBrain().queueProduce(artifact);
+    // As above: the prescription routes through one repair attempt; the repair and
+    // the re-loop both re-emit the same out-of-range anchor so the recheck fails and
+    // the run isomorphic-blocks. (produce queued twice: initial + re-loop.)
+    const brain = new ScriptedBrain().queueProduce(artifact, artifact).queueRepair(artifact);
     const registry = buildRegistry([
       leafTypeDef({
         name: 'deep-dive-region',
@@ -469,6 +482,9 @@ describe('deep-dive-region leaf — invalid anchors (deterministic gate blocks)'
     const report = await engine.run(goal);
 
     expect(report.blockers.length).toBeGreaterThan(0);
+
+    const repairEvents = await store.list({ type: 'repair-applied' });
+    expect(repairEvents).toHaveLength(1);
 
     const judgeEvents = await store.list({ type: 'judge-verdict' });
     expect(judgeEvents).toHaveLength(0);

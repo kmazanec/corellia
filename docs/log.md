@@ -16,6 +16,17 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-26
 
+- **A mechanically-repairable deterministic failure routes through the repair rung
+  instead of escalating the tier.** `DeterministicCheck.run` gained an optional
+  `prescription`; `diveAnchorCheck` supplies one on a bad anchor, so a hallucinated
+  `path:line` is re-grounded in-attempt (ADR-006) rather than re-rolled at the next
+  tier into the same hallucination (the dominant wall in slice-C run 14). Partially
+  closes [dive-anchor-hallucination-blocks-region](issues/dive-anchor-hallucination-blocks-region.md)
+  (structural floor + model-capability signal still open). Also fixed a pre-existing
+  full-suite flake: the two subprocess-heavy convergence flows
+  (`convergence-eyes`/`convergence-taste`) timed out under parallel contention at the
+  default 5s — given a 30s file timeout.
+
 - **Iteration 15 — explore-then-emit consolidation** ([ADR-039](adrs/ADR-039-explore-then-emit-is-a-bounded-shape-and-scope-is-load-bearing.md);
   [iteration 15](iterations/2026-06-26-00-explore-then-emit-consolidation/index.md)).
   Three independent audits traced a string of slice-C stalls to ONE root cause — an

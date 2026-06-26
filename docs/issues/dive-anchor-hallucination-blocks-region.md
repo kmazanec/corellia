@@ -4,12 +4,24 @@ title: "a deep-dive that hallucinates a line-anchor fails the dive-anchor check 
 description: A deep-dive-region's RegionFacts cite path:line anchors the model invents (e.g. engine.ts:4687 in a 4686-line file); the dive-anchor deterministic check correctly rejects them, but with no repair path the dive escalates to the high tier, fails again, and emits a null artifact — so the ADR-040 handoff injects no facts for that region and the dependent build leaf re-surveys it and blocks.
 tags: [engine, comprehend, knowledge, dive-anchor, verify-on-read, region-facts, deliver-intent, model-quality]
 timestamp: 2026-06-26
-status: open
+status: partially-fixed
 kind: bug
 severity: high
 ---
 
 # a deep-dive that hallucinates a line-anchor fails the dive-anchor check terminally and cascade-starves its dependent builder
+
+> **Partially fixed (2026-06-26).** The repair-rung half is done: `diveAnchorCheck`
+> now returns a `prescription` on a bad anchor (the contract's `DeterministicCheck.run`
+> gained an optional `prescription` field), so the engine routes the failure through
+> the repair rung (ADR-006, repair-within-attempt) — handing the model the exact bad
+> anchors with the instruction to re-ground them by symbol search or drop the unfounded
+> fact — instead of escalating the tier into the same hallucination. If the repair
+> still reproduces the bad anchor, the isomorphic-failure check blocks honestly (one
+> repair attempt, not an infinite loop). **Still open:** the *structural floor* for a
+> build leaf whose primary-region dive nonetheless produced nothing (so it re-surveys
+> and blocks), and the model-capability signal so escalation doesn't roll into the same
+> wall. The control-token contributor was already fixed separately (`ba4a9d1`).
 
 ## Problem
 
