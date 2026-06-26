@@ -361,6 +361,27 @@ describe('step translation', () => {
     expect(result.calls[0]!.args).toEqual({ region: 'src/engine', claim: 'ok' });
   });
 
+  it('strips a BARE control token (<｜DSML｜ with no closing >) from a content-emit artifact', async () => {
+    // Run live-self-14794116 (slice C, run 15): a dive's RegionFacts emit began with
+    // the BARE form `<｜DSML｜` — open-bar, marker, close-bar, then content, with NO
+    // closing `>`. The earlier `<｜…｜>`-only regex required a `>` so it never matched,
+    // and the token broke the artifact JSON parse ("Unexpected token '<', \"<｜DSML｜
+    // too\"..."), failing diveAnchorCheck and escalating the dive into the same leak.
+    // The strip must remove the bare `<｜…｜` form (optional trailing `>`) too.
+    const json = JSON.stringify({ region: 'docs/iterations', generatedAtSha: 'sha', facts: [] });
+    const { fetch } = stubFetch({ status: 200, body: contentResponse('<｜DSML｜' + json) });
+    const brain = new LlmBrain({ baseUrl: BASE, apiKey: KEY, modelByTier, fetchImpl: fetch });
+    const result = await brain.step(baseGoal, [{ role: 'context', content: 'sys' }], tools, ctx);
+
+    expect(result.kind).toBe('artifact');
+    if (result.kind !== 'artifact') throw new Error('unreachable');
+    expect(result.artifact.kind).toBe('text');
+    if (result.artifact.kind !== 'text') throw new Error('unreachable');
+    // The leaked token is gone and the artifact body is clean parseable JSON.
+    expect(result.artifact.text).not.toContain('DSML');
+    expect(() => JSON.parse(result.artifact.kind === 'text' ? result.artifact.text : '')).not.toThrow();
+  });
+
   it('returns {kind:artifact, files} when response is content-only with file blocks', async () => {
     const content = '```src/widget.ts\nexport const x = 1;\n```';
     const { fetch } = stubFetch({ status: 200, body: contentResponse(content) });

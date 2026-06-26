@@ -410,12 +410,25 @@ function translateStepResponse(
 /**
  * Remove provider special-vocabulary control tokens that some models (DeepSeek,
  * GLM/z-ai) leak into the response body. They are delimited by the fullwidth
- * vertical bar U+FF5C — e.g. `<｜DSML｜>`, `<｜tool▁calls▁begin｜>`,
- * `<｜end▁of▁sentence｜>` — and are never valid output (JSON, code, or prose), so
- * removing them can only help. Conservative: only strips the `<｜…｜>` form.
+ * vertical bar U+FF5C and come in TWO forms:
+ *   - bracket-terminated: `<｜tool▁calls▁begin｜>`, `<｜end▁of▁sentence｜>`
+ *   - bare (no closing `>`): `<｜DSML｜` as a prefix marker, immediately followed
+ *     by content — e.g. `<｜DSML｜tool...` or `<｜DSML｜{json}` (run live-self-14794116:
+ *     a dive's RegionFacts emit began `<｜DSML｜` with no `>`, so the earlier
+ *     `<｜…｜>`-only regex never matched and the token broke the JSON parse).
+ * Both are `<｜MARKER｜`; the closing `>` is optional. They are never valid output
+ * (JSON, code, or prose), so removing them can only help. Strip `<｜ … ｜` and an
+ * optional immediately-following `>`, where the marker between the bars contains
+ * no bar or `>` itself.
  */
 function stripControlTokens(s: string): string {
-  return s.includes('<｜') ? s.replace(/<｜[^>]*?｜>/g, '') : s;
+  if (!s.includes('<｜')) return s;
+  // First remove the bracket-terminated form, allowing internal `｜` segments
+  // (e.g. `<｜DSML｜tool｜>`, `<｜tool▁calls▁begin｜>`): match up to the closing `｜>`.
+  // Then remove any remaining BARE prefix marker `<｜…｜` with no `>` (e.g.
+  // `<｜DSML｜` immediately followed by JSON — run live-self-14794116). The bare
+  // pass disallows `>` inside the marker so it can't swallow real following markup.
+  return s.replace(/<｜[^>]*?｜>/g, '').replace(/<｜[^｜>]*?｜/g, '');
 }
 
 // ---------------------------------------------------------------------------
