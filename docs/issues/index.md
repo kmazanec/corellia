@@ -26,6 +26,7 @@ Each issue is one OKF `type: issue` file with `kind` (bug | idea | future-work),
 | [author-leaf-first-step-failure](author-leaf-first-step-failure.md) | bug | engine, step-loop, author, isomorphic-block, first-step |
 | [visual-runtime-verification](visual-runtime-verification.md) | future-work | structural, verification, vision |
 | [milestone-loop-step-7-prove-live](milestone-loop-step-7-prove-live.md) | future-work | milestone-loop, engine, live-proof |
+| [operator-console-ui](operator-console-ui.md) | future-work | ui, operator-console, observability, read-model, front-door |
 
 ## Medium severity
 
