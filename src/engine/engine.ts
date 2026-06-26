@@ -3289,16 +3289,39 @@ export class Engine {
 
     if (allInjected.length === 0) return children;
 
-    // Every existing child must depend on ALL injected comprehension children
-    // so the dependency scheduler sequences them first (the contract-children-
-    // first machinery pattern).
-    const injectedLocalIds = allInjected.map((c) => c.localId);
+    // A child depends on the injected comprehension children whose region is
+    // RELEVANT to its scope — not on ALL of them. Wiring every builder to every
+    // dive is the cascade amplifier: a dive of `docs/issues/` failing fatally
+    // blocked a builder scoped to `src/engine/` that never needed it (run
+    // live-self-0beb576f). A region dive (it carries the dived region as its
+    // scope) is a dependency only of children whose scope overlaps that region;
+    // a scope-less or whole-repo injected child (refresh of architecture/stack —
+    // no single region) remains a dependency of all, as before. This keeps the
+    // "comprehend the region before building it" guarantee while stopping an
+    // unrelated dive's failure from sinking the whole tree.
+    const scopesOverlap = (a: string[], b: string[]): boolean => {
+      if (a.length === 0 || b.length === 0) return true; // a scope-less side touches everything
+      const norm = (p: string): string => p.replace(/\/+$/, '');
+      return a.some((x) => {
+        const xn = norm(x);
+        return b.some((y) => {
+          const yn = norm(y);
+          return xn === yn || xn.startsWith(`${yn}/`) || yn.startsWith(`${xn}/`);
+        });
+      });
+    };
+    const depsForChild = (child: ChildPlan): string[] => {
+      const relevant = allInjected
+        .filter((inj) => inj.scope.length === 0 || scopesOverlap(child.scope, inj.scope))
+        .map((inj) => inj.localId);
+      return [...child.dependsOn, ...relevant];
+    };
 
     const rawAugmented: ChildPlan[] = [
       ...allInjected,
       ...children.map((child) => ({
         ...child,
-        dependsOn: [...child.dependsOn, ...injectedLocalIds],
+        dependsOn: depsForChild(child),
       })),
     ];
 

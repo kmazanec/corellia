@@ -203,6 +203,18 @@ describe('LlmBrain.decide', () => {
     expect(result.value.kind).toBe('block');
   });
 
+  it('strips leaked provider control tokens (<｜…｜>) before parsing the decision', async () => {
+    // Run live-self-0beb576f: GLM/z-ai leaked a `<｜DSML｜>` special token into the
+    // body, breaking JSON.parse ("Unexpected token '<'"). stripJsonEnvelope must
+    // remove the `<｜…｜>` marker so a contaminated-but-otherwise-valid decision parses.
+    const { fetch } = stubFetch(
+      chatResponse('<｜DSML｜tool｜>' + JSON.stringify({ kind: 'satisfy' })),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(result.value.kind).toBe('satisfy');
+  });
+
   it('normalizes a split child that omits dependsOn/scope to empty arrays', async () => {
     // Regression: the live model omitted `dependsOn`, and the raw child flowed
     // into the engine's split/integrate machinery where `[...child.dependsOn]`

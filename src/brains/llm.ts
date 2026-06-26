@@ -384,11 +384,29 @@ function translateStepResponse(
     return { kind: 'tool-calls', calls, usage, ...incidentField };
   }
 
-  const content = choice.message.content ?? '';
+  // Strip provider control-token contamination from the emitted artifact content
+  // (see stripControlTokens): models like DeepSeek/GLM leak `<｜…｜>` special tokens
+  // into the body, which breaks a downstream JSON.parse of a structured artifact
+  // (run live-self-0beb576f: `<｜DSML｜…` prefixed a RegionFacts artifact, failing
+  // diveAnchorCheck). These tokens are never legitimate output — strip them here so
+  // the clean artifact flows to every consumer (the deterministic gates parse the
+  // artifact directly, not through stripJsonEnvelope).
+  const content = stripControlTokens(choice.message.content ?? '');
   const files = parseFileBlocks(content);
   const artifact: Artifact =
     files.length > 0 ? { kind: 'files', files } : { kind: 'text', text: content };
   return { kind: 'artifact', artifact, usage, ...incidentField };
+}
+
+/**
+ * Remove provider special-vocabulary control tokens that some models (DeepSeek,
+ * GLM/z-ai) leak into the response body. They are delimited by the fullwidth
+ * vertical bar U+FF5C — e.g. `<｜DSML｜>`, `<｜tool▁calls▁begin｜>`,
+ * `<｜end▁of▁sentence｜>` — and are never valid output (JSON, code, or prose), so
+ * removing them can only help. Conservative: only strips the `<｜…｜>` form.
+ */
+function stripControlTokens(s: string): string {
+  return s.includes('<｜') ? s.replace(/<｜[^>]*?｜>/g, '') : s;
 }
 
 // ---------------------------------------------------------------------------
@@ -511,7 +529,9 @@ function fillBudgetShares(children: ChildPlan[]): ChildPlan[] {
  * no fence/preamble is detected.
  */
 function stripJsonEnvelope(raw: string): string {
-  let s = raw.trim();
+  // Strip provider control-token contamination first (see stripControlTokens) so a
+  // leading `<｜…｜>` token doesn't defeat the fence/brace handling below.
+  let s = stripControlTokens(raw).trim();
   const fence = s.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i);
   if (fence && fence[1] !== undefined) s = fence[1].trim();
   // If prose precedes the object, slice from the first balanced-looking brace.
