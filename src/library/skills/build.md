@@ -52,6 +52,15 @@ is evidence of prior decisions, not a template. When the spec and the code
 conflict, the spec wins — surface the conflict as a finding if the existing code
 represents an intentional constraint the spec does not mention.
 
+Read, then `note`, then write. You do not need to hold whole files in mind. After
+reading a file, use the `note` tool to distill what it MEANS for the task — the
+one or two facts you will act on ("collectTree is called at engine.ts ~563 in the
+success branch; the two steps go just before it"). Raw reads may be evicted from
+your context to keep it bounded; your notes persist. Do not read broadly and stall:
+read what a chunk needs, note it, and make your first edit. Reaching for the next
+file when you already have enough to write is how a leaf balloons its context and
+fails to produce.
+
 Scope is a hard boundary. Write no files outside the declared scope. If
 satisfying the spec requires touching an out-of-scope file, surface a blocker
 finding with the specific path and the reason; do not silently expand the diff.

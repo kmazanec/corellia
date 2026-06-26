@@ -42,6 +42,9 @@ import {
 } from './assembly.js';
 import { diffWithinScope, collectTree, preserveTree, commitRound, diffBodiesWithinScope, treeChangedWithinScope } from './worktree.js';
 import {
+  newScratchpad, addNote, renderScratchpad, evictTranscript, type Scratchpad,
+} from './scratchpad.js';
+import {
   parseAcceptanceCriteria,
   criterionToCheck,
   type AcceptanceCriterion,
@@ -129,6 +132,39 @@ function dupKey(name: string, args: Record<string, unknown>): string {
  * against the written path by removing all guard keys whose first arg matches
  * the written path string.
  */
+/**
+ * Release the duplicate-read guard for a call whose result was EVICTED from the
+ * transcript (ADR-036). The read is no longer in context, so the model must be
+ * allowed to re-read it. Uses the callId→guardKey map recorded when the read ran.
+ */
+function releaseGuardForCallId(
+  seenCalls: Set<string>,
+  callKeyByCallId: Map<string, string>,
+  callId: string,
+): void {
+  const key = callKeyByCallId.get(callId);
+  if (key !== undefined) seenCalls.delete(key);
+}
+
+/**
+ * Keep a single notes `context` message updated in the transcript (ADR-036). The
+ * notes block is injected right after the first (immutable harness) message so it
+ * is always in context regardless of how much raw read content is evicted below it.
+ * Re-runs each step: updates the existing notes message in place, or inserts one.
+ */
+function syncScratchpadMessage(transcript: StepTranscript, pad: Scratchpad): void {
+  const rendered = renderScratchpad(pad);
+  if (rendered.length === 0) return; // no notes yet → nothing to inject
+  const NOTE_PREFIX = 'YOUR NOTES';
+  const idx = transcript.findIndex((m) => m.role === 'context' && m.content.startsWith(NOTE_PREFIX));
+  if (idx >= 0) {
+    (transcript[idx] as { role: 'context'; content: string }).content = rendered;
+  } else {
+    // Insert just after the first message (the immutable harness/goal block).
+    transcript.splice(1, 0, { role: 'context', content: rendered });
+  }
+}
+
 function invalidateReadGuardForPath(
   seenCalls: Set<string>,
   writtenPath: string,
@@ -2006,6 +2042,22 @@ export class Engine {
     // Pass the concrete broker (if present) so real ToolDef parameter schemas
     // reach the brain — in particular, run_script's 'script' property.
     const tools = deriveToolDefs(grants, this.effectiveBroker as { defs?: () => ToolDef[] });
+    // `note` (ADR-036) is available to every leaf, engine-intercepted (not broker-
+    // routed, not grant-gated): distill what a read meant so the raw read can be
+    // evicted without losing the substance. Appended to the model's tool surface.
+    tools.push({
+      name: 'note',
+      description:
+        'Record a short note in your durable working memory (your scratchpad). Use it to ' +
+        'distill what a file you read MEANS for the task (e.g. "collectTree is called at ' +
+        'engine.ts ~563 in the success branch") so the raw file can be dropped from context ' +
+        'without losing the insight. Notes persist across steps; raw reads may be evicted.',
+      parameters: {
+        type: 'object',
+        properties: { text: { type: 'string', description: 'The note to remember.' } },
+        required: ['text'],
+      },
+    });
     const transcript: StepTranscript = [];
     let remainingToolCalls = budget.toolCalls;
     // Warn-only runaway backstop: even when the toolCalls budget is not enforced
@@ -2040,6 +2092,13 @@ export class Engine {
     // without debiting the toolCalls counter. Reset per-attempt (not per-step) so
     // the guard spans the full conversation window.
     const seenCalls = new Set<string>();
+
+    // The leaf's curated note buffer (ADR-036): distilled working memory that
+    // survives eviction of raw reads. Filled via the engine-intercepted `note` tool.
+    const scratchpad = newScratchpad();
+    // callId → duplicate-guard key, so an evicted read's guard can be released
+    // (ADR-036) and the model may re-read it.
+    const callKeyByCallId = new Map<string, string>();
 
     // The harness message: the goal itself — title, type, spec — plus any
     // injected memories quoted as data (evidence to weigh, never instructions
@@ -2250,6 +2309,23 @@ export class Engine {
         };
       }
 
+      // ── WORKING-MEMORY BOUND (ADR-036) ──────────────────────────────────────
+      // Refresh the always-retained notes block, then bound the transcript before
+      // sending it: evict the oldest raw tool reads to stubs once the transcript
+      // crosses the token cap, so the prompt never balloons to the point a tool-call
+      // response truncates (build #8: ~117K tokens → truncated JSON → block). Notes
+      // (distilled by the model) and recent reads survive; evicted paths are
+      // released from the duplicate-read guard so the model may re-read on demand.
+      syncScratchpadMessage(transcript, scratchpad);
+      const eviction = evictTranscript(transcript);
+      if (eviction.evicted) {
+        for (const cid of eviction.evictedCallIds) releaseGuardForCallId(seenCalls, callKeyByCallId, cid);
+        await this.store.append({
+          type: 'context-evicted', at: t(), goalId: goal.id,
+          detail: `${eviction.beforeTokens}→${eviction.afterTokens} est. tokens; ${eviction.evictedCallIds.length} read(s) stubbed`,
+        });
+      }
+
       let stepOutput: import('../contract/brain.js').StepOutput;
       try {
         stepOutput = await this.brain.step(goal, transcript, tools, ctx);
@@ -2409,6 +2485,26 @@ export class Engine {
       });
 
       for (const call of stepOutput.calls) {
+        // `note` (ADR-036): engine-intercepted, NOT broker-routed and NOT
+        // grant-gated. The model distills what a read meant into its scratchpad; the
+        // note is always retained (re-injected each step) so it survives eviction of
+        // the raw read. Does not touch the worktree, does not debit the toolCall
+        // budget (it produces no product and reads nothing). Acknowledged inline.
+        if (call.name === 'note') {
+          const text = typeof call.args['text'] === 'string' ? call.args['text'] : '';
+          const landed = addNote(scratchpad, text);
+          await this.store.append({
+            type: 'tool-call', at: t(), goalId: goal.id, tool: 'note', callId: call.id,
+            outcome: landed ? 'ran' : 'refused',
+            ...(landed ? {} : { reason: 'note: empty text ignored' }),
+          });
+          transcript.push({
+            role: 'tool', callId: call.id,
+            content: landed ? 'Noted.' : 'note: empty text ignored',
+          });
+          continue;
+        }
+
         // When enforced, stop routing once the budget is spent (a multi-call step
         // cannot drive the counter past 0). When WARN-ONLY (default), keep
         // routing — the pre-step gate already emitted the budget-exhausted signal
@@ -2453,8 +2549,10 @@ export class Engine {
             });
             continue;
           }
-          // First occurrence of this read-only call: record it.
+          // First occurrence of this read-only call: record it (and map the
+          // callId → key so eviction can release the guard, ADR-036).
           seenCalls.add(key);
+          callKeyByCallId.set(call.id, key);
         }
 
         const result = await this.effectiveBroker!.execute(goal, call);

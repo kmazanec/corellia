@@ -1198,7 +1198,21 @@ export class LlmBrain implements Brain {
         }
 
         if (response.ok) {
-          return (await response.json()) as StepResponse;
+          // A truncated response body (the provider cut the model off at its output
+          // limit) yields invalid JSON here — `response.json()` throws
+          // "Unexpected end of JSON input". Surface that as a clear, classifiable
+          // error rather than a bare parse failure (ADR-036: the working-memory
+          // eviction bound is what PREVENTS the context bloat that causes this; this
+          // is the defensive net that names it when it still happens).
+          const bodyText = await response.text();
+          try {
+            return JSON.parse(bodyText) as StepResponse;
+          } catch {
+            throw new Error(
+              `LLM step response was truncated or invalid JSON (likely output-length ` +
+                `truncation under a large context — ADR-036). Body length: ${bodyText.length}.`,
+            );
+          }
         }
 
         const errorText = await response.text();
