@@ -3529,28 +3529,21 @@ export class Engine {
     const shares = children.map((c) => c.budgetShare);
     const budgets = subdivide(goal.budget, shares);
 
-    // The dive→build knowledge handoff (ADR-040): resolve the repo root + HEAD SHA
-    // once, so each child's spawn can also pull the RegionFacts a dependency dive
-    // produced for its scope and inject them as memory pointers. repoRoot is derived
-    // the same way as the comprehend-merge checkpoint below.
+    // The dive→build knowledge handoff (ADR-040) resolves the repo root once. The
+    // ACTUAL injection happens at child-run time (after a child's dependency dives
+    // have executed and persisted their RegionFacts), NOT here at construction — all
+    // child goals are built upfront before any sibling runs, so a dive's facts do not
+    // yet exist at this point (run live-self-c43b4f69: a builder got 0 dive memories
+    // because they were queried before the dives ran). See the run-time injection below.
     const spawnSpecRepoRoot = (goal.spec as Record<string, unknown>)['repoRoot'];
     const spawnRepoRoot =
       this._activeAssembly?.worktree.repoRoot ??
       (typeof spawnSpecRepoRoot === 'string' ? spawnSpecRepoRoot : '');
-    let spawnHeadSha = '';
-    if (this.knowledge?.headSha !== undefined && spawnRepoRoot.length > 0) {
-      try {
-        spawnHeadSha = await this.knowledge.headSha(spawnRepoRoot);
-      } catch {
-        spawnHeadSha = '';
-      }
-    }
 
-    // Build child goals, injecting memories via memory.query (spawner-mediated) AND
-    // the dive facts a dependency comprehension already produced for the child's scope.
+    // Build child goals, injecting the spawner-mediated memory.query results. The dive
+    // facts a dependency comprehension produces are injected later, at run time.
     const childGoals: Goal[] = await Promise.all(children.map(async (child, i) => {
       const childMemories = await this.memory.query(child.title, child.scope);
-      const diveMemories = await this.diveFactsAsMemories(spawnRepoRoot, child.scope, spawnHeadSha);
       let childBudget = budgets[i] ?? {
         attempts: 1,
         tokens: 1,
@@ -3573,7 +3566,7 @@ export class Engine {
         intent: child.intent ?? goal.intent,
         scope: child.scope,
         budget: childBudget,
-        memories: [...childMemories, ...diveMemories],
+        memories: childMemories,
         ...(goal.spendCeilingUsd !== undefined ? { spendCeilingUsd: goal.spendCeilingUsd } : {}),
       };
     }));
@@ -3668,8 +3661,25 @@ export class Engine {
             }
           }
 
+          // The dive→build knowledge handoff (ADR-040): NOW that this child's
+          // dependency dives have run and persisted their RegionFacts, pull the facts
+          // for the child's scope and inject them as memory pointers — so a builder
+          // starts WITH the comprehension a dependency dive produced instead of
+          // re-reading the region. Done here (not at upfront construction) because the
+          // facts only exist after the dives execute. HEAD SHA is read now too, so the
+          // freshness/provenance gate sees the SHA the dives actually ran against.
+          let spawnHeadSha = '';
+          if (this.knowledge?.headSha !== undefined && spawnRepoRoot.length > 0) {
+            try { spawnHeadSha = await this.knowledge.headSha(spawnRepoRoot); } catch { spawnHeadSha = ''; }
+          }
+          const diveMemories = await this.diveFactsAsMemories(spawnRepoRoot, childGoal.scope, spawnHeadSha);
+          const childGoalWithFacts: Goal =
+            diveMemories.length > 0
+              ? { ...childGoal, memories: [...childGoal.memories, ...diveMemories] }
+              : childGoal;
+
           // Run the child through the engine (shares the tree-scoped accumulator)
-          const ran = await this._run(childGoal, treeState);
+          const ran = await this._run(childGoalWithFacts, treeState);
           if (degradedFindings.length > 0) {
             return { ...ran, findings: [...ran.findings, ...degradedFindings] };
           }
