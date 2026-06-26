@@ -40,6 +40,7 @@ Each issue is one OKF `type: issue` file with `kind` (bug | idea | future-work),
 | [observability-pluggable-tracing](observability-pluggable-tracing.md) | idea | observability, eventlog, cli, langsmith, otel |
 | [external-asset-acquisition](external-asset-acquisition.md) | future-work | structural, asset, tool |
 | [deployment-to-live-url](deployment-to-live-url.md) | future-work | structural, deploy |
+| [deploy-the-factory-end-to-end](deploy-the-factory-end-to-end.md) | future-work | harness, deploy, docker, ci, ghcr, ops, lifecycle |
 | [greenfield-bootstrap](greenfield-bootstrap.md) | future-work | structural, scaffold |
 | [ground-fact-external-knowledge](ground-fact-external-knowledge.md) | future-work | structural, knowledge, grounding |
 | [milestone-loop-step-8-slice-nesting](milestone-loop-step-8-slice-nesting.md) | future-work | milestone-loop, engine |
