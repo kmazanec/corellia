@@ -51,11 +51,17 @@
  *   this iteration's scope (only the scan field on the card was wired; the engine seam is future work).
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+
+// Full-stack scripted flow spawning real subprocesses (git + declared scripts via
+// the worktree sandbox). Like convergence-eyes, the default 5s per-test timeout
+// flakes under full-suite parallel contention — give the file a generous timeout
+// so subprocess starvation can't produce a spurious "Test timed out" failure.
+vi.setConfig({ testTimeout: 30_000 });
 
 import { Engine } from '../../src/engine/engine.js';
 import {

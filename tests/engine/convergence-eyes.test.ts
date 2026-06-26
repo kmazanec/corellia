@@ -21,11 +21,20 @@
  * a test-scaffold leaf run through the engine (green→emit, red→block-no-judge).
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+
+// These are full-stack scripted flows that spawn REAL subprocesses (git init/add/
+// commit + the declared check.mjs through the worktree sandbox). The default 5s
+// per-test timeout is fine in isolation but is starved under full-suite parallel
+// contention (the test-scaffold cases were observed at 8–14s), producing spurious
+// "Test timed out in 5000ms" failures unrelated to logic. Give the whole file a
+// generous timeout so subprocess contention can't flake it; a genuine hang still
+// trips well before any human notices.
+vi.setConfig({ testTimeout: 30_000 });
 
 import { Engine } from '../../src/engine/engine.js';
 import {
