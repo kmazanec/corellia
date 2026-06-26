@@ -1509,7 +1509,7 @@ function comprehendType() {
   });
 }
 
-describe('comprehend over-explore backstop', () => {
+describe('explore-then-emit over-explore backstop (ADR-039)', () => {
   it('forces the emit at the read ceiling instead of read-looping to exhaustion', async () => {
     const store = new MemoryEventStore();
     const finalArtifact = textArtifact('{"result":"forced emit"}');
@@ -1570,13 +1570,13 @@ describe('comprehend over-explore backstop', () => {
     expect(readsRequested).toBeLessThanOrEqual(20);
   }, 10_000);
 
-  it('does NOT force emit for a non-comprehend (deliver/implement) leaf', async () => {
+  it('does NOT force emit for a BUILD leaf (has a write grant — legitimately re-reads)', async () => {
     const store = new MemoryEventStore();
     const finalArtifact = textArtifact('done');
 
-    // An implement-family leaf reads 25 distinct files then volunteers the artifact.
-    // The comprehend backstop must NOT fire — implement leaves legitimately make
-    // many tool-calls. So all 25 reads happen and the brain emits on its own.
+    // A build leaf (fs.write grant) reads 25 distinct files then volunteers the
+    // artifact. The backstop must NOT fire — a write leaf legitimately makes many
+    // read-write-reread tool-calls (ADR-039 excludes it via the write-grant test).
     let readsRequested = 0;
     const TARGET_READS = 25;
     const brain: import('../../src/contract/brain.js').Brain = {
@@ -1597,8 +1597,9 @@ describe('comprehend over-explore backstop', () => {
       },
     };
 
+    // outputSchema present BUT fs.write granted → NOT an explore-then-emit leaf.
     const registry = buildRegistry([
-      leafTypeDef({ name: 'implement', family: 'test', grants: ['fs.read'] }),
+      leafTypeDef({ name: 'implement', family: 'test', grants: ['fs.read', 'fs.write'], outputSchema: SAMPLE_OUTPUT_SCHEMA }),
     ]);
     const engine = new Engine({
       registry,
@@ -1617,8 +1618,57 @@ describe('comprehend over-explore backstop', () => {
     const report = await engine.run(goal);
     expect(report.blockers).toHaveLength(0);
     expect(report.artifact).toEqual(finalArtifact);
-    // All reads happened — the comprehend ceiling did not cut it off at 16.
+    // All reads happened — the ceiling did not cut a write leaf off at 16.
     expect(readsRequested).toBe(TARGET_READS);
+  }, 10_000);
+
+  it('forces emit for an AUTHOR-style explore-then-emit leaf (outputSchema, no write grant)', async () => {
+    const store = new MemoryEventStore();
+    const finalArtifact = textArtifact('{"result":"forced emit"}');
+
+    // An author-acceptance-criteria-shaped leaf: outputSchema + retrieval-only grants,
+    // NO write. ADR-039: it must earn the same force-emit ceiling comprehend gets —
+    // this is the exact shape that read-looped 140 files in run 9e035402.
+    let readsRequested = 0;
+    const brain: import('../../src/contract/brain.js').Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair() { throw new Error('not used'); },
+      async step(_goal, transcript) {
+        const sawStop = transcript.some(
+          (m) => m.role === 'context' && typeof m.content === 'string' && m.content.toLowerCase().includes('stop reading'),
+        );
+        if (sawStop) return { kind: 'artifact', artifact: finalArtifact, usage: ZERO_USAGE };
+        readsRequested++;
+        return {
+          kind: 'tool-calls',
+          calls: [{ id: `r${readsRequested}`, name: 'read_file', args: { path: `src/f${readsRequested}.ts` } }],
+          usage: ZERO_USAGE,
+        };
+      },
+    };
+
+    const registry = buildRegistry([
+      leafTypeDef({ name: 'author-acceptance-criteria', family: 'author', grants: ['retrieval.api', 'fs.read'], outputSchema: SAMPLE_OUTPUT_SCHEMA }),
+    ]);
+    const engine = new Engine({
+      registry, brain, store, memory: new NoopMemoryView(),
+      broker: new FakeBroker([{ callId: 'x', ok: true, output: 'file body' }]),
+    });
+
+    const goal = makeGoal({
+      type: 'author-acceptance-criteria',
+      title: 'author criteria',
+      budget: { attempts: 50, tokens: 10_000_000, toolCalls: 500, wallClockMs: 600_000 },
+    });
+
+    const report = await engine.run(goal);
+    // The backstop fired for the author leaf too — it emitted instead of looping.
+    expect(report.blockers).toHaveLength(0);
+    expect(report.artifact).toEqual(finalArtifact);
+    expect(readsRequested).toBeGreaterThanOrEqual(16);
+    expect(readsRequested).toBeLessThanOrEqual(20);
   }, 10_000);
 });
 

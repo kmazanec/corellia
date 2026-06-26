@@ -22,7 +22,7 @@ import type { Verdict, Finding } from '../contract/verdict.js';
 import type { EventStore } from '../contract/events.js';
 import type { Brain, BrainContext, StepTranscript } from '../contract/brain.js';
 import { MalformedStepError } from '../contract/brain.js';
-import type { Registry } from '../contract/goal-type.js';
+import type { Registry, GoalTypeDef } from '../contract/goal-type.js';
 import type { MemoryView } from '../contract/memory.js';
 import type { RiskClass, SensitivityFact } from '../contract/risk.js';
 import type { PatternStore } from '../contract/pattern.js';
@@ -91,6 +91,27 @@ const READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
   'stack_versions',
   'impact',
 ]);
+
+/** Grants that let a leaf mutate the product/repo — the test that separates a
+ *  read-write-reread BUILD leaf from a pure read-then-emit leaf (ADR-039). */
+const PRODUCT_WRITE_GRANTS: ReadonlySet<string> = new Set(['fs.write', 'docs.issues.write']);
+
+/**
+ * An *explore-then-emit* leaf (ADR-039): it has an `outputSchema` (so it runs the
+ * two-phase explore→emit, ADR-023) AND holds no product-write grant — so it
+ * legitimately reads to gather context, then emits one structured artifact, and
+ * never has cause to read-write-reread. This SHAPE — not the comprehend family
+ * string — is what earns the force-emit read-ceiling: such a leaf that keeps
+ * reading instead of emitting is over-exploring (`author-acceptance-criteria`,
+ * `map-repo`, `deep-dive-region`, `research-external`). A BUILD leaf (`fs.write`)
+ * is excluded by the write-grant test: it legitimately re-reads after writing.
+ */
+function isExploreThenEmitLeaf(typeDef: GoalTypeDef): boolean {
+  return (
+    typeDef.outputSchema !== undefined &&
+    !typeDef.grants.some((g) => PRODUCT_WRITE_GRANTS.has(g))
+  );
+}
 
 /**
  * Produce a stable, order-independent JSON serialization of an args object so
@@ -2116,19 +2137,19 @@ export class Engine {
     const hardToolCallCap = Math.max(budget.toolCalls, 1) * WARN_ONLY_BACKSTOP_MULTIPLE;
     let toolCallsMade = 0;
     let stepIndex = 0;
-    // Comprehend over-explore backstop (AC-4 run #5). The "read at most 6–8 files
-    // then EMIT" economy rule lives only in comprehend.md prose; a model that
-    // ignores it read-loops until it exhausts attempts and emits NOTHING — observed
-    // on a 4-file / 49-LOC region (`src/cats/agents/common`) that ran 49 read-class
-    // calls without ever signalling exploration-complete. Make the rule structural,
-    // scoped to the comprehend (discovery) family only: once read-class tool-calls
-    // cross a hard ceiling, FORCE the two-phase emit on the next step instead of
-    // looping to attempt-exhaustion. deliver/implement leaves are untouched (they
-    // legitimately make many write_file/run_script/re-read calls). The ceiling is a
-    // correctness backstop, not an economy lever — set it well above the 6–8 the
-    // skill asks for so a genuinely thorough dive is never cut short.
-    const COMPREHEND_READ_CEILING = 16;
-    let comprehendReadCalls = 0;
+    // Explore-then-emit over-explore backstop (AC-4 run #5; generalized in ADR-039).
+    // The "read at most 6–8 files then EMIT" economy rule lives in shared skill
+    // prose; a model that ignores it read-loops until it exhausts attempts and emits
+    // NOTHING — observed on a 4-file region (`src/cats/agents/common`, 49 reads) for
+    // comprehend, AND on `author-acceptance-criteria` (140 reads → timeout, run
+    // 9e035402). Make the rule structural for ANY explore-then-emit leaf (outputSchema
+    // + no write grant — see isExploreThenEmitLeaf): once read-class tool-calls cross
+    // a hard ceiling, FORCE the two-phase emit on the next step. BUILD leaves
+    // (fs.write) are excluded by the write-grant test — they legitimately
+    // read-write-reread. The ceiling is a correctness backstop, not an economy lever —
+    // set well above the 6–8 the skill asks for so a thorough dive is never cut short.
+    const EXPLORE_READ_CEILING = 16;
+    let exploreReadCalls = 0;
     let forceEmitNext = false;
     // One recovery from a malformed/truncated step per attempt: on a MalformedStepError
     // (two consecutive unparseable tool-calls) we force a clean emit rather than letting
@@ -2159,6 +2180,9 @@ export class Engine {
     // and the type's section from the loaded skill file. Types whose loader
     // returns nothing inject nothing (lint catches real gaps; engine stays lenient).
     const typeDef = this.registry.get(goal.type);
+    // Whether this leaf earns the explore-then-emit force-emit ceiling (ADR-039):
+    // outputSchema + no product-write grant. Computed once; used in the routing loop.
+    const isExploreThenEmit = isExploreThenEmitLeaf(typeDef);
     const familySkill = loadFamilySkill(typeDef.family);
     const skillBlock = familySkill
       ? (() => {
@@ -2310,7 +2334,7 @@ export class Engine {
         transcript.push({
           role: 'context',
           content:
-            `You have read enough of this region (${comprehendReadCalls} read-class ` +
+            `You have read enough (${exploreReadCalls} read-class ` +
             `calls). STOP reading. Emit the artifact NOW from what you have already ` +
             `read — over-reading a bounded region is a failure, not thoroughness. ` +
             (typeDefForForce.outputSchema !== undefined
@@ -2357,8 +2381,8 @@ export class Engine {
         return {
           kind: 'failed',
           error:
-            `comprehend over-explore: ignored the forced emit after ${comprehendReadCalls} ` +
-            `read-class calls (ceiling ${COMPREHEND_READ_CEILING})`,
+            `explore-then-emit over-explore: ignored the forced emit after ${exploreReadCalls} ` +
+            `read-class calls (ceiling ${EXPLORE_READ_CEILING})`,
           budget: { ...budget, toolCalls: remainingToolCalls },
           transcript,
         };
@@ -2653,13 +2677,16 @@ export class Engine {
         const result = await this.effectiveBroker!.execute(goal, call);
         remainingToolCalls--;
         toolCallsMade++;
-        // Comprehend over-explore backstop: count successful read-class calls for
-        // the discovery family only. Refused calls (above) `continue` before here,
-        // so they don't count. Once the ceiling is crossed, the next loop iteration
-        // forces the emit (see the top of the while loop).
-        if (typeDef.family === 'comprehend' && READ_ONLY_TOOL_NAMES.has(call.name)) {
-          comprehendReadCalls++;
-          if (comprehendReadCalls >= COMPREHEND_READ_CEILING) {
+        // Explore-then-emit over-explore backstop (ADR-039): count successful
+        // read-class calls for any explore-then-emit leaf (outputSchema + no write
+        // grant — comprehend AND author/research alike), NOT just the comprehend
+        // family. Refused calls (above) `continue` before here, so they don't count.
+        // Once the ceiling is crossed, the next loop iteration forces the emit (see
+        // the top of the while loop). Build leaves (fs.write) are excluded — they
+        // legitimately read-write-reread.
+        if (isExploreThenEmit && READ_ONLY_TOOL_NAMES.has(call.name)) {
+          exploreReadCalls++;
+          if (exploreReadCalls >= EXPLORE_READ_CEILING) {
             forceEmitNext = true;
           }
         }
