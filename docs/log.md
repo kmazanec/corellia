@@ -16,6 +16,15 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-25
 
+- **Expert-persona layer for minted subagents** ([ADR-038](adrs/ADR-038-expert-persona-layer.md)).
+  Cloned 12 domain-expert personas into `src/library/personas/` under generic names
+  (go-expert, rust-expert, typescript-expert, …; provenance kept in frontmatter), added one
+  shared pure selector (`src/library/personas.ts` — scope+type → ordered persona keys, LLM-free)
+  and wired `renderPersonaBlock(goal)` into both mint paths: the brain's four roles via
+  `systemPrompt` and the step-loop leaf's harness context. Derived from the goal, so no
+  `BrainContext` plumbing. 23 selector tests; issue `expert-persona-subagents` deleted per the
+  ephemeral-issue rule. Hand-built on main; not yet proven through a live run.
+
 - **Iteration 14 — cascade + decide-robustness fixes from driving slice C**
   ([iteration 14](iterations/2026-06-25-21-cascade-and-decide-fixes/index.md)). Bundles
   ADR-037 + the mustDecompose re-decide (below) and the live runs that surfaced them.

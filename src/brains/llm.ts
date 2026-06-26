@@ -27,6 +27,7 @@ import type { Decision, ChildPlan } from '../contract/decision.js';
 import type { Artifact } from '../contract/report.js';
 import type { ToolDef, ToolCall } from '../contract/tool.js';
 import type { Verdict, Finding } from '../contract/verdict.js';
+import { renderPersonaBlock } from '../library/personas.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -916,12 +917,16 @@ export class LlmBrain implements Brain {
   // Prompt builders
   // -------------------------------------------------------------------------
 
-  private systemPrompt(role: string, goalTypeName: string): string {
-    return (
+  private systemPrompt(role: string, goal: Goal): string {
+    const base =
       `You are a ${role} in the Corellia factory. ` +
-      `You are handling a goal of type "${goalTypeName}". ` +
-      `Respond precisely and factually. Never hallucinate.`
-    );
+      `You are handling a goal of type "${goal.type}". ` +
+      `Respond precisely and factually. Never hallucinate.`;
+    // Expert-persona layer (ADR-038). The persona is derived from
+    // the goal alone via the shared selector, so every brain role wears the same
+    // lens without threading a field through every BrainContext construction site.
+    const persona = renderPersonaBlock(goal);
+    return persona ? `${base}\n\n${persona}` : base;
   }
 
   private goalContext(goal: Goal): string {
@@ -965,7 +970,7 @@ export class LlmBrain implements Brain {
     const messages: ChatMessage[] = [
       {
         role: 'system',
-        content: this.systemPrompt('decision-maker', goal.type),
+        content: this.systemPrompt('decision-maker', goal),
       },
       {
         role: 'user',
@@ -1037,7 +1042,7 @@ export class LlmBrain implements Brain {
     const messages: ChatMessage[] = [
       {
         role: 'system',
-        content: this.systemPrompt('artifact producer', goal.type),
+        content: this.systemPrompt('artifact producer', goal),
       },
       {
         role: 'user',
@@ -1078,7 +1083,7 @@ export class LlmBrain implements Brain {
     const messages: ChatMessage[] = [
       {
         role: 'system',
-        content: this.systemPrompt('judge', goal.type),
+        content: this.systemPrompt('judge', goal),
       },
       {
         role: 'user',
@@ -1126,7 +1131,7 @@ export class LlmBrain implements Brain {
     const messages: ChatMessage[] = [
       {
         role: 'system',
-        content: this.systemPrompt('artifact repairer', goal.type),
+        content: this.systemPrompt('artifact repairer', goal),
       },
       {
         role: 'user',

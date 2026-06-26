@@ -31,7 +31,6 @@ Each issue is one OKF `type: issue` file with `kind` (bug | idea | future-work),
 
 | Issue | Kind | Tags |
 |---|---|---|
-| [expert-persona-subagents](expert-persona-subagents.md) | idea | library, engine, brain, persona, subagent |
 | [design-arch-empty-artifact-block](design-arch-empty-artifact-block.md) | bug | engine, brain, design-arch, robustness |
 | [partial-delivery-on-blocked-dependency](partial-delivery-on-blocked-dependency.md) | idea | partial-delivery, engine, collect |
 | [salvage-on-repeated-failure](salvage-on-repeated-failure.md) | bug | in-run-stall, engine, salvage |
