@@ -985,7 +985,28 @@ export class Engine {
             await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision, usage: reDecideResult.usage });
             return this.ceilingReport(goal, treeState);
           }
-          if (decision.kind !== 'split') break; // changed its mind
+          if (decision.kind !== 'split') {
+            // The re-decide changed its mind away from split. For a `mustDecompose`
+            // type a `satisfy` is STILL invalid (it has no producing tool) — and
+            // breaking here would dispatch it to the attempt loop, BYPASSING the
+            // cannot-satisfy guard that runs only once before the split-eval. Block
+            // honestly instead: the model had the split-rejection feedback and still
+            // would not produce a valid split (surfaced live-self-c9329860, where a
+            // requiresScope rejection forced a re-decide that returned satisfy and
+            // ran the deliver-intent root as a leaf).
+            if (decision.kind === 'satisfy' && typeDef.mustDecompose) {
+              const report = blockedReport(
+                `Type "${goal.type}" must decompose and cannot satisfy directly — after a ` +
+                  `rejected split it re-decided to satisfy, which is invalid for a type with ` +
+                  `no producing tool. Re-commission with a clearer, decomposable intent, or ` +
+                  `the split must propose valid typed children.`,
+              );
+              await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision, ...(decideUsage !== undefined ? { usage: decideUsage } : {}) });
+              await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
+              return report;
+            }
+            break; // changed its mind (block, or satisfy for a non-mustDecompose type)
+          }
           continue;
         }
 

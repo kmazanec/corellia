@@ -1666,4 +1666,38 @@ describe('cannot-satisfy guard (mustDecompose types)', () => {
     expect(report.blockers).toHaveLength(0);
     expect(report.artifact).toEqual(textArtifact('produced'));
   });
+
+  // Regression: a mustDecompose root whose SPLIT is rejected (e.g. a requiresScope
+  // child with empty scope) re-decides; if that re-decide returns satisfy, it must
+  // BLOCK — not break out of the split loop and dispatch to the attempt loop,
+  // bypassing the cannot-satisfy guard (surfaced live-self-c9329860: a requiresScope
+  // rejection forced a re-decide → satisfy → the deliver-intent root ran as a leaf).
+  it('a rejected split that re-decides to satisfy still BLOCKS for a mustDecompose type (no step loop)', async () => {
+    const store = new MemoryEventStore();
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'deliver-intent', family: 'deliver', mustDecompose: true }),
+      // A child that requires scope — spawned with empty scope → validateSplit rejects.
+      leafTypeDef({ name: 'anchored', requiresScope: true }),
+    ]);
+
+    const brain = new ScriptedBrain()
+      // First decide: a split whose anchored child has empty scope → validateSplit rejects.
+      .queueDecide({
+        kind: 'split',
+        children: [
+          { localId: 'a', type: 'anchored', title: 'a', spec: {}, dependsOn: [], scope: [], budgetShare: 1 },
+        ],
+      })
+      // Re-decide (split-rejection path): the model gives up and satisfies.
+      .queueDecide({ kind: 'satisfy' });
+
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const report = await engine.run(makeGoal({ type: 'deliver-intent', scope: ['src/'] }));
+
+    // It blocked honestly — it did NOT run the attempt loop as a leaf.
+    expect(report.blockers.length).toBeGreaterThan(0);
+    expect(report.blockers.join(' ')).toMatch(/must decompose|cannot satisfy/i);
+    const stepEvents = await store.list({ type: 'step' });
+    expect(stepEvents).toHaveLength(0);
+  });
 });
