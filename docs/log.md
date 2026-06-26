@@ -16,6 +16,22 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-25
 
+- **Build run `live-self-2e2ece33`** ($1.56, polluted shared store) — re-commissioned
+  slice C to prove ADR-037. It did **not** reach ADR-037: the `deliver-intent` root
+  returned `satisfy` on its **first** decision (8 completion tokens, defying the
+  prompt that omits the satisfy shape), and the `mustDecompose` guard terminal-blocked
+  it before any split formed. Surfaced a new gap (filed +fixed below); ADR-037 stays
+  committed but unproven live. (Orphaned worktrees from this + an interrupted attempt
+  cleaned up; primary `main` undisturbed. Aside: `out/events.jsonl` is a shared store
+  across runs — pollutes the tree view/cost; noted for a per-run-store cleanup.)
+- **mustDecompose guard re-decides once instead of terminal-blocking** (fixes
+  [mustdecompose-satisfy-terminal-block](issues/mustdecompose-satisfy-terminal-block.md)).
+  A `mustDecompose` root that returns `satisfy` is now **re-decided once** with a
+  corrective nudge (`BrainContext.decideCorrection`); only a *repeated* satisfy
+  terminal-blocks. The guard moved before the SPLIT EVAL so a corrected split is
+  validated normally. `src/engine/engine.ts`, `src/contract/brain.ts`,
+  `src/brains/llm.ts`; tests in `tests/engine/engine.test.ts`. Next: re-commission
+  slice C (should now clear the root decision and finally exercise ADR-037).
 - **ADR-037 — degraded dependency does not cascade-block** (the run-#9 fix). The
   dependency cascade (`src/engine/engine.ts`) gated on "does this dependency have a
   blocker"; it now gates on the dependency's **artifact**: a dependency that blocked

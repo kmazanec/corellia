@@ -816,6 +816,68 @@ export class Engine {
       decision = { kind: 'satisfy' };
     }
 
+    // ── CANNOT-SATISFY GUARD (with one corrective re-decide) ───────────────
+    // A `mustDecompose` type (canonically the deliver-intent root) has no
+    // producing tool and CANNOT satisfy — its only legitimate decisions are split
+    // or block. The decide prompt already omits the satisfy shape and forbids it
+    // (`mustDecompose` ctx). But the brain can still return satisfy in defiance
+    // (observed live-self-2e2ece33: a fresh first decision came back `satisfy` in
+    // 8 completion tokens despite the instruction). A terminal block on that single
+    // slip dead-ends the whole intent with no recovery, even though the model
+    // plainly did not deliberate. So RE-DECIDE ONCE with a sharp correction; only a
+    // REPEATED satisfy (the model had its chance and refused) terminal-blocks. A
+    // corrected split/block then flows through the normal SPLIT EVAL + dispatch
+    // below, so this must run BEFORE the split-eval. The invariant is declared on
+    // the type (`mustDecompose`), not inferred from grants — "capability is the
+    // type" (GOAL-TYPES.md) — so it stays lintable.
+    // (See docs/issues/mustdecompose-satisfy-terminal-block.md.)
+    if (decision.kind === 'satisfy' && typeDef.mustDecompose) {
+      // Record the rejected decision honestly, then give the brain one corrected
+      // shot at a split (or an honest block).
+      await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision, ...(decideUsage !== undefined ? { usage: decideUsage } : {}) });
+
+      const correctionSkill = this.decideSkillBlock(goal.type);
+      const correctionRepoShape = this.repoShapeHint(goal);
+      const correctionCtx: BrainContext = {
+        tier: currentTier,
+        memories: goal.memories,
+        mustDecompose: true,
+        decideCorrection:
+          `Your last decision was "satisfy". That is structurally INVALID for type ` +
+          `"${goal.type}": it has no tool with which to produce the product — its only ` +
+          `job is to decompose. Return a "split" that breaks this intent into typed ` +
+          `children (e.g. comprehension dives over the regions you must understand, ` +
+          `then implement leaves that do the work), or "block" with a brief ONLY if you ` +
+          `genuinely cannot decompose. Do NOT return satisfy again.`,
+        ...(correctionSkill ? { skill: correctionSkill } : {}),
+        ...(correctionRepoShape ? { repoShape: correctionRepoShape } : {}),
+      };
+      const retry = await this.brain.decide(goal, correctionCtx);
+      this.debitTreeState(treeState, retry.usage);
+      if (await this.checkCeiling(goal, treeState)) {
+        await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision: retry.value, usage: retry.usage });
+        return this.ceilingReport(goal, treeState);
+      }
+
+      if (retry.value.kind === 'satisfy') {
+        // The model was corrected and STILL chose satisfy — an honest dead-end now.
+        const report = blockedReport(
+          `Type "${goal.type}" must decompose and cannot satisfy directly — it has no ` +
+            `tool with which to produce the product. The decision-maker returned satisfy ` +
+            `twice (once after an explicit correction); re-commission with a clearer, ` +
+            `decomposable intent, or the split must propose typed children.`,
+        );
+        await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision: retry.value, usage: retry.usage });
+        await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
+        return report;
+      }
+
+      // The corrected decision is a split or block — adopt it and fall through to
+      // the normal SPLIT EVAL + dispatch path (which records the `decided` event).
+      decision = retry.value;
+      decideUsage = retry.usage;
+    }
+
     // The shape is captured for the post-subtree record call.
     const goalShape = typeDef.leafOnly ? null : specShape(goal);
 
@@ -1008,29 +1070,6 @@ export class Engine {
         // Split passed validation (and judge if present)
         break;
       }
-    }
-
-    // ── CANNOT-SATISFY GUARD ───────────────────────────────────────────────
-    // A `mustDecompose` type (canonically the deliver-intent root) has no
-    // producing tool and CANNOT satisfy — its only legitimate decisions are split
-    // or block. If decide nonetheless returns satisfy (e.g. the brain took the
-    // easy exit after its split was judge-rejected), running the attempt loop is
-    // futile: it produces an empty artifact and loops to an opaque
-    // `step-loop:failed` isomorphic block with nothing built (surfaced by build
-    // run live-self-3bf0f5b2). Coerce that satisfy into an actionable block that
-    // names the real reason. The invariant is declared on the type
-    // (`mustDecompose`), not inferred from grants — "capability is the type"
-    // (GOAL-TYPES.md) — so it stays lintable and unambiguous.
-    if (decision.kind === 'satisfy' && typeDef.mustDecompose) {
-      const report = blockedReport(
-        `Type "${goal.type}" must decompose and cannot satisfy directly — it has no ` +
-          `tool with which to produce the product. The decision-maker returned ` +
-          `satisfy; re-commission with a clearer, decomposable intent, or the split ` +
-          `must propose typed children.`,
-      );
-      await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision, ...(decideUsage !== undefined ? { usage: decideUsage } : {}) });
-      await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
-      return report;
     }
 
     await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision, ...(decideUsage !== undefined ? { usage: decideUsage } : {}) });

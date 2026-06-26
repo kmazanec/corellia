@@ -81,6 +81,17 @@ export interface BrainContext {
    * Absent/false → all three shapes are offered, exactly as before.
    */
   mustDecompose?: boolean;
+  /**
+   * A free-text corrective injected into a RE-DECIDE after the engine rejected a
+   * structurally-invalid decision and is giving the brain exactly one more chance
+   * to correct it — canonically a `mustDecompose` root that returned `satisfy`
+   * despite the prompt forbidding it. Carries the sharp reason ("your last
+   * decision was satisfy; that is invalid for this type — split into typed
+   * children NOW") so the second decision is steered, not blind. Distinct from
+   * `priorAttempt` (which is a produce/judge Verdict, not a decision correction).
+   * Absent → a fresh decide with no correction, exactly as before.
+   */
+  decideCorrection?: string;
 }
 
 /**

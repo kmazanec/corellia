@@ -25,6 +25,7 @@ Each issue is one OKF `type: issue` file with `kind` (bug | idea | future-work),
 | [implement-read-paralysis](implement-read-paralysis.md) | bug | engine, step-loop, llm, truncation, finish-reason |
 | [comprehension-region-wallclock-exhaustion](comprehension-region-wallclock-exhaustion.md) | bug | engine, comprehend, wall-clock, recursion |
 | [comprehension-oversplit-cascade](comprehension-oversplit-cascade.md) | bug | engine, comprehend, over-split, dependency-cascade |
+| [mustdecompose-satisfy-terminal-block](mustdecompose-satisfy-terminal-block.md) | bug | engine, decide, mustDecompose, deliver-intent, retry |
 | [visual-runtime-verification](visual-runtime-verification.md) | future-work | structural, verification, vision |
 | [milestone-loop-step-7-prove-live](milestone-loop-step-7-prove-live.md) | future-work | milestone-loop, engine, live-proof |
 

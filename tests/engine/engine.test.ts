@@ -1517,17 +1517,21 @@ describe('comprehend block-without-effort coercion', () => {
 
 // ---------------------------------------------------------------------------
 // A mustDecompose type (the deliver-intent root) CANNOT satisfy: it has no
-// producing tool, so a satisfy decision is coerced to an actionable block rather
-// than run through the futile attempt loop (which would emit an empty artifact and
-// dead-end at step-loop:failed). Surfaced by build run live-self-3bf0f5b2.
+// producing tool. A satisfy decision is RE-DECIDED ONCE with a corrective nudge
+// (ADR-037 follow-on / mustdecompose-satisfy-terminal-block.md) — only a REPEATED
+// satisfy (the model had its corrected chance and refused) is coerced to an
+// actionable terminal block rather than run through the futile attempt loop.
+// First surfaced by build run live-self-3bf0f5b2; the terminal-on-first-slip
+// brittleness surfaced by live-self-2e2ece33.
 // ---------------------------------------------------------------------------
 
 describe('cannot-satisfy guard (mustDecompose types)', () => {
-  it('blocks with an actionable reason when a mustDecompose type decides satisfy', async () => {
+  it('re-decides once, then blocks with an actionable reason when a mustDecompose type satisfies TWICE', async () => {
     const store = new MemoryEventStore();
-    // The brain returns satisfy for the root — the invalid "easy exit" the build
-    // run took after its split was judge-rejected.
-    const brain = new ScriptedBrain().queueDecide({ kind: 'satisfy' });
+    // The brain returns satisfy, is corrected, and defiantly satisfies AGAIN.
+    const brain = new ScriptedBrain()
+      .queueDecide({ kind: 'satisfy' })
+      .queueDecide({ kind: 'satisfy' });
 
     const registry = buildRegistry([
       nonLeafTypeDef({ name: 'deliver-intent', family: 'deliver', mustDecompose: true }),
@@ -1537,12 +1541,51 @@ describe('cannot-satisfy guard (mustDecompose types)', () => {
     const goal = makeGoal({ type: 'deliver-intent' });
     const report = await engine.run(goal);
 
-    // It blocks (does not run the attempt loop), and the brief names the reason.
+    // It blocks (does not run the attempt loop), and the brief names the reason +
+    // that satisfy was returned twice.
     expect(report.blockers.length).toBeGreaterThan(0);
     expect(report.blockers.join(' ')).toMatch(/must decompose|cannot satisfy/i);
+    expect(report.blockers.join(' ')).toMatch(/twice/i);
     // The futile attempt loop never ran: no produce was consumed, no empty emit-loop.
     const stepEvents = await store.list({ type: 'step' });
     expect(stepEvents).toHaveLength(0);
+    // Both decisions were recorded honestly (rejected satisfy + re-decided satisfy).
+    const decided = await store.list({ type: 'decided' });
+    expect(decided.length).toBe(2);
+  });
+
+  it('re-decides once and PROCEEDS when the corrected decision is a split', async () => {
+    const store = new MemoryEventStore();
+    // First satisfy (rejected) → corrected → a valid split into a leaf child.
+    const brain = new ScriptedBrain()
+      .queueDecide({ kind: 'satisfy' })
+      .queueDecide({
+        kind: 'split',
+        children: [
+          { localId: 'impl', type: 'leaf', title: 'do the work', spec: {}, dependsOn: [], scope: [], budgetShare: 1 },
+        ],
+      })
+      .queueProduce(textArtifact('built after correction'));
+
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'deliver-intent', family: 'deliver', mustDecompose: true }),
+      leafTypeDef({ name: 'leaf' }),
+    ]);
+
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const goal = makeGoal({ type: 'deliver-intent' });
+    const report = await engine.run(goal);
+
+    // The corrected split flowed through normal eval + dispatch — no block.
+    expect(report.blockers).toHaveLength(0);
+    // The child was spawned and ran (the corrected split was honored).
+    const spawned = await store.list({ type: 'child-spawned' });
+    expect(spawned).toHaveLength(1);
+    // Both the rejected satisfy and the adopted split were recorded.
+    const decided = await store.list({ type: 'decided' });
+    const kinds = decided.map((e) => (e.type === 'decided' ? e.decision.kind : '')).filter(Boolean);
+    expect(kinds).toContain('satisfy'); // the rejected one
+    expect(kinds).toContain('split');   // the corrected one
   });
 
   it('does NOT guard a normal non-leaf type that legitimately satisfies', async () => {
