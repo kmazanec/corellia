@@ -40,7 +40,6 @@ import { diffWithinScope, collectTree, preserveTree, commitRound, treeChangedWit
 import { createIterationRecord, deleteProvenanceIssue } from './iteration-tools.js';
 import type { KnowledgeArtifact, RegionFacts } from '../contract/knowledge.js';
 import {
-  coverageCheck,
   type KnowledgeForCoverage,
   type MissingRequirement,
 } from '../library/coverage.js';
@@ -77,11 +76,8 @@ import {
 } from './tree-spend.js';
 import { repoShapeHint as buildRepoShapeHint } from './repo-shape-hint.js';
 import {
-  filterMissingCoveredByRefresh,
-  gateMissingLabels,
-  injectCoverageChildren,
-} from './coverage-gate.js';
-import { checkpointVerifyArtifacts } from './coverage-checkpoint.js';
+  runKnowledgeCoverageSplitGate,
+} from './coverage/split-gate.js';
 import { appendGoldenCandidate } from './judge-support.js';
 import { runAuthorityGate } from './authority-gate.js';
 import { runDeterministicGate } from './deterministic-gate.js';
@@ -990,10 +986,19 @@ export class Engine {
         let childrenToSplit = decision.children;
         if (this.knowledge !== undefined) {
           try {
-            childrenToSplit = await this.runCoverageGate(
-              goal, typeDef.kind as 'make' | 'learn' | 'judge' | 'evolve',
-              decision.children, treeState,
-            );
+            const repoRoot = this._activeAssembly?.worktree.repoRoot;
+            if (repoRoot !== undefined) {
+              childrenToSplit = await runKnowledgeCoverageSplitGate({
+                goal,
+                kind: typeDef.kind,
+                children: decision.children,
+                repoRoot,
+                knowledge: this.knowledge,
+                registry: this.registry,
+                store: this.store,
+                now: this.now,
+              });
+            }
           } catch (gateErr) {
             // coverage gate threw a structural split error (injection
             // pushed children over the budget). Block through the existing
@@ -1904,123 +1909,6 @@ export class Engine {
    */
   private repoShapeHint(goal: Goal): string | undefined {
     return buildRepoShapeHint(goal, this._activeAssembly?.worktree.root);
-  }
-
-  private async runCoverageGate(
-    goal: Goal,
-    kind: 'make' | 'learn' | 'judge' | 'evolve',
-    children: ChildPlan[],
-    _treeState: TreeState,
-  ): Promise<ChildPlan[]> {
-    const t = this.now;
-    const kw = this.knowledge;
-    if (kw === undefined) return children;
-
-    // knowledge wiring requires a sandbox with a real repoRoot.
-    // Without a sandbox the gate cannot query meaningful knowledge — skip it
-    // entirely so callers never query with repoRoot '' by accident.
-    if (this._activeAssembly === undefined) return children;
-
-    const repoRoot = this._activeAssembly.worktree.repoRoot;
-
-    const knowledgeState = await kw.query(repoRoot);
-
-    // ── Checkpoint verify-on-read at split entry (ADR-019) ──────────────────
-    // Before running the coverage check, verify any artifacts the goal's kind
-    // would consume. On drift, validate; pass → stale-validated event + proceed;
-    // fail → invalid event + inject refresh child as a dependency.
-    const { refreshChildren, validatedOk, refreshedCategories } =
-      await checkpointVerifyArtifacts({
-        goal,
-        knowledge: knowledgeState,
-        repoRoot,
-        knowledgeGateway: kw,
-        store: this.store,
-        now: t,
-      });
-
-    // Build a goal model for coverageCheck — the parent's kind and split status,
-    // plus the scopes its make-leaf children touch (those leaves go straight to
-    // satisfy and never run their own coverage gate, so the parent is the only
-    // place their region dives can be pulled).
-    //
-    // ADR-029 Decision 2 (comprehension is JIT, pulled by the split gate, bounded
-    // by the regions the goal touches): we union proposed child scopes, but
-    // existsByRegion then bounds the demand to regions that ACTUALLY EXIST. A
-    // child creating a brand-new region has nothing to comprehend, so it pulls no
-    // dive — which is precisely the speculative over-firing the iteration-08
-    // proof runs exposed (~10 dives of unrelated/new regions for a trivial
-    // feature). A child touching an EXISTING region still pulls its dive.
-    const coverageGoal = {
-      kind,
-      isRootSplit: !this.registry.get(goal.type).leafOnly,
-      scope: goal.scope,
-      typeName: goal.type,
-    };
-
-    // Collect scopes from proposed make-kind leaf children so region dives are
-    // checked for them too (they never reach a gate on their own).
-    const childScopeEntries: string[] = [];
-    for (const child of children) {
-      if (!this.registry.has(child.type)) continue;
-      const childDef = this.registry.get(child.type);
-      if (childDef.kind === 'make' && childDef.leafOnly) {
-        childScopeEntries.push(...child.scope);
-      }
-    }
-    const effectiveScope =
-      childScopeEntries.length > 0
-        ? [...goal.scope, ...childScopeEntries]
-        : goal.scope;
-
-    // existsByRegion is the relevance signal over the full effective scope: a
-    // region absent from the working tree is never comprehended (greenfield root
-    // split → no whole-repo maps; not-yet-created child region → no dive).
-    // Region existence is supplied by the knowledge wiring (real existsSync-backed
-    // impl in assembly; deterministic injection in tests). When absent, default to
-    // treat-as-existing — the legacy pre-existence-signal behavior.
-    const regionExists = kw.regionExists ?? (() => true);
-    const existsByRegion: Record<string, boolean> = {};
-    for (const scopeEntry of effectiveScope) {
-      const region = scopeEntry.replace(/\/$/, '');
-      existsByRegion[region] = regionExists(repoRoot, region);
-    }
-
-    const effectiveCoverageGoal =
-      childScopeEntries.length > 0
-        ? { ...coverageGoal, isRootSplit: false, scope: effectiveScope, existsByRegion }
-        : { ...coverageGoal, existsByRegion };
-
-    const result = coverageCheck(effectiveCoverageGoal, knowledgeState, validatedOk);
-
-    // filter out categories already covered by a refresh child so that
-    // an invalid-then-refreshed category never produces two children for the
-    // same category (one from checkpointVerifyArtifacts and one from
-    // mintComprehension). Each category gets exactly one child.
-    const filteredMissing = filterMissingCoveredByRefresh(result.missing, refreshedCategories);
-    const filteredResult = { ok: filteredMissing.length === 0, missing: filteredMissing };
-
-    // Emit gate-checked (always, per spec)
-    await this.store.append({
-      type: 'gate-checked',
-      at: t(),
-      goalId: goal.id,
-      ok: filteredResult.ok && refreshChildren.length === 0,
-      missing: gateMissingLabels(filteredResult.missing, refreshChildren),
-    });
-
-    if (filteredResult.ok && refreshChildren.length === 0) {
-      // Gate passes — no new children, no extra brain calls
-      return children;
-    }
-
-    return injectCoverageChildren({
-      children,
-      missing: filteredResult.missing,
-      refreshChildren,
-      mintComprehension: kw.mintComprehension,
-      resolveType: (tp) => (this.registry.has(tp) ? this.registry.get(tp) : undefined),
-    });
   }
 
   // ── SPLIT PATH ────────────────────────────────────────────────────────────
