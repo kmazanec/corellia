@@ -1,12 +1,11 @@
 import type { Brain } from '../../contract/brain.js';
 import type { DecisionBrief } from '../../contract/decision.js';
 import type { EventStore } from '../../contract/events.js';
-import type { Goal, Tier, Usage } from '../../contract/goal.js';
+import type { Goal, Tier } from '../../contract/goal.js';
 import type { CheckContext, GoalTypeDef, Registry } from '../../contract/goal-type.js';
 import type { Artifact, Report } from '../../contract/report.js';
 import type { RiskClass, SensitivityFact } from '../../contract/risk.js';
 import type { ToolBroker } from '../../contract/tool.js';
-import type { Verdict } from '../../contract/verdict.js';
 import { debitAttempt } from '../budget-events.js';
 import { exhaustedBrief } from '../reports.js';
 import {
@@ -22,10 +21,7 @@ import {
   produceAttemptArtifact,
   type AttemptArtifactProductionResult,
 } from './artifact-production.js';
-import {
-  resolveAttemptFailure,
-  type AttemptFailureResolution,
-} from './failure.js';
+import { handleAttemptFailure } from './failure-resolution.js';
 import { recheckArtifactAfterRepair } from './recheck.js';
 import {
   attemptBrainContext,
@@ -69,7 +65,7 @@ export interface AttemptRunnerDeps {
   ceilingReport: (goal: Goal, treeState: TreeState) => Promise<Report>;
 }
 
-interface AttemptLoopContext extends AttemptLoopInput {
+export interface AttemptLoopContext extends AttemptLoopInput {
   deps: AttemptRunnerDeps;
   typeDef: GoalTypeDef;
   brainConfig: BrainConfig | undefined;
@@ -181,7 +177,7 @@ async function produceArtifactForAttempt(
     debitUsage: (usage) => debitTreeState(context.treeState, usage),
     hasReachedCeiling: () => hasReachedSpendCeiling(context.treeState),
     resolveStepLoopFailure: (failure) =>
-      handleFailure({
+      handleAttemptFailure({
         context,
         artifact: failure.artifact,
         verdict: failure.verdict,
@@ -240,7 +236,7 @@ async function evaluateProducedArtifact(
     blockOnToolCallExhausted: () =>
       context.deps.runBlock(context.goal, exhaustedBrief(context.goal, 'toolCalls')),
     resolveFailure: (failure) =>
-      handleFailure({
+      handleAttemptFailure({
         context,
         artifact: failure.artifact,
         verdict: failure.verdict,
@@ -286,35 +282,6 @@ async function continueAfterEvaluation(
     case 'retry':
       return { kind: 'retry', state: evaluation.state };
   }
-}
-
-function handleFailure(params: {
-  context: AttemptLoopContext;
-  artifact: Artifact;
-  verdict: Verdict;
-  budget: Goal['budget'];
-  tier: Tier;
-  tierIndex: number;
-  priorAttempt: { artifact: Artifact | null; verdict: Verdict } | undefined;
-}): Promise<AttemptFailureResolution> {
-  return resolveAttemptFailure({
-    goal: params.context.goal,
-    artifact: params.artifact,
-    verdict: params.verdict,
-    budget: params.budget,
-    tier: params.tier,
-    tierIndex: params.tierIndex,
-    tierLadder: params.context.tierLadder,
-    priorAttempt: params.priorAttempt,
-    brain: params.context.deps.brain,
-    store: params.context.deps.store,
-    now: params.context.deps.now,
-    onBrief: params.context.deps.onBrief(),
-    debitUsage: (usage: Usage) => debitTreeState(params.context.treeState, usage),
-    hasReachedCeiling: () => hasReachedSpendCeiling(params.context.treeState),
-    onCeilingReached: () =>
-      params.context.deps.ceilingReport(params.context.goal, params.context.treeState),
-  });
 }
 
 function brainConfigFor(brain: Brain): BrainConfig | undefined {
