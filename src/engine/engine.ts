@@ -64,6 +64,12 @@ import { routeStepToolCalls } from './step-loop-router.js';
 import { boundStepLoopTranscript, evictTranscriptAfterTruncation } from './step-loop-transcript.js';
 import { NOTE_TOOL_DEF, deriveToolDefs, isToolGranted } from './step-loop-tools.js';
 import {
+  stepLoopFailureArtifact,
+  stepLoopFailureVerdict,
+  stepLoopTranscriptFinding,
+  type StepLoopResult,
+} from './step-loop-result.js';
+import {
   blockedReport,
   buildReport,
   escalatedBrief,
@@ -1312,7 +1318,7 @@ export class Engine {
       // (deterministic or judge) can thread it into the next attempt's
       // BrainContext.priorAttempt. Stored as a non-gating advisory finding so
       // it travels through every priorAttempt assignment that follows.
-      let stepLoopTailFinding: import('../contract/verdict.js').Finding | null = null;
+      let stepLoopTailFinding: Finding | null = null;
       // Set to true when the leaf tournament ran for this attempt — when true, the
       // standard judgeType judge section is skipped (the tournament IS the judge).
       let tournamentRan = false;
@@ -1328,23 +1334,7 @@ export class Engine {
           artifact = loopResult.artifact;
           budget = loopResult.budget;
           stepLoopTranscriptTail = loopResult.transcript;
-          const tail = stepLoopTranscriptTail.slice(-8).map((m) => {
-            if (m.role === 'assistant') {
-              return { role: m.role, calls: m.toolCalls?.map((c) => c.name) ?? [] };
-            } else if (m.role === 'context') {
-              return { role: m.role, content: m.content };
-            } else {
-              return { role: m.role, content: m.content.slice(0, 120) };
-            }
-          });
-          if (tail.length > 0) {
-            stepLoopTailFinding = {
-              title: `step-loop-transcript:${JSON.stringify(tail)}`,
-              dimension: 'spec',
-              severity: 'low',
-              gating: false,
-            };
-          }
+          stepLoopTailFinding = stepLoopTranscriptFinding(stepLoopTranscriptTail);
           // Track accumulated step token usage on the tokens counter for
           // observability (ADR-033). Tokens never block work; the dollar ceiling
           // is the real bound on spend, enforced by the step loop's ceiling check.
@@ -1365,28 +1355,8 @@ export class Engine {
               dimension: 'toolCalls',
             });
           }
-          const transcriptArtifact: Artifact = {
-            kind: 'text',
-            text: JSON.stringify(loopResult.transcript ?? []),
-          };
-          const loopVerdict: import('../contract/verdict.js').Verdict = {
-            pass: false,
-            findings: [
-              {
-                title: loopResult.kind === 'exhausted'
-                  ? 'Tool-call budget exhausted in step loop'
-                  : `Step loop failed: ${loopResult.error}`,
-                dimension: 'spec',
-                severity: 'high',
-                gating: true,
-              },
-            ],
-            // A non-logical step incident gets a DISTINCT signature (`step-loop:malformed`
-            // for a format incident, `step-loop:transport` for a timed-out/flaky-endpoint
-            // incident) so it neither collides with a genuine logical `step-loop:failed`
-            // in the isomorphic detector nor masquerades as non-convergence.
-            failureSignature: `step-loop:${loopResult.kind === 'failed' && loopResult.failKind && loopResult.failKind !== 'failed' ? loopResult.failKind : loopResult.kind}`,
-          };
+          const transcriptArtifact = stepLoopFailureArtifact(loopResult.transcript);
+          const loopVerdict = stepLoopFailureVerdict(loopResult);
           const resolution = await this.handleFailure(
             goal,
             transcriptArtifact,
@@ -1884,12 +1854,7 @@ export class Engine {
     _priorAttempt: { artifact: Artifact | null; verdict: Verdict } | undefined,
     treeState: TreeState = createTreeState(),
     priorTranscript?: StepTranscript,
-  ): Promise<
-    | { kind: 'artifact'; artifact: Artifact; budget: Budget; transcript: StepTranscript; tokensUsed: number }
-    | { kind: 'exhausted'; budget: Budget; transcript: StepTranscript }
-    | { kind: 'failed'; error: string; failKind?: 'failed' | 'malformed' | 'transport'; budget: Budget; transcript: StepTranscript }
-    | { kind: 'ceiling'; budget: Budget; transcript: StepTranscript }
-  > {
+  ): Promise<StepLoopResult> {
     const t = this.now;
     // Pass the concrete broker (if present) so real ToolDef parameter schemas
     // reach the brain — in particular, run_script's 'script' property.
