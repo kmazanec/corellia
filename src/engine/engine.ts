@@ -13,7 +13,6 @@
  * human-signoff step the engine never performs.
  */
 
-import { createHash } from 'node:crypto';
 import type { Goal, Tier, MemoryPointer, Budget, Usage } from '../contract/goal.js';
 import type { Decision, ChildPlan } from '../contract/decision.js';
 import type { Artifact, Report } from '../contract/report.js';
@@ -89,6 +88,7 @@ import {
   injectCoverageChildren,
 } from './coverage-gate.js';
 import { checkpointVerifyArtifacts } from './coverage-checkpoint.js';
+import { appendGoldenCandidate, enrichRubric } from './judge-support.js';
 
 export { WORST_CASE_PRICE_PER_TOKEN };
 
@@ -905,7 +905,7 @@ export class Engine {
             kind: 'text',
             text: JSON.stringify(decision.children),
           };
-          const rubric = this.enrichRubric(
+          const rubric = enrichRubric(this.registry,
             'Evaluate the split: is it sound and complete? Are dependencies correct and acyclic? Are budgetShares sensible?',
             'judge-split',
             goal.intent,
@@ -1122,7 +1122,7 @@ export class Engine {
     };
 
     const candidates: Candidate[] = [];
-    const rubric = this.enrichRubric(
+    const rubric = enrichRubric(this.registry,
       'Evaluate the split: is it sound and complete? Are dependencies correct and acyclic? Are budgetShares sensible?',
       'judge-split',
       goal.intent,
@@ -1669,7 +1669,7 @@ export class Engine {
       // Skipped when the leaf tournament already ran (the tournament IS the judge
       // for scan.k > 1 types — the winner was selected by k judge calls).
       if (typeDef.judgeType !== null && !tournamentRan) {
-        const rubric = this.enrichRubric(
+        const rubric = enrichRubric(this.registry,
           `Judge this artifact as a ${typeDef.judgeType} for goal type ${typeDef.name}`,
           typeDef.judgeType,
           goal.intent,
@@ -1834,7 +1834,7 @@ export class Engine {
     type Candidate = { artifact: Artifact; verdict: Verdict; lens: string };
     const candidates: Candidate[] = [];
 
-    const rubric = this.enrichRubric(
+    const rubric = enrichRubric(this.registry,
       `Judge this artifact as a ${judgeType} for goal type ${goal.type}`,
       judgeType,
       goal.intent,
@@ -1915,51 +1915,6 @@ export class Engine {
   }
 
   /**
-   * Enrich a judge rubric with:
-   *   (a) the judge type's family skill section + preamble (same injection
-   *       pattern as the step-loop harness, via loadFamilySkill)
-   *   (b) the family's '## The intent dial' section when present — injected
-   *       between the preamble and the type section so judges see the full
-   *       bar definitions (Mimicry bar, Answers-the-question bar, etc.) and
-   *       the arbiter's structural-invariants-never-waived protection
-   *   (c) an intent line: "The goal's intent is <intent>. Apply the bar that
-   *       intent demands per the skill."
-   *
-   * The intent line is included for every judge call — the intent dial is in the
-   * rubric; the scripted brain in tests can key off it to demonstrate the dial.
-   *
-   * HARD INVARIANT: deterministic checks never see intent. This method is ONLY
-   * called at brain.judge call sites, never at deterministic check sites.
-   */
-  private enrichRubric(baseRubric: string, judgeType: string, intent: import('../contract/goal.js').Intent): string {
-    const intentLine = `The goal's intent is ${intent}. Apply the bar that intent demands per the skill.`;
-
-    // Look up the judge type's family skill
-    let skillBlock = '';
-    if (this.registry.has(judgeType)) {
-      const judgeTypeDef = this.registry.get(judgeType);
-      const familySkill = loadFamilySkill(judgeTypeDef.family);
-      if (familySkill) {
-        const section = familySkill.sectionFor(judgeType);
-        const preamble = familySkill.full.split(/\n## /)[0]!.trim();
-        // Include the '## The intent dial' section when present so judges see
-        // the full bar definitions and any structural-invariants-never-waived
-        // protection. Injected between the preamble and the type-specific section.
-        const intentDialSection = familySkill.sectionFor('The intent dial');
-        const parts: string[] = [];
-        if (preamble) parts.push(preamble);
-        if (intentDialSection) parts.push(intentDialSection.trim());
-        if (section) parts.push(section.trim());
-        if (parts.length > 0) {
-          skillBlock = `\n\n--- JUDGE SKILL ---\n${parts.join('\n\n')}\n--- END JUDGE SKILL ---`;
-        }
-      }
-    }
-
-    return `${baseRubric}\n\n${intentLine}${skillBlock}`;
-  }
-
-  /**
    * Append a `golden-candidate` event when goldenCapture is enabled (ADR-024).
    * The artifact and rubric are referenced by sha1 digest so the log does not
    * duplicate large payloads. The model is read from the brain config if the
@@ -1976,32 +1931,18 @@ export class Engine {
     verdict: Verdict,
     tier: Tier,
   ): Promise<void> {
-    if (!this.goldenCapture) return;
-
-    const artifactText =
-      artifact.kind === 'text'
-        ? (artifact.text ?? '')
-        : JSON.stringify(artifact.files ?? []);
-    const artifactDigest = createHash('sha1').update(artifactText).digest('hex');
-    const rubricDigest = createHash('sha1').update(rubric).digest('hex');
-
-    // Extract model from brain config if available (LlmBrain exposes config.modelByTier)
-    let model: string | undefined;
-    const brainAsAny = this.brain as { config?: { modelByTier?: Record<string, string> } };
-    if (brainAsAny.config?.modelByTier) {
-      model = brainAsAny.config.modelByTier[tier];
-    }
-
-    await this.store.append({
-      type: 'golden-candidate',
-      at: this.now(),
+    const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
+    await appendGoldenCandidate({
+      enabled: this.goldenCapture,
+      store: this.store,
+      now: this.now,
       goalId,
       judgeType,
-      artifactDigest,
-      rubricDigest,
-      verdictPass: verdict.pass,
+      artifact,
+      rubric,
+      verdict,
       tier,
-      ...(model !== undefined ? { model } : {}),
+      ...(brainConfig !== undefined ? { brainConfig } : {}),
     });
   }
 
@@ -2422,7 +2363,7 @@ export class Engine {
 
     // Re-run judge
     if (typeDef.judgeType !== null) {
-      const rubric = this.enrichRubric(
+      const rubric = enrichRubric(this.registry,
         `Judge this artifact as a ${typeDef.judgeType} for goal type ${typeDef.name}`,
         typeDef.judgeType,
         goal.intent,
@@ -3076,7 +3017,7 @@ export class Engine {
     const integrationFindings: string[] = [];
     const integrationBlockers: string[] = [];
     if (this.registry.has('judge-integration') && mergedArtifact) {
-      const rubric = this.enrichRubric(
+      const rubric = enrichRubric(this.registry,
         `Does the integrated artifact satisfy the original goal: "${goal.title}"?`,
         'judge-integration',
         goal.intent,
@@ -3518,7 +3459,7 @@ export class Engine {
           return `- [${r?.ok ? 'PASS' : 'FAIL'}] ${c.id}: ${c.claim} (${r?.detail ?? 'not run'})`;
         })
         .join('\n');
-      const rubric = this.enrichRubric(
+      const rubric = enrichRubric(this.registry,
         `Are the frozen acceptance criteria satisfied to a shippable bar for the intent: "${goal.title}"?\n\nFrozen criteria and this round's deterministic check results:\n${criteriaSummary}`,
         judgeType,
         goal.intent,
