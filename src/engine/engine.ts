@@ -24,7 +24,7 @@ import type { MemoryView } from '../contract/memory.js';
 import type { RiskClass, SensitivityFact } from '../contract/risk.js';
 import type { PatternStore } from '../contract/pattern.js';
 import type { ToolBroker } from '../contract/tool.js';
-import { debitAttempt, debitTokenUsage } from './budget-events.js';
+import { debitAttempt } from './budget-events.js';
 import { lintLibrary } from '../library/constitution.js';
 import { loadFamilySkill } from '../library/skills.js';
 import { classifyRisk } from '../library/risk.js';
@@ -60,21 +60,15 @@ import { finalizeSandboxedRun } from './sandbox-finalization.js';
 import { runSplitDispatch } from './split-dispatch.js';
 import { appendGoldenCandidate } from './judge-support.js';
 import { runAuthorityGate } from './authority-gate.js';
-import { runDeterministicGate } from './deterministic-gate.js';
-import { judgeLeafArtifact } from './leaf-judge.js';
 import { produceAttemptArtifact } from './attempt/artifact-production.js';
-import { checkEmissionAuthority } from './attempt/emission-authority.js';
+import { evaluateAttemptArtifact } from './attempt/artifact-evaluation.js';
 import { resolveAttemptFailure } from './attempt/failure.js';
-import { transitionArtifactFailure } from './attempt/failure-transition.js';
 import {
   attemptBrainContext,
-  continueAfterArtifactFailure,
   createAttemptLoopState,
   withAttemptBudget,
-  withAttemptRetry,
 } from './attempt/state.js';
 import { recheckArtifactAfterRepair } from './attempt/recheck.js';
-import { emitSuccessfulArtifact } from './attempt/success.js';
 import { resolveDecisionPhase } from './decision/phase.js';
 import { runSplitRound, type SplitRoundResult } from './split-round.js';
 import {
@@ -674,206 +668,62 @@ export class Engine {
       } = production;
       attemptState = production.state;
 
-      // ── DETERMINISTIC CHECKS ───────────────────────────────────────────
-      const deterministicGate = await runDeterministicGate({
+      const evaluation = await evaluateAttemptArtifact({
         goal,
         artifact,
-        checks: typeDef.deterministic,
-        budget: attemptState.budget,
-        checkContext: this.checkContextFor(goal.id),
-        store: this.store,
-        now: t,
-      });
-      attemptState = withAttemptBudget(attemptState, deterministicGate.budget);
-      if (deterministicGate.verdict !== null) {
-        // Track tool calls spent. toolCalls exhaustion is WARN-ONLY by default
-        // (ADR-030 / enforceToolCallBudget) — emit the signal but do not block
-        // unless an operator armed enforcement. This site previously blocked
-        // unconditionally, inconsistent with the step loop; a deep comprehension
-        // node (with toolCalls now inherited, not floored) should not be killed
-        // on the count.
-        if (deterministicGate.toolCallsExhausted) {
-          await this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'toolCalls' });
-          if (this.enforceToolCallBudget) {
-            return this.runBlock(goal, exhaustedBrief(goal, 'toolCalls'));
-          }
-        }
-
-        if (!deterministicGate.verdict.pass) {
-          const failure = await transitionArtifactFailure({
-            goal,
-            artifact,
-            verdict: deterministicGate.verdict,
-            budget: attemptState.budget,
-            tier: attemptState.tier,
-            tierIndex: attemptState.tierIndex,
-            tierLadder,
-            priorAttempt: attemptState.priorAttempt,
-            stepLoopTailFinding,
-            stepLoopTranscriptTail,
-            resolveFailure: () =>
-              this.handleFailure(
-                goal,
-                artifact,
-                deterministicGate.verdict!,
-                attemptState.budget,
-                attemptState.tier,
-                attemptState.tierIndex,
-                tierLadder,
-                attemptState.priorAttempt,
-                treeState,
-              ),
-            recheck: (repairedArtifact, repairedBudget, repairedTier) =>
-              this.recheckArtifactAfterRepair(
-                goal,
-                repairedArtifact,
-                repairedBudget,
-                repairedTier,
-                typeDef,
-                treeState,
-              ),
-            emitSuccess: (successArtifact) =>
-              emitSuccessfulArtifact({
-                goal,
-                artifact: successArtifact,
-                store: this.store,
-                now: t,
-                persist: (persistGoal, persistArtifact) =>
-                  this.persistLeafKnowledge(persistGoal, persistArtifact),
-              }),
-          });
-          const continuation = continueAfterArtifactFailure(failure);
-          if (continuation.kind === 'ceiling') {
-            return this.ceilingReport(goal, treeState);
-          }
-          if (continuation.kind === 'return') {
-            return continuation.report;
-          }
-          attemptState = withAttemptRetry(attemptState, continuation.retry);
-          continue;
-        }
-      }
-
-      // ── EMISSION RISK RE-CHECK ────────────────────────────────────────────
-      // After deterministic checks pass, re-classify risk against the ACTUAL
-      // artifact file paths. If the artifact touches sensitive territory that
-      // the declared scope did not (scope escape into sensitive paths), the
-      // authority gate fires again before proceeding to the judge.
-      const emissionAuthorityReport = await checkEmissionAuthority({
-        goal,
-        artifact,
+        typeDef,
+        state: attemptState,
+        tierLadder,
         entryRisk,
-        sensitivity: this.sensitivity,
+        stepLoopTailFinding,
+        stepLoopTranscriptTail,
+        tournamentRan,
+        registry: this.registry,
+        brain: this.brain,
         store: this.store,
         now: t,
+        checkContext: this.checkContextFor(goal.id),
+        sensitivity: this.sensitivity,
         onGate: this.onGate,
         onBrief: this.effectiveOnBrief,
-      });
-      if (emissionAuthorityReport !== null) return emissionAuthorityReport;
-
-      // ── LLM JUDGE (only if deterministic passed) ─────────────────────────
-      // Skipped when the leaf tournament already ran (the tournament IS the judge
-      // for scan.k > 1 types — the winner was selected by k judge calls).
-      if (typeDef.judgeType !== null && !tournamentRan) {
-        const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
-        const judgeResult = await judgeLeafArtifact({
-          goal,
-          artifact,
-          typeDef,
-          judgeType: typeDef.judgeType,
-          tier: attemptState.tier,
-          registry: this.registry,
-          brain: this.brain,
-          store: this.store,
-          now: t,
-          goldenCapture: this.goldenCapture,
-          ...(brainConfig !== undefined ? { brainConfig } : {}),
-        });
-        const verdict = judgeResult.verdict;
-
-        debitTreeState(treeState, judgeResult.usage);
-        if (hasReachedSpendCeiling(treeState)) {
-          return this.ceilingReport(goal, treeState);
-        }
-
-        // Track reported tokens on the tokens counter for observability
-        // (ADR-033). Tokens never block work; the dollar ceiling (checked above)
-        // is the real bound on spend.
-        attemptState = withAttemptBudget(
-          attemptState,
-          await debitTokenUsage({
-            budget: attemptState.budget,
-            usage: judgeResult.usage,
+        enforceToolCallBudget: this.enforceToolCallBudget,
+        goldenCapture: this.goldenCapture,
+        ...(brainConfig !== undefined ? { brainConfig } : {}),
+        debitUsage: (usage) => debitTreeState(treeState, usage),
+        hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
+        blockOnToolCallExhausted: () => this.runBlock(goal, exhaustedBrief(goal, 'toolCalls')),
+        resolveFailure: (failureContext) =>
+          this.handleFailure(
             goal,
-            store: this.store,
-            now: t,
-          }),
-        );
-
-        if (!verdict.pass) {
-          const failure = await transitionArtifactFailure({
-            goal,
-            artifact,
-            verdict,
-            budget: attemptState.budget,
-            tier: attemptState.tier,
-            tierIndex: attemptState.tierIndex,
+            failureContext.artifact,
+            failureContext.verdict,
+            failureContext.budget,
+            failureContext.tier,
+            failureContext.tierIndex,
             tierLadder,
-            priorAttempt: attemptState.priorAttempt,
-            stepLoopTailFinding,
-            stepLoopTranscriptTail,
-            resolveFailure: () =>
-              this.handleFailure(
-                goal,
-                artifact,
-                verdict,
-                attemptState.budget,
-                attemptState.tier,
-                attemptState.tierIndex,
-                tierLadder,
-                attemptState.priorAttempt,
-                treeState,
-              ),
-            recheck: (repairedArtifact, repairedBudget, repairedTier) =>
-              this.recheckArtifactAfterRepair(
-                goal,
-                repairedArtifact,
-                repairedBudget,
-                repairedTier,
-                typeDef,
-                treeState,
-              ),
-            emitSuccess: (successArtifact) =>
-              emitSuccessfulArtifact({
-                goal,
-                artifact: successArtifact,
-                store: this.store,
-                now: t,
-                persist: (persistGoal, persistArtifact) =>
-                  this.persistLeafKnowledge(persistGoal, persistArtifact),
-              }),
-          });
-          const continuation = continueAfterArtifactFailure(failure);
-          if (continuation.kind === 'ceiling') {
-            return this.ceilingReport(goal, treeState);
-          }
-          if (continuation.kind === 'return') {
-            return continuation.report;
-          }
-          attemptState = withAttemptRetry(attemptState, continuation.retry);
-          continue;
-        }
-      }
-
-      // Both gates passed (or no judge) — emit the report
-      return emitSuccessfulArtifact({
-        goal,
-        artifact,
-        store: this.store,
-        now: t,
+            failureContext.priorAttempt,
+            treeState,
+          ),
+        recheck: (repairedArtifact, repairedBudget, repairedTier) =>
+          this.recheckArtifactAfterRepair(
+            goal,
+            repairedArtifact,
+            repairedBudget,
+            repairedTier,
+            typeDef,
+            treeState,
+          ),
         persist: (persistGoal, persistArtifact) =>
           this.persistLeafKnowledge(persistGoal, persistArtifact),
       });
+      if (evaluation.kind === 'ceiling') {
+        return this.ceilingReport(goal, treeState);
+      }
+      if (evaluation.kind === 'retry') {
+        attemptState = evaluation.state;
+        continue;
+      }
+      return evaluation.report;
     }
   }
 
