@@ -55,8 +55,6 @@ import { recordStepOutput } from './step-loop-step.js';
 import { boundStepLoopTranscript } from './step-loop-transcript.js';
 import { isToolGranted } from './step-loop-tools.js';
 import {
-  stepLoopFailureArtifact,
-  stepLoopFailureVerdict,
   stepLoopTranscriptFinding,
   type StepLoopResult,
 } from './step-loop-result.js';
@@ -93,6 +91,7 @@ import { produceClassicArtifact } from './attempt/classic-produce.js';
 import { checkEmissionAuthority } from './attempt/emission-authority.js';
 import { resolveAttemptFailure } from './attempt/failure.js';
 import { transitionArtifactFailure } from './attempt/failure-transition.js';
+import { transitionStepLoopFailure } from './attempt/step-loop-failure.js';
 import { runLeafTournament } from './attempt/leaf-tournament.js';
 import { recheckArtifactAfterRepair } from './attempt/recheck.js';
 import { emitSuccessfulArtifact } from './attempt/success.js';
@@ -1024,47 +1023,37 @@ export class Engine {
             now: t,
           });
         } else {
-          // exhausted or thrown — fail into the control loop
-          if (loopResult.kind === 'exhausted') {
-            await this.store.append({
-              type: 'budget-exhausted',
-              at: t(),
-              goalId: goal.id,
-              dimension: 'toolCalls',
-            });
-          }
-          const transcriptArtifact = stepLoopFailureArtifact(loopResult.transcript);
-          const loopVerdict = stepLoopFailureVerdict(loopResult);
-          const resolution = await this.handleFailure(
+          const failure = await transitionStepLoopFailure({
             goal,
-            transcriptArtifact,
-            loopVerdict,
-            loopResult.budget,
+            loopResult,
             tier,
             tierIndex,
             tierLadder,
-            priorAttempt
-              ? priorAttempt
-              : { artifact: transcriptArtifact, verdict: loopVerdict },
-            treeState,
-          );
-          if (resolution.kind === 'repaired') {
-            budget = resolution.budget;
-            priorAttempt = { artifact: transcriptArtifact, verdict: loopVerdict };
-            // Carry the failed transcript so the next attempt's harness has evidence
-            priorLoopTranscript = loopResult.transcript;
-            continue;
-          } else if (resolution.kind === 'escalated') {
-            tier = resolution.tier;
-            tierIndex = tierLadder.indexOf(tier);
-            budget = resolution.budget;
-            priorAttempt = { artifact: transcriptArtifact, verdict: loopVerdict };
-            // Carry the failed transcript so the next attempt's harness has evidence
-            priorLoopTranscript = loopResult.transcript;
-            continue;
-          } else {
-            return resolution.report;
+            priorAttempt,
+            store: this.store,
+            now: t,
+            resolveFailure: (failureContext) =>
+              this.handleFailure(
+                goal,
+                failureContext.artifact,
+                failureContext.verdict,
+                failureContext.budget,
+                failureContext.tier,
+                failureContext.tierIndex,
+                tierLadder,
+                failureContext.priorAttempt,
+                treeState,
+              ),
+          });
+          if (failure.kind === 'blocked') {
+            return failure.report;
           }
+          tier = failure.tier;
+          tierIndex = failure.tierIndex;
+          budget = failure.budget;
+          priorAttempt = failure.priorAttempt;
+          priorLoopTranscript = failure.priorLoopTranscript;
+          continue;
         }
       } else {
         // Classic produce path
