@@ -127,6 +127,7 @@ import {
   assessMilestoneRound,
   type RoundAssessment,
 } from './milestone/round-assessment.js';
+import { runMilestoneLoop } from './milestone/loop.js';
 import { reDecideMilestoneRound } from './milestone/redecide-round.js';
 
 export { WORST_CASE_PRICE_PER_TOKEN };
@@ -2174,165 +2175,26 @@ export class Engine {
     treeState: TreeState,
     _depth = 0,
   ): Promise<Report> {
-    const t = this.now;
     const typeDef = this.registry.get(goal.type);
     const iterative = typeDef.iterative!; // dispatch guard guarantees presence
     const effectiveMaxRounds = goal.maxRounds ?? iterative.maxRounds;
-
-    // The frozen done-condition (minted round 0, never re-authored) and the loop
-    // carry-state across rounds.
-    let criteriaArtifact: Artifact | null = null;
-    let roundReport: Report = blockedReport('milestone loop produced no round');
-    let lastAssessment: RoundAssessment | null = null;
-    let priorPassingCount = -1; // -1 so round 0 is always a "strict increase" baseline
-    let flatRounds = 0;
-    let priorRoundRef: string | null = null;
-    let roundChildren = children;
-
-    let roundIndex = 0;
-    let outcome: 'done' | 'continue' | 'halt-no-progress' | 'halt-max-rounds' | 'halt-ceiling' =
-      'continue';
-
-    while (true) {
-      // (a) GUARD 4 (CEILING) at the TOP of every round — the per-round top gate
-      // the termination tradeoff requires; the bound spend cannot exceed.
-      if (hasReachedSpendCeiling(treeState)) {
-        if (lastAssessment === null) {
-          // Tripped before any round ran — a plain ceiling block, no partial yet.
-          return this.ceilingReport(goal, treeState);
-        }
-        // A round already produced a partial — record the ceiling halt honestly:
-        // the once-per-tree ceiling-reached event + a round-assessed naming the
-        // guard, then break to emit the cumulative partial.
-        await this.ceilingReachedOnce(goal, treeState);
-        outcome = 'halt-ceiling';
-        await this.store.append({
-          type: 'round-assessed',
-          at: t(),
-          goalId: goal.id,
-          round: roundIndex,
-          passingCount: lastAssessment.passingCount,
-          criteriaTotal: lastAssessment.criteriaTotal,
-          judgeVerdict: lastAssessment.judgeVerdict,
-          outcome,
-          diffDigest: lastAssessment.diffDigest,
-        });
-        break;
-      }
-
-      await this.store.append({
-        type: 'round-started',
-        at: t(),
-        goalId: goal.id,
-        round: roundIndex,
-        spentUsd: treeState.spentUsd,
-        roundWallClockMs: goal.budget.wallClockMs,
-      });
-
-      // (b) DECIDE — round 0 uses the dispatch's already-validated split; round
-      // N>0 re-decides against the unmet criteria, the judge findings, and the
-      // prior round's diff bodies (quoted DATA, weighed not obeyed).
-      if (roundIndex > 0) {
-        const reDecided = await this.reDecideRound(
-          goal,
-          treeState,
-          lastAssessment!,
-          priorRoundRef,
-        );
-        if ('halt' in reDecided) {
-          // Re-decide could not produce a runnable split — halt with the partial
-          // we have rather than looping blind.
-          outcome = 'continue';
-          break;
-        }
-        roundChildren = reDecided.children;
-      }
-
-      // (c) runRound — the existing single-pass body (build child map → integrate).
-      const round = await this.runRound(goal, roundChildren, [], treeState);
-      roundReport = round.report;
-
-      // Round 0 freezes the criteria; later rounds keep the frozen one.
-      if (roundIndex === 0) {
-        criteriaArtifact = this.extractCriteriaArtifact(round.childOutcomes);
-        if (criteriaArtifact !== null) {
-          await this.persistLeafKnowledge(goal, criteriaArtifact);
-        }
-      }
-
-      // (d) commitRound advancing HEAD (so verify-on-read + diffBodies are real).
-      const committedRef = this.commitRoundIfWorktree(roundIndex, goal.title);
-
-      // (e) assess → passingCount + judge-acceptance; emit round-assessed.
-      const assessment = await this.assessRound(
-        goal,
-        criteriaArtifact,
-        round.mergedArtifact,
-        treeState,
-      );
-      lastAssessment = assessment;
-
-      // (f) THE FOUR-GUARD HALT (first-to-fire-wins, §4.3). CEILING (guard 4) is
-      // gated at the TOP of the loop; here we evaluate DONE → NO-PROGRESS →
-      // MAX-ROUNDS in order, the first that fires winning.
-      const strictIncrease = assessment.passingCount > priorPassingCount;
-      // Update the no-progress grace counter on this round's deterministic result:
-      // a strict increase resets it; a non-increase consumes the one grace round.
-      if (strictIncrease) {
-        flatRounds = 0;
-      } else {
-        flatRounds += 1;
-      }
-      const done =
-        assessment.criteriaTotal > 0 &&
-        assessment.passingCount === assessment.criteriaTotal &&
-        assessment.judgeVerdict.pass;
-
-      if (done) {
-        outcome = 'done'; // GUARD 1 — scripts AND judge (decision 1)
-      } else if (flatRounds >= 2) {
-        // GUARD 2 — NO-PROGRESS: passingCount failed to strictly increase for a
-        // SECOND consecutive round (one grace round tolerated, decision 4).
-        // Judge-independent — the one near-deterministic guard.
-        outcome = 'halt-no-progress';
-      } else if (roundIndex + 1 >= effectiveMaxRounds) {
-        // GUARD 3 — MAX-ROUNDS runaway-backstop (decision 4).
-        outcome = 'halt-max-rounds';
-      } else {
-        outcome = 'continue';
-      }
-
-      await this.store.append({
-        type: 'round-assessed',
-        at: t(),
-        goalId: goal.id,
-        round: roundIndex,
-        passingCount: assessment.passingCount,
-        criteriaTotal: assessment.criteriaTotal,
-        judgeVerdict: assessment.judgeVerdict,
-        outcome,
-        diffDigest: assessment.diffDigest,
-      });
-
-      if (outcome !== 'continue') break;
-
-      // Advance loop state for the next round.
-      priorPassingCount = assessment.passingCount;
-      priorRoundRef = committedRef ?? priorRoundRef;
-      roundIndex += 1;
-    }
-
-    // ── After break: emit ONE final report. DONE → the cumulative green report;
-    // any non-DONE halt → the cumulative green artifact with the unmet criteria
-    // and the judge's gating verdict as blockers (gap A5, honest partial). The
-    // last round's integrate (judge-integration inside runRound) already ran —
-    // we do NOT double-run it.
-    const finalReport =
-      outcome === 'done' || lastAssessment === null
-        ? roundReport
-        : this.withUnmetBlockers(roundReport, lastAssessment);
-    await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report: finalReport });
-    return finalReport;
+    return runMilestoneLoop({
+      goal,
+      initialChildren: children,
+      effectiveMaxRounds,
+      treeState,
+      store: this.store,
+      now: this.now,
+      runRound: (roundChildren) => this.runRound(goal, roundChildren, [], treeState),
+      reDecideRound: (priorAssessment, priorRoundRef) =>
+        this.reDecideRound(goal, treeState, priorAssessment, priorRoundRef),
+      persistCriteria: (artifact) => this.persistLeafKnowledge(goal, artifact),
+      commitRound: (roundIndex) => this.commitRoundIfWorktree(roundIndex, goal.title),
+      assessRound: (criteriaArtifact, mergedArtifact) =>
+        this.assessRound(goal, criteriaArtifact, mergedArtifact, treeState),
+      ceilingReachedOnce: () => this.ceilingReachedOnce(goal, treeState),
+      ceilingReport: () => this.ceilingReport(goal, treeState),
+    });
   }
 
   /**
@@ -2361,21 +2223,6 @@ export class Engine {
       tier: this.registry.get(goal.type).tier.default,
       debitUsage: (usage) => debitTreeState(treeState, usage),
     });
-  }
-
-  /**
-   * Locate the frozen acceptance-criteria artifact among a round's children: the
-   * report of the child planned as `author-acceptance-criteria`. Null when no
-   * such child ran or it produced no artifact (the loop then has no criteria to
-   * gate on — handled as zero criteria by the assessment).
-   */
-  private extractCriteriaArtifact(
-    childOutcomes: { plan: ChildPlan; report: Report }[],
-  ): Artifact | null {
-    const criteriaChild = childOutcomes.find(
-      (c) => c.plan.type === 'author-acceptance-criteria',
-    );
-    return criteriaChild?.report.artifact ?? null;
   }
 
   /**
@@ -2416,36 +2263,6 @@ export class Engine {
       ...(brainConfig !== undefined ? { brainConfig } : {}),
       debitUsage: (usage) => debitTreeState(treeState, usage),
     });
-  }
-
-  /**
-   * Decorate a round's report with the unmet criteria as blockers — the honest
-   * non-done outcome (gap A5): the cumulative green artifact is emitted, never an
-   * empty worktree, with the unmet criteria and the judge's gating verdict named.
-   */
-  private withUnmetBlockers(
-    report: Report,
-    assessment: {
-      passingCount: number;
-      criteriaTotal: number;
-      judgeVerdict: Verdict;
-      checkResults: { id: string; ok: boolean; detail: string }[];
-    },
-  ): Report {
-    const unmet = assessment.checkResults.filter((r) => !r.ok);
-    const blockers = [...report.blockers];
-    if (unmet.length > 0) {
-      blockers.push(
-        `Acceptance criteria not yet met (${assessment.passingCount}/${assessment.criteriaTotal}): ` +
-          unmet.map((r) => `${r.id} (${r.detail})`).join('; '),
-      );
-    }
-    if (!assessment.judgeVerdict.pass) {
-      blockers.push(
-        `judge-acceptance did not pass: ${assessment.judgeVerdict.findings.map((f) => f.title).join(', ') || 'no shippable verdict'}`,
-      );
-    }
-    return { ...report, blockers };
   }
 
   // ── BLOCK PATH ────────────────────────────────────────────────────────────
