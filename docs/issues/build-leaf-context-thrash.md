@@ -24,8 +24,14 @@ severity: high
 >    read past `READ_FILE_AUTO_BOUND_LINES` (400) returns a bounded head + a paging
 >    notice. Small whole-file reads stay byte-identical.
 >
-> **Still to prove:** a live run showing the build leaf converges to `write_file`
-> without the re-read sawtooth.
+> Plus (ADR-041): the **explore-then-emit read-ceiling was removed** — with context
+> bounded by the working-memory mechanism, the 16-read force-emit was redundant and
+> was force-emitting a partial RegionFacts that failed its gate (`dive-tests-engine`,
+> the dive that cascade-blocked the build in runs 15-17). A leaf now reads what the
+> region needs and emits when ready.
+>
+> **Still to prove:** a live run showing the dives all converge AND the build leaf
+> reaches `write_file` without the re-read sawtooth.
 
 ## Problem
 

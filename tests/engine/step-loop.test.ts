@@ -1509,25 +1509,30 @@ function comprehendType() {
   });
 }
 
-describe('explore-then-emit over-explore backstop (ADR-039)', () => {
-  it('forces the emit at the read ceiling instead of read-looping to exhaustion', async () => {
-    const store = new MemoryEventStore();
-    const finalArtifact = textArtifact('{"result":"forced emit"}');
+describe('explore-then-emit reads freely (no read-count ceiling)', () => {
+  // The old EXPLORE_READ_CEILING (16) force-emitted an explore-then-emit leaf once
+  // its read count crossed a bar, on the theory an unbounded read-loop balloons the
+  // transcript to truncation. That root cause now lives in the working-memory bound
+  // (140K cap + summarize-on-evict + ranged reads), so the ceiling was removed — it
+  // had been forcing a PARTIAL emit from ~16 reads of a region that needed more,
+  // which then failed its gate and step-loop:failed (dive-tests-engine, runs 15-17).
+  // A leaf now reads as many files as the region needs and emits when IT is ready.
 
-    // The brain ALWAYS asks to read a NEW file (unique path → never duplicate-guarded),
-    // EXCEPT when the transcript carries the forced "stop reading, emit now" nudge —
-    // then it returns the artifact. A brain that never saw the nudge would loop forever.
+  it('a comprehend leaf reads well past 16 files and converges on its own (not cut off)', async () => {
+    const store = new MemoryEventStore();
+    const finalArtifact = textArtifact('{"result":"emitted when ready"}');
+
+    // The brain reads 40 distinct files — more than double the old 16 ceiling — then
+    // volunteers the artifact. Nothing forces it: it must reach 40 and emit itself.
     let readsRequested = 0;
+    const TARGET_READS = 40;
     const brain: import('../../src/contract/brain.js').Brain = {
       async decide() { throw new Error('not used'); },
       async produce() { throw new Error('not used'); },
       async judge() { throw new Error('not used'); },
       async repair() { throw new Error('not used'); },
-      async step(_goal, transcript) {
-        const sawStopReading = transcript.some(
-          (m) => m.role === 'context' && typeof m.content === 'string' && m.content.toLowerCase().includes('stop reading'),
-        );
-        if (sawStopReading) {
+      async step() {
+        if (readsRequested >= TARGET_READS) {
           return { kind: 'artifact', artifact: finalArtifact, usage: ZERO_USAGE };
         }
         readsRequested++;
@@ -1541,42 +1546,26 @@ describe('explore-then-emit over-explore backstop (ADR-039)', () => {
 
     const registry = buildRegistry([comprehendType()]);
     const engine = new Engine({
-      registry,
-      brain,
-      store,
-      memory: new NoopMemoryView(),
-      // Every read returns distinct content so the duplicate guard never fires.
+      registry, brain, store, memory: new NoopMemoryView(),
       broker: new FakeBroker([{ callId: 'x', ok: true, output: 'file body' }]),
     });
 
-    const goal = makeGoal({
+    const report = await engine.run(makeGoal({
       type: 'deep-dive-region',
       title: 'Deep-dive region src/small',
-      // Generous attempts/toolCalls so the run would NOT stop on budget — only the
-      // read-ceiling backstop can end this read-loop.
       budget: { attempts: 50, tokens: 10_000_000, toolCalls: 500, wallClockMs: 600_000 },
-    });
+    }));
 
-    const report = await engine.run(goal);
-
-    // The backstop forced the emit: the goal produced the artifact, not a blocker.
+    // It emitted its OWN artifact after all 40 reads — never cut off at ~16.
     expect(report.blockers).toHaveLength(0);
     expect(report.artifact).toEqual(finalArtifact);
-
-    // It stopped at the ceiling, not after hundreds of reads. The ceiling is 16;
-    // allow a small margin (a multi-call step could overshoot by a few) but it must
-    // be nowhere near the 500-toolCall / 50-attempt budget.
-    expect(readsRequested).toBeGreaterThanOrEqual(16);
-    expect(readsRequested).toBeLessThanOrEqual(20);
+    expect(readsRequested).toBe(TARGET_READS);
   }, 10_000);
 
-  it('does NOT force emit for a BUILD leaf (has a write grant — legitimately re-reads)', async () => {
+  it('a BUILD leaf also reads freely (unchanged — it was never ceiling-bound)', async () => {
     const store = new MemoryEventStore();
     const finalArtifact = textArtifact('done');
 
-    // A build leaf (fs.write grant) reads 25 distinct files then volunteers the
-    // artifact. The backstop must NOT fire — a write leaf legitimately makes many
-    // read-write-reread tool-calls (ADR-039 excludes it via the write-grant test).
     let readsRequested = 0;
     const TARGET_READS = 25;
     const brain: import('../../src/contract/brain.js').Brain = {
@@ -1597,127 +1586,22 @@ describe('explore-then-emit over-explore backstop (ADR-039)', () => {
       },
     };
 
-    // outputSchema present BUT fs.write granted → NOT an explore-then-emit leaf.
     const registry = buildRegistry([
       leafTypeDef({ name: 'implement', family: 'test', grants: ['fs.read', 'fs.write'], outputSchema: SAMPLE_OUTPUT_SCHEMA }),
     ]);
     const engine = new Engine({
-      registry,
-      brain,
-      store,
-      memory: new NoopMemoryView(),
+      registry, brain, store, memory: new NoopMemoryView(),
       broker: new FakeBroker([{ callId: 'x', ok: true, output: 'file body' }]),
     });
 
-    const goal = makeGoal({
+    const report = await engine.run(makeGoal({
       type: 'implement',
       title: 'implement many reads',
       budget: { attempts: 50, tokens: 10_000_000, toolCalls: 500, wallClockMs: 600_000 },
-    });
-
-    const report = await engine.run(goal);
-    expect(report.blockers).toHaveLength(0);
-    expect(report.artifact).toEqual(finalArtifact);
-    // All reads happened — the ceiling did not cut a write leaf off at 16.
-    expect(readsRequested).toBe(TARGET_READS);
-  }, 10_000);
-
-  it('forces emit for an AUTHOR-style explore-then-emit leaf (outputSchema, no write grant)', async () => {
-    const store = new MemoryEventStore();
-    const finalArtifact = textArtifact('{"result":"forced emit"}');
-
-    // An author-acceptance-criteria-shaped leaf: outputSchema + retrieval-only grants,
-    // NO write. ADR-039: it must earn the same force-emit ceiling comprehend gets —
-    // this is the exact shape that read-looped 140 files in run 9e035402.
-    let readsRequested = 0;
-    const brain: import('../../src/contract/brain.js').Brain = {
-      async decide() { throw new Error('not used'); },
-      async produce() { throw new Error('not used'); },
-      async judge() { throw new Error('not used'); },
-      async repair() { throw new Error('not used'); },
-      async step(_goal, transcript) {
-        const sawStop = transcript.some(
-          (m) => m.role === 'context' && typeof m.content === 'string' && m.content.toLowerCase().includes('stop reading'),
-        );
-        if (sawStop) return { kind: 'artifact', artifact: finalArtifact, usage: ZERO_USAGE };
-        readsRequested++;
-        return {
-          kind: 'tool-calls',
-          calls: [{ id: `r${readsRequested}`, name: 'read_file', args: { path: `src/f${readsRequested}.ts` } }],
-          usage: ZERO_USAGE,
-        };
-      },
-    };
-
-    const registry = buildRegistry([
-      leafTypeDef({ name: 'author-acceptance-criteria', family: 'author', grants: ['retrieval.api', 'fs.read'], outputSchema: SAMPLE_OUTPUT_SCHEMA }),
-    ]);
-    const engine = new Engine({
-      registry, brain, store, memory: new NoopMemoryView(),
-      broker: new FakeBroker([{ callId: 'x', ok: true, output: 'file body' }]),
-    });
-
-    const goal = makeGoal({
-      type: 'author-acceptance-criteria',
-      title: 'author criteria',
-      budget: { attempts: 50, tokens: 10_000_000, toolCalls: 500, wallClockMs: 600_000 },
-    });
-
-    const report = await engine.run(goal);
-    // The backstop fired for the author leaf too — it emitted instead of looping.
-    expect(report.blockers).toHaveLength(0);
-    expect(report.artifact).toEqual(finalArtifact);
-    expect(readsRequested).toBeGreaterThanOrEqual(16);
-    expect(readsRequested).toBeLessThanOrEqual(20);
-  }, 10_000);
-
-  it('the forced emit is given NO tools, so a defiant model cannot keep reading (ADR-039)', async () => {
-    const store = new MemoryEventStore();
-    const finalArtifact = textArtifact('{"result":"forced"}');
-
-    // A DEFIANT model: it keeps requesting reads whenever it is given tools, ignoring
-    // any "stop reading" instruction. It only emits when handed an EMPTY tool set
-    // (nothing to call). This is run live-self-56492678's failure: the forced emit
-    // passed the full tool set, so the model read 30 files past the 16 ceiling and
-    // blocked "ignored the forced emit". With tools removed, it MUST emit.
-    let readsRequested = 0;
-    let sawEmptyTools = false;
-    const brain: import('../../src/contract/brain.js').Brain = {
-      async decide() { throw new Error('not used'); },
-      async produce() { throw new Error('not used'); },
-      async judge() { throw new Error('not used'); },
-      async repair() { throw new Error('not used'); },
-      async step(_goal, _transcript, tools) {
-        if (tools.length === 0) {
-          sawEmptyTools = true;
-          return { kind: 'artifact', artifact: finalArtifact, usage: ZERO_USAGE };
-        }
-        readsRequested++;
-        return {
-          kind: 'tool-calls',
-          calls: [{ id: `r${readsRequested}`, name: 'read_file', args: { path: `src/f${readsRequested}.ts` } }],
-          usage: ZERO_USAGE,
-        };
-      },
-    };
-
-    const registry = buildRegistry([comprehendType()]);
-    const engine = new Engine({
-      registry, brain, store, memory: new NoopMemoryView(),
-      broker: new FakeBroker([{ callId: 'x', ok: true, output: 'file body' }]),
-    });
-    const report = await engine.run(makeGoal({
-      type: 'deep-dive-region', title: 'Deep-dive region src/small',
-      budget: { attempts: 50, tokens: 10_000_000, toolCalls: 500, wallClockMs: 600_000 },
     }));
-
-    // The forced emit ran with no tools and the defiant model was forced to emit.
-    expect(sawEmptyTools).toBe(true);
     expect(report.blockers).toHaveLength(0);
     expect(report.artifact).toEqual(finalArtifact);
-    // It stopped at the ceiling, not after 500 reads — the escape hatch is closed.
-    expect(readsRequested).toBeGreaterThanOrEqual(16);
-    expect(readsRequested).toBeLessThanOrEqual(20);
+    expect(readsRequested).toBe(TARGET_READS);
   }, 10_000);
 });
 

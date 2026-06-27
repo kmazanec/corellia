@@ -2241,18 +2241,21 @@ export class Engine {
     const hardToolCallCap = Math.max(budget.toolCalls, 1) * WARN_ONLY_BACKSTOP_MULTIPLE;
     let toolCallsMade = 0;
     let stepIndex = 0;
-    // Explore-then-emit over-explore backstop (AC-4 run #5; generalized in ADR-039).
-    // The "read at most 6–8 files then EMIT" economy rule lives in shared skill
-    // prose; a model that ignores it read-loops until it exhausts attempts and emits
-    // NOTHING — observed on a 4-file region (`src/cats/agents/common`, 49 reads) for
-    // comprehend, AND on `author-acceptance-criteria` (140 reads → timeout, run
-    // 9e035402). Make the rule structural for ANY explore-then-emit leaf (outputSchema
-    // + no write grant — see isExploreThenEmitLeaf): once read-class tool-calls cross
-    // a hard ceiling, FORCE the two-phase emit on the next step. BUILD leaves
-    // (fs.write) are excluded by the write-grant test — they legitimately
-    // read-write-reread. The ceiling is a correctness backstop, not an economy lever —
-    // set well above the 6–8 the skill asks for so a thorough dive is never cut short.
-    const EXPLORE_READ_CEILING = 16;
+    // Count read-class calls for the over-explore signal only — NOT to force an
+    // emit. The old EXPLORE_READ_CEILING (16) force-emitted any explore-then-emit
+    // leaf once it crossed the count, on the theory that an unbounded read-loop
+    // balloons the transcript to truncation and emits nothing. That theory is now
+    // handled at the source by the working-memory bound (ADR-036, raised to 140K +
+    // summarize-on-evict + ranged reads, run live-self-bcc825bb): context stays
+    // bounded no matter how many files are read, so a thorough dive of a large
+    // region (tests/engine, 33 files) no longer needs cutting short. The ceiling was
+    // doing active harm — forcing a PARTIAL emit from ~16 reads of a region that
+    // needs more, which then failed its dive-anchor gate and `step-loop:failed`
+    // (dive-tests-engine, runs 15/16/17). True non-termination is still backstopped
+    // by the warn-only tool-call cap (50× below), the tokens/dollar/wall-clock
+    // bounds, and the malform-recovery forced emit — none of which truncate a
+    // legitimately-reading dive. `exploreReadCalls` is retained only for the
+    // honest read-count phrase on the malform-recovery emit path.
     let exploreReadCalls = 0;
     let forceEmitNext = false;
     // One recovery from a malformed/truncated step per attempt: on a MalformedStepError
@@ -2502,14 +2505,15 @@ export class Engine {
             tokensUsed: totalTokensUsed,
           };
         }
-        // The model ignored the forced emit and returned tool-calls anyway. Fail
-        // the attempt with a useful signal; the control loop re-decides (and the
-        // carried transcript means the next attempt starts already-read).
+        // The model ignored the forced emit (only reachable now via malform-recovery)
+        // and returned tool-calls anyway. Fail the attempt with a useful signal; the
+        // control loop re-decides (and the carried transcript means the next attempt
+        // starts already-read).
         return {
           kind: 'failed',
           error:
-            `explore-then-emit over-explore: ignored the forced emit after ${exploreReadCalls} ` +
-            `read-class calls (ceiling ${EXPLORE_READ_CEILING})`,
+            `ignored the malform-recovery forced emit after ${exploreReadCalls} ` +
+            `read-class calls`,
           budget: { ...budget, toolCalls: remainingToolCalls },
           transcript,
         };
@@ -2819,18 +2823,15 @@ export class Engine {
         const result = await this.effectiveBroker!.execute(goal, call);
         remainingToolCalls--;
         toolCallsMade++;
-        // Explore-then-emit over-explore backstop (ADR-039): count successful
-        // read-class calls for any explore-then-emit leaf (outputSchema + no write
-        // grant — comprehend AND author/research alike), NOT just the comprehend
-        // family. Refused calls (above) `continue` before here, so they don't count.
-        // Once the ceiling is crossed, the next loop iteration forces the emit (see
-        // the top of the while loop). Build leaves (fs.write) are excluded — they
-        // legitimately read-write-reread.
+        // Count successful read-class calls for an explore-then-emit leaf — used
+        // ONLY for the honest read-count phrase if a malform-recovery emit fires.
+        // No force-emit ceiling any more: the working-memory bound keeps the
+        // transcript bounded, so an unbounded read no longer balloons to truncation,
+        // and forcing a partial emit was failing thorough dives (see the comment at
+        // the top of the loop). Refused calls `continue` before here, so they don't
+        // count. Build leaves (fs.write) are not explore-then-emit and skip this.
         if (isExploreThenEmit && READ_ONLY_TOOL_NAMES.has(call.name)) {
           exploreReadCalls++;
-          if (exploreReadCalls >= EXPLORE_READ_CEILING) {
-            forceEmitNext = true;
-          }
         }
 
         // Log the tool-call event

@@ -16,6 +16,16 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-26
 
+- **Bound a leaf's CONTEXT, not its read COUNT** ([ADR-041](adrs/ADR-041-bound-context-not-read-count.md)).
+  Removed the explore-then-emit read-ceiling (force-emit after 16 reads): now that the
+  working-memory bound keeps context bounded regardless of read count, the ceiling was
+  redundant AND harmful — it force-emitted a partial RegionFacts from ~16 reads of a
+  33-file region (tests/engine), which failed its dive-anchor gate → step-loop:failed →
+  null → cascade-block (runs 15/16/17, deterministic not flaky). A leaf now reads what
+  the region needs and emits when ready; non-termination is still backstopped by the
+  warn-only tool-call cap and the tokens/dollar/wall-clock bounds. Reframed
+  `_explore-economy.md` from a hard count to relevance guidance.
+
 - **The build-leaf working-memory bound stops thrashing — bigger cap, summarize-on-evict,
   ranged reads.** A fully-fed implement leaf read 170 files across 46 evictions with 0
   writes (slice-C run 16): the ADR-036 bound evicted after ~6 of corellia's large files,
