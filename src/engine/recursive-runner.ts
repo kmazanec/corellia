@@ -1,5 +1,5 @@
 import type { Brain } from '../contract/brain.js';
-import type { DecisionBrief } from '../contract/decision.js';
+import type { Decision, DecisionBrief } from '../contract/decision.js';
 import type { EventStore } from '../contract/events.js';
 import type { Goal, Usage } from '../contract/goal.js';
 import type { CheckContext, Registry } from '../contract/goal-type.js';
@@ -14,7 +14,10 @@ import {
   ceilingReport,
   runBlock,
 } from './blocking.js';
-import { resolveDecisionPhase } from './decision/phase.js';
+import {
+  resolveDecisionPhase,
+  type DecisionPhaseResult,
+} from './decision/phase.js';
 import { enterGoal } from './goal-entry.js';
 import type { EngineKnowledge } from './options.js';
 import { runSplitDispatch } from './split-dispatch.js';
@@ -27,6 +30,18 @@ import {
 import type { TreeWorktree } from './worktree.js';
 
 type BriefResolution = 'deny' | 'park' | 'bounce' | 'answered';
+type RecursiveRunnerDeps = Parameters<typeof createRecursiveRunner>[0];
+type GoalEntry = Awaited<ReturnType<typeof enterGoal>>;
+type ReadyGoalEntry = Extract<GoalEntry, { kind: 'ready' }>;
+type ReadyDecision = Extract<DecisionPhaseResult, { kind: 'ready' }> & {
+  entry: ReadyGoalEntry;
+};
+type ReadySatisfyDecision = ReadyDecision & {
+  decision: Extract<Decision, { kind: 'satisfy' }>;
+};
+type ReadySplitDecision = ReadyDecision & {
+  decision: Extract<Decision, { kind: 'split' }>;
+};
 
 export interface RecursiveRunner {
   run: (goal: Goal, treeState: TreeState) => Promise<Report>;
@@ -59,20 +74,11 @@ export function createRecursiveRunner(deps: {
 }
 
 async function runRecursiveGoal(
-  deps: Parameters<typeof createRecursiveRunner>[0],
+  deps: RecursiveRunnerDeps,
   goal: Goal,
   treeState: TreeState,
 ): Promise<Report> {
-  const entry = await enterGoal({
-    goal,
-    registry: deps.registry,
-    store: deps.store,
-    now: deps.now,
-    sensitivity: deps.sensitivity,
-    onGate: deps.onGate,
-    onBrief: deps.onBrief(),
-    hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
-  });
+  const entry = await enterRecursiveGoal(deps, goal, treeState);
   if (entry.kind === 'ceiling') {
     return runCeilingReport(deps, goal, treeState);
   }
@@ -88,6 +94,32 @@ async function runRecursiveGoal(
     return decision.report;
   }
 
+  await appendDecidedEvent(deps, goal, decision);
+  return dispatchDecision(deps, goal, treeState, decision);
+}
+
+function enterRecursiveGoal(
+  deps: RecursiveRunnerDeps,
+  goal: Goal,
+  treeState: TreeState,
+): Promise<GoalEntry> {
+  return enterGoal({
+    goal,
+    registry: deps.registry,
+    store: deps.store,
+    now: deps.now,
+    sensitivity: deps.sensitivity,
+    onGate: deps.onGate,
+    onBrief: deps.onBrief(),
+    hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
+  });
+}
+
+async function appendDecidedEvent(
+  deps: RecursiveRunnerDeps,
+  goal: Goal,
+  decision: ReadyDecision,
+): Promise<void> {
   await deps.store.append({
     type: 'decided',
     at: deps.now(),
@@ -95,78 +127,26 @@ async function runRecursiveGoal(
     decision: decision.decision,
     ...(decision.decideUsage !== undefined ? { usage: decision.decideUsage } : {}),
   });
+}
 
+function dispatchDecision(
+  deps: RecursiveRunnerDeps,
+  goal: Goal,
+  treeState: TreeState,
+  decision: ReadyDecision,
+): Promise<Report> {
   switch (decision.decision.kind) {
     case 'satisfy':
-      return createAttemptRunner({
-        registry: deps.registry,
-        brain: deps.brain,
-        store: deps.store,
-        now: deps.now,
-        effectiveBroker: deps.effectiveBroker,
-        sandboxRepoRoot: () => deps.activeWorktree()?.repoRoot,
-        checkContextFor: deps.checkContextFor,
-        sensitivity: deps.sensitivity,
-        onGate: deps.onGate,
-        onBrief: deps.onBrief,
-        enforceToolCallBudget: deps.enforceToolCallBudget,
-        goldenCapture: deps.goldenCapture,
-        persistLeafKnowledge: deps.persistLeafKnowledge,
-        runBlock: (blockGoal, brief) => runBlockFor(deps, blockGoal, brief),
-        ceilingReport: (ceilingGoal, ceilingTreeState) =>
-          runCeilingReport(deps, ceilingGoal, ceilingTreeState),
-      }).runAttemptLoop({
-        goal,
-        initialTier: decision.entry.tier,
-        initialTierIndex: decision.entry.tierIndex,
-        tierLadder: decision.entry.tierLadder,
-        deadline: decision.entry.deadline,
-        entryRisk: decision.entry.entryRisk,
-        treeState,
+      return runSatisfyDecision(deps, goal, treeState, {
+        ...decision,
+        decision: decision.decision,
       });
 
-    case 'split': {
-      const splitRunner = createSplitRunner({
-        memory: deps.memory,
-        registry: deps.registry,
-        brain: deps.brain,
-        goldenCapture: deps.goldenCapture,
-        store: deps.store,
-        now: deps.now,
-        activeWorktree: deps.activeWorktree,
-        factsForRegions: deps.knowledge?.factsForRegions,
-        headSha: deps.knowledge?.headSha,
-        checkContextFor: deps.checkContextFor,
-        persistLeafKnowledge: deps.persistLeafKnowledge,
-        runChild: deps.runChild,
-        decideSkillBlock: deps.decideSkillBlock,
-        ceilingReachedOnce: (ceilingGoal, ceilingTreeState) =>
-          ceilingReachedOnce({
-            goal: ceilingGoal,
-            treeState: ceilingTreeState,
-            store: deps.store,
-            now: deps.now,
-          }),
-        ceilingReport: (ceilingGoal, ceilingTreeState) =>
-          runCeilingReport(deps, ceilingGoal, ceilingTreeState),
-      });
-      return runSplitDispatch({
-        goal,
-        typeDef: decision.entry.typeDef,
+    case 'split':
+      return runSplitDecision(deps, goal, treeState, {
+        ...decision,
         decision: decision.decision,
-        terracedLoserFindings: decision.terracedLoserFindings,
-        goalShape: decision.goalShape,
-        repoRoot: deps.activeWorktree()?.repoRoot,
-        knowledge: deps.knowledge,
-        patterns: deps.patterns,
-        registry: deps.registry,
-        store: deps.store,
-        now: deps.now,
-        runMilestone: (children) => splitRunner.runMilestone(goal, children, treeState),
-        runSplit: (children, findings) =>
-          splitRunner.runSplit(goal, children, findings, treeState),
       });
-    }
 
     case 'block':
       return runBlockFor(deps, goal, decision.decision.brief);
@@ -176,8 +156,93 @@ async function runRecursiveGoal(
   }
 }
 
+function runSatisfyDecision(
+  deps: RecursiveRunnerDeps,
+  goal: Goal,
+  treeState: TreeState,
+  decision: ReadySatisfyDecision,
+): Promise<Report> {
+  return createAttemptRunner({
+    registry: deps.registry,
+    brain: deps.brain,
+    store: deps.store,
+    now: deps.now,
+    effectiveBroker: deps.effectiveBroker,
+    sandboxRepoRoot: () => deps.activeWorktree()?.repoRoot,
+    checkContextFor: deps.checkContextFor,
+    sensitivity: deps.sensitivity,
+    onGate: deps.onGate,
+    onBrief: deps.onBrief,
+    enforceToolCallBudget: deps.enforceToolCallBudget,
+    goldenCapture: deps.goldenCapture,
+    persistLeafKnowledge: deps.persistLeafKnowledge,
+    runBlock: (blockGoal, brief) => runBlockFor(deps, blockGoal, brief),
+    ceilingReport: (ceilingGoal, ceilingTreeState) =>
+      runCeilingReport(deps, ceilingGoal, ceilingTreeState),
+  }).runAttemptLoop({
+    goal,
+    initialTier: decision.entry.tier,
+    initialTierIndex: decision.entry.tierIndex,
+    tierLadder: decision.entry.tierLadder,
+    deadline: decision.entry.deadline,
+    entryRisk: decision.entry.entryRisk,
+    treeState,
+  });
+}
+
+function runSplitDecision(
+  deps: RecursiveRunnerDeps,
+  goal: Goal,
+  treeState: TreeState,
+  decision: ReadySplitDecision,
+): Promise<Report> {
+  const splitRunner = createSplitRunnerFor(deps);
+  return runSplitDispatch({
+    goal,
+    typeDef: decision.entry.typeDef,
+    decision: decision.decision,
+    terracedLoserFindings: decision.terracedLoserFindings,
+    goalShape: decision.goalShape,
+    repoRoot: deps.activeWorktree()?.repoRoot,
+    knowledge: deps.knowledge,
+    patterns: deps.patterns,
+    registry: deps.registry,
+    store: deps.store,
+    now: deps.now,
+    runMilestone: (children) => splitRunner.runMilestone(goal, children, treeState),
+    runSplit: (children, findings) =>
+      splitRunner.runSplit(goal, children, findings, treeState),
+  });
+}
+
+function createSplitRunnerFor(deps: RecursiveRunnerDeps) {
+  return createSplitRunner({
+    memory: deps.memory,
+    registry: deps.registry,
+    brain: deps.brain,
+    goldenCapture: deps.goldenCapture,
+    store: deps.store,
+    now: deps.now,
+    activeWorktree: deps.activeWorktree,
+    factsForRegions: deps.knowledge?.factsForRegions,
+    headSha: deps.knowledge?.headSha,
+    checkContextFor: deps.checkContextFor,
+    persistLeafKnowledge: deps.persistLeafKnowledge,
+    runChild: deps.runChild,
+    decideSkillBlock: deps.decideSkillBlock,
+    ceilingReachedOnce: (goal, treeState) =>
+      ceilingReachedOnce({
+        goal,
+        treeState,
+        store: deps.store,
+        now: deps.now,
+      }),
+    ceilingReport: (goal, treeState) => runCeilingReport(deps, goal, treeState),
+  });
+}
+
 async function decideGoal(
-  deps: Parameters<typeof createRecursiveRunner>[0],
+  deps: RecursiveRunnerDeps,
   goal: Goal,
   treeState: TreeState,
   entry: Extract<Awaited<ReturnType<typeof enterGoal>>, { kind: 'ready' }>,
@@ -209,7 +274,7 @@ function assertNever(value: never): never {
 }
 
 function runBlockFor(
-  deps: Parameters<typeof createRecursiveRunner>[0],
+  deps: RecursiveRunnerDeps,
   goal: Goal,
   brief: DecisionBrief,
 ): Promise<Report> {
@@ -223,7 +288,7 @@ function runBlockFor(
 }
 
 function runCeilingReport(
-  deps: Parameters<typeof createRecursiveRunner>[0],
+  deps: RecursiveRunnerDeps,
   goal: Goal,
   treeState: TreeState,
 ): Promise<Report> {
