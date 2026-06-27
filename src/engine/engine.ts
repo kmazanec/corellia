@@ -94,6 +94,7 @@ import { checkEmissionAuthority } from './attempt/emission-authority.js';
 import { resolveAttemptFailure } from './attempt/failure.js';
 import { runLeafTournament } from './attempt/leaf-tournament.js';
 import { recheckArtifactAfterRepair } from './attempt/recheck.js';
+import { finishRepairedAttempt } from './attempt/repair-flow.js';
 import { emitSuccessfulArtifact } from './attempt/success.js';
 import { acceptSplitDecision } from './decision/split-acceptance.js';
 import { runTerracedScan } from './decision/terraced-scan.js';
@@ -1162,48 +1163,42 @@ export class Engine {
           );
 
           if (resolution.kind === 'repaired') {
-            // Repaired: loop again with the repaired artifact as context
-            budget = resolution.budget;
-            priorAttempt = {
-              artifact: resolution.artifact,
-              verdict: deterministicGate.verdict,
-            };
-            // Re-run checks on the repaired artifact immediately (repair is part of
-            // the same attempt that produced the flawed artifact — no extra consume)
-            const recheck = await this.recheckArtifactAfterRepair(
+            const repaired = await finishRepairedAttempt({
               goal,
-              resolution.artifact,
-              budget,
+              repair: resolution,
               tier,
-              typeDef,
-              treeState,
-            );
-            budget = recheck.budget;
-
-            if (recheck.ceiling) {
+              recheck: (repairedArtifact, repairedBudget, repairedTier) =>
+                this.recheckArtifactAfterRepair(
+                  goal,
+                  repairedArtifact,
+                  repairedBudget,
+                  repairedTier,
+                  typeDef,
+                  treeState,
+                ),
+              emitSuccess: (successArtifact) =>
+                emitSuccessfulArtifact({
+                  goal,
+                  artifact: successArtifact,
+                  store: this.store,
+                  now: t,
+                  persist: (persistGoal, persistArtifact) =>
+                    this.persistLeafKnowledge(persistGoal, persistArtifact),
+                }),
+            });
+            if (repaired.kind === 'ceiling') {
               return this.ceilingReport(goal, treeState);
             }
-            if (recheck.passed) {
-              return emitSuccessfulArtifact({
-                goal,
-                artifact: resolution.artifact,
-                store: this.store,
-                now: t,
-                persist: (persistGoal, persistArtifact) =>
-                  this.persistLeafKnowledge(persistGoal, persistArtifact),
-              });
-            } else {
-              // Repair didn't hold — continue loop with failure context
-              priorAttempt = {
-                artifact: resolution.artifact,
-                verdict: recheck.verdict!,
-              };
-              if (recheck.tier !== tier) {
-                tier = recheck.tier;
-                tierIndex = tierLadder.indexOf(tier);
-              }
-              continue;
+            if (repaired.kind === 'emitted') {
+              return repaired.report;
             }
+            budget = repaired.budget;
+            priorAttempt = repaired.priorAttempt;
+            if (repaired.tier !== tier) {
+              tier = repaired.tier;
+              tierIndex = tierLadder.indexOf(tier);
+            }
+            continue;
           } else if (resolution.kind === 'escalated') {
             tier = resolution.tier;
             tierIndex = tierLadder.indexOf(tier);
@@ -1294,45 +1289,42 @@ export class Engine {
           );
 
           if (resolution.kind === 'repaired') {
-            budget = resolution.budget;
-            priorAttempt = {
-              artifact: resolution.artifact,
-              verdict,
-            };
-            // Repair is part of the same attempt — no extra consume
-            const recheck = await this.recheckArtifactAfterRepair(
+            const repaired = await finishRepairedAttempt({
               goal,
-              resolution.artifact,
-              budget,
+              repair: resolution,
               tier,
-              typeDef,
-              treeState,
-            );
-            budget = recheck.budget;
-
-            if (recheck.ceiling) {
+              recheck: (repairedArtifact, repairedBudget, repairedTier) =>
+                this.recheckArtifactAfterRepair(
+                  goal,
+                  repairedArtifact,
+                  repairedBudget,
+                  repairedTier,
+                  typeDef,
+                  treeState,
+                ),
+              emitSuccess: (successArtifact) =>
+                emitSuccessfulArtifact({
+                  goal,
+                  artifact: successArtifact,
+                  store: this.store,
+                  now: t,
+                  persist: (persistGoal, persistArtifact) =>
+                    this.persistLeafKnowledge(persistGoal, persistArtifact),
+                }),
+            });
+            if (repaired.kind === 'ceiling') {
               return this.ceilingReport(goal, treeState);
             }
-            if (recheck.passed) {
-              return emitSuccessfulArtifact({
-                goal,
-                artifact: resolution.artifact,
-                store: this.store,
-                now: t,
-                persist: (persistGoal, persistArtifact) =>
-                  this.persistLeafKnowledge(persistGoal, persistArtifact),
-              });
-            } else {
-              priorAttempt = {
-                artifact: resolution.artifact,
-                verdict: recheck.verdict!,
-              };
-              if (recheck.tier !== tier) {
-                tier = recheck.tier;
-                tierIndex = tierLadder.indexOf(tier);
-              }
-              continue;
+            if (repaired.kind === 'emitted') {
+              return repaired.report;
             }
+            budget = repaired.budget;
+            priorAttempt = repaired.priorAttempt;
+            if (repaired.tier !== tier) {
+              tier = repaired.tier;
+              tierIndex = tierLadder.indexOf(tier);
+            }
+            continue;
           } else if (resolution.kind === 'escalated') {
             tier = resolution.tier;
             tierIndex = tierLadder.indexOf(tier);
