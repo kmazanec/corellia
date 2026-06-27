@@ -106,6 +106,7 @@ import {
 } from './decision/context.js';
 import { produceClassicArtifact } from './attempt/classic-produce.js';
 import { checkEmissionAuthority } from './attempt/emission-authority.js';
+import { runLeafTournament } from './attempt/leaf-tournament.js';
 import { emitSuccessfulArtifact } from './attempt/success.js';
 import {
   invalidSplitStructureVerdict,
@@ -1221,17 +1222,26 @@ export class Engine {
         // types already use tool calls to produce a high-quality artifact and
         // do not benefit from blind-text comparison.
         if (typeDef.scan && typeDef.scan.k > 1 && typeDef.judgeType !== null) {
-          const tournResult = await this.runLeafTournament(
+          const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
+          const tournResult = await runLeafTournament({
             goal,
-            artifact,
-            typeDef.scan,
-            typeDef.judgeType,
+            firstArtifact: artifact,
+            scan: typeDef.scan,
+            judgeType: typeDef.judgeType,
+            typeDef,
             tier,
             budget,
             ctx,
-            treeState,
-          );
-          if ('ceiling' in tournResult) {
+            registry: this.registry,
+            brain: this.brain,
+            store: this.store,
+            now: t,
+            goldenCapture: this.goldenCapture,
+            ...(brainConfig !== undefined ? { brainConfig } : {}),
+            debitUsage: (usage) => debitTreeState(treeState, usage),
+            hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
+          });
+          if (tournResult.kind === 'ceiling') {
             return this.ceilingReport(goal, treeState);
           }
           artifact = tournResult.artifact;
@@ -1489,124 +1499,6 @@ export class Engine {
    * routes tool calls through the broker, and logs every step and result. Returns
    * either the final artifact (with updated budget) or a failure descriptor.
    */
-
-  // ── LEAF TOURNAMENT (F-65 A9) ─────────────────────────────────────────────
-  /**
-   * Run a k-candidate tournament for a leafOnly type with scan.k > 1.
-   *
-   * The first candidate artifact is already produced (passed in). We produce
-   * k-1 more with different lenses (cycling through scan.lenses) and judge each
-   * with the type's judgeType. The winner — the first passing candidate with
-   * fewest findings, tie-broken by fewest findings overall — is returned as the
-   * new artifact. Losers are advisory: their judge-verdict events are in the log
-   * but they never block emission.
-   *
-   * Every candidate emits one `judge-verdict` event. When `goldenCapture` is true
-   * (non-scripted runs), each candidate also emits a `golden-candidate` event so
-   * ADR-024's flywheel accumulates tournament evidence.
-   *
-   * The tournament is budget-transparent: each additional produce call debits the
-   * treeState and the per-attempt token budget dimension; each judge call debits
-   * the treeState. A ceiling hit at any point returns `{ ceiling: true }` so the
-   * caller can surface `ceilingReport`.
-   *
-   * The `seenCalls` guard (F-64) is per step-loop attempt, not per tournament
-   * candidate — each candidate uses the classic produce path, not the step loop,
-   * so there is no duplicate-call concern here.
-   */
-  private async runLeafTournament(
-    goal: Goal,
-    firstArtifact: Artifact,
-    scan: NonNullable<import('../contract/goal-type.js').GoalTypeDef['scan']>,
-    judgeType: string,
-    tier: Tier,
-    budget: Budget,
-    ctx: BrainContext,
-    treeState: TreeState,
-  ): Promise<{ artifact: Artifact; budget: Budget } | { ceiling: true }> {
-    const t = this.now;
-
-    type Candidate = { artifact: Artifact; verdict: Verdict; lens: string };
-    const candidates: Candidate[] = [];
-
-    const rubric = enrichRubric(this.registry,
-      `Judge this artifact as a ${judgeType} for goal type ${goal.type}`,
-      judgeType,
-      goal.intent,
-    );
-    const judgeCtx: BrainContext = { tier, memories: goal.memories };
-
-    for (let i = 0; i < scan.k; i++) {
-      const lens = scan.lenses[i % scan.lenses.length] ?? scan.lenses[0]!;
-
-      // The first candidate artifact is already produced (passed in). Produce
-      // the remaining k-1 candidates with lens-carrying contexts.
-      let candidateArtifact: Artifact;
-      if (i === 0) {
-        candidateArtifact = firstArtifact;
-      } else {
-        const lensCtx: BrainContext = { ...ctx, lens };
-        const produceResult = await this.brain.produce(goal, lensCtx);
-        candidateArtifact = produceResult.value;
-        debitTreeState(treeState, produceResult.usage);
-        if (hasReachedSpendCeiling(treeState)) {
-          return { ceiling: true };
-        }
-        // Track reported tokens on the tokens counter for observability
-        // (ADR-033). Tokens never cut the tournament short — the full k
-        // candidates always run; the dollar ceiling (checked above) and
-        // wall-clock are the only bounds. Emit the signal once on crossing zero.
-        budget = await debitTokenUsage({
-          budget,
-          usage: produceResult.usage,
-          goal,
-          store: this.store,
-          now: t,
-          emitOnlyOnCrossing: true,
-        });
-      }
-
-      // Judge this candidate.
-      const judgeResult = await this.brain.judge(goal, candidateArtifact, rubric, judgeCtx);
-      const verdict = judgeResult.value;
-      debitTreeState(treeState, judgeResult.usage);
-
-      await this.store.append({
-        type: 'judge-verdict',
-        at: t(),
-        goalId: goal.id,
-        judgeType,
-        verdict,
-        tier,
-        usage: judgeResult.usage,
-      });
-      await this.maybeAppendGoldenCandidate(goal.id, judgeType, candidateArtifact, rubric, verdict, tier);
-
-      if (hasReachedSpendCeiling(treeState)) {
-        return { ceiling: true };
-      }
-
-      candidates.push({ artifact: candidateArtifact, verdict, lens });
-    }
-
-    // Rank: first passing candidate by fewest findings; if none pass, best loser.
-    const passing = candidates.filter((c) => c.verdict.pass);
-    let winner: Candidate;
-    if (passing.length > 0) {
-      winner = passing.reduce((best, c) =>
-        c.verdict.findings.length < best.verdict.findings.length ? c : best,
-      );
-    } else {
-      // No passing candidate — use the artifact with fewest findings as the
-      // best loser; the outer attempt loop will see a fail verdict on the next
-      // deterministic/judge pass and handle it through the normal failure path.
-      winner = candidates.reduce((best, c) =>
-        c.verdict.findings.length < best.verdict.findings.length ? c : best,
-      );
-    }
-
-    return { artifact: winner.artifact, budget };
-  }
 
   /**
    * Append a `golden-candidate` event when goldenCapture is enabled (ADR-024).
