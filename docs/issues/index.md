@@ -40,7 +40,6 @@ Each issue is one OKF `type: issue` file with `kind` (bug | idea | future-work),
 | [repair-integration-rung](repair-integration-rung.md) | idea | in-run-stall, engine, integration |
 | [collect-review-manifest](collect-review-manifest.md) | idea | scope-safety, collect, review |
 | [observability-pluggable-tracing](observability-pluggable-tracing.md) | idea | observability, eventlog, cli, langsmith, otel |
-| [factory-code-quality-patterns](factory-code-quality-patterns.md) | future-work | factory, code-quality, patterns, constitution, self-hosting |
 | [external-asset-acquisition](external-asset-acquisition.md) | future-work | structural, asset, tool |
 | [deployment-to-live-url](deployment-to-live-url.md) | future-work | structural, deploy |
 | [deploy-the-factory-end-to-end](deploy-the-factory-end-to-end.md) | future-work | harness, deploy, docker, ci, ghcr, ops, lifecycle |

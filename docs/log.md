@@ -14,6 +14,19 @@ the [iteration](iterations/index.md) or [ADR](adrs/index.md) that owns the detai
 This file replaces the former `STATUS.md`. Forward strategy is no longer a
 standalone roadmap — it lives as open issues.
 
+## 2026-06-27
+
+- **Iteration 16 — factory code-quality patterns**
+  ([iteration 16](iterations/2026-06-27-18-code-quality-patterns/index.md)).
+  Added deterministic code-shape evidence (`npm run code-shape -- <scope...>`)
+  and injects scoped pressure hints into make-goal step-loop harnesses when the
+  sandbox contains oversized files or functions. The shared build guidance now
+  carries the lessons from the engine refactor: orchestration as table of
+  contents, domain-verb modules, adapters for repeated callback wiring, explicit
+  context objects where they clarify flow, and tests following ownership
+  boundaries. Closed and deleted the `factory-code-quality-patterns` issue per
+  OKF discipline.
+
 ## 2026-06-26
 
 - **Bound a leaf's CONTEXT, not its read COUNT** ([ADR-041](adrs/ADR-041-bound-context-not-read-count.md)).

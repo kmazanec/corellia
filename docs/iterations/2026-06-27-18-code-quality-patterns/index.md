@@ -4,7 +4,7 @@ title: "Iteration 16 — Factory code-quality patterns"
 description: Corellia learns deterministic code-shape signals and build guidance so future factory-written code preserves small, composable domain boundaries.
 tags: [iteration, factory, code-quality, patterns, self-hosting]
 timestamp: 2026-06-27
-status: building
+status: done
 ---
 
 # Iteration 16 — Factory code-quality patterns
@@ -40,7 +40,7 @@ write code.
 - [x] Add the code-shape analyzer, CLI, and focused unit tests.
 - [x] Inject scoped code-shape hints into the step-loop harness for make goals.
 - [x] Update shared build guidance with durable code-quality patterns.
-- [ ] Validate, close the issue, and update the OKF catalog/log.
+- [x] Validate, close the issue, and update the OKF catalog/log.
 
 ## Decisions, assumptions & blockers
 
@@ -51,3 +51,6 @@ write code.
 - Decision: expose the analyzer as `npm run code-shape -- <scope...>` so humans,
   commissions, and future factory scripts can ask for the same evidence the
   harness injects.
+- Validation: `npm run typecheck`, focused code-shape and skills-wiring tests,
+  `npm run lint`, `npm run code-shape -- src/engine`, and full `vitest run` all
+  passed. Full suite result: 1832 passed, 21 skipped.
