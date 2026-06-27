@@ -39,9 +39,6 @@ import {
 import { diffWithinScope, collectTree, preserveTree, commitRound, diffBodiesWithinScope, treeChangedWithinScope } from './worktree.js';
 import { createIterationRecord, deleteProvenanceIssue } from './iteration-tools.js';
 import {
-  newScratchpad,
-} from './scratchpad.js';
-import {
   parseAcceptanceCriteria,
   criterionToCheck,
   type AcceptanceCriterion,
@@ -53,20 +50,17 @@ import {
   type MissingRequirement,
 } from '../library/coverage.js';
 import { validateSplit } from './split-validation.js';
-import {
-  isExploreThenEmitLeaf,
-} from './step-loop-guards.js';
-import { buildStepLoopInitialTranscript } from './step-loop-context.js';
 import { runForcedEmit, runStructuredArtifactEmit } from './step-loop-emit.js';
 import { handleStepLoopStepError } from './step-loop-errors.js';
 import { routeStepToolCalls } from './step-loop-router.js';
 import {
   checkStepLoopToolBudget,
-  stepLoopHardToolCallCap,
   updateRemainingToolCallContext,
 } from './step-loop-budget.js';
+import { createStepLoopSession } from './step-loop-session.js';
+import { recordStepOutput } from './step-loop-step.js';
 import { boundStepLoopTranscript } from './step-loop-transcript.js';
-import { NOTE_TOOL_DEF, deriveToolDefs, isToolGranted } from './step-loop-tools.js';
+import { isToolGranted } from './step-loop-tools.js';
 import {
   stepLoopFailureArtifact,
   stepLoopFailureVerdict,
@@ -1548,67 +1542,35 @@ export class Engine {
     priorTranscript?: StepTranscript,
   ): Promise<StepLoopResult> {
     const t = this.now;
-    // Pass the concrete broker (if present) so real ToolDef parameter schemas
-    // reach the brain — in particular, run_script's 'script' property.
-    const tools = deriveToolDefs(grants, this.effectiveBroker as { defs?: () => ToolDef[] });
-    // `note` (ADR-036) is available to every leaf, engine-intercepted (not broker-
-    // routed, not grant-gated): distill what a read meant so the raw read can be
-    // evicted without losing the substance. Appended to the model's tool surface.
-    tools.push(NOTE_TOOL_DEF);
-    let remainingToolCalls = budget.toolCalls;
-    const hardToolCallCap = stepLoopHardToolCallCap(budget.toolCalls);
-    let toolCallsMade = 0;
-    let stepIndex = 0;
-    // Count read-class calls for the over-explore signal only — NOT to force an
-    // emit. The old EXPLORE_READ_CEILING (16) force-emitted any explore-then-emit
-    // leaf once it crossed the count, on the theory that an unbounded read-loop
-    // balloons the transcript to truncation and emits nothing. That theory is now
-    // handled at the source by the working-memory bound (ADR-036, raised to 140K +
-    // summarize-on-evict + ranged reads, run live-self-bcc825bb): context stays
-    // bounded no matter how many files are read, so a thorough dive of a large
-    // region (tests/engine, 33 files) no longer needs cutting short. The ceiling was
-    // doing active harm — forcing a PARTIAL emit from ~16 reads of a region that
-    // needs more, which then failed its dive-anchor gate and `step-loop:failed`
-    // (dive-tests-engine, runs 15/16/17). True non-termination is still backstopped
-    // by the warn-only tool-call cap (50× below), the tokens/dollar/wall-clock
-    // bounds, and the malform-recovery forced emit — none of which truncate a
-    // legitimately-reading dive. `exploreReadCalls` is retained only for the
-    // honest read-count phrase on the malform-recovery emit path.
-    let exploreReadCalls = 0;
-    let forceEmitNext = false;
-    // One recovery from a malformed/truncated step per attempt: on a MalformedStepError
-    // (two consecutive unparseable tool-calls) we force a clean emit rather than letting
-    // the leaf die on `step-loop:failed`. Consumed once so a malformation cannot loop.
-    let malformRecoveryUsed = false;
-    // Accumulate total token usage across all steps for tokens-budget debit.
-    let totalTokensUsed = 0;
-    // Per-attempt duplicate-call guard (F-64 / ADR-017): tracks (name, stable-args)
-    // keys for read-only calls in this attempt. Byte-identical re-reads are refused
-    // without debiting the toolCalls counter. Reset per-attempt (not per-step) so
-    // the guard spans the full conversation window.
-    const seenCalls = new Set<string>();
-
-    // The leaf's curated note buffer (ADR-036): distilled working memory that
-    // survives eviction of raw reads. Filled via the engine-intercepted `note` tool.
-    const scratchpad = newScratchpad();
-    // callId → duplicate-guard key, so an evicted read's guard can be released
-    // (ADR-036) and the model may re-read it.
-    const callKeyByCallId = new Map<string, string>();
-
     const typeDef = this.registry.get(goal.type);
-    const isExploreThenEmit = isExploreThenEmitLeaf(typeDef);
-    const transcript = buildStepLoopInitialTranscript({
+    const session = createStepLoopSession({
       goal,
+      grants,
+      budget,
       typeDef,
-      isExploreThenEmit,
-      remainingToolCalls,
+      broker: this.effectiveBroker as { defs?: () => ToolDef[] },
       sandboxRepoRoot: this._activeAssembly?.worktree.repoRoot,
       priorTranscript,
     });
-
-    // Whether the budget-exhausted signal has already been emitted this attempt
-    // (warn-only mode emits it once, then keeps going — see enforceToolCallBudget).
-    let toolBudgetWarned = false;
+    const {
+      tools,
+      transcript,
+      scratchpad,
+      seenCalls,
+      callKeyByCallId,
+      isExploreThenEmit,
+      hardToolCallCap,
+    } = session;
+    let {
+      remainingToolCalls,
+      toolCallsMade,
+      stepIndex,
+      exploreReadCalls,
+      totalTokensUsed,
+      toolBudgetWarned,
+      forceEmitNext,
+      malformRecoveryUsed,
+    } = session.counters;
 
     while (true) {
       const budgetGate = await checkStepLoopToolBudget({
@@ -1724,35 +1686,18 @@ export class Engine {
         return stepError.result;
       }
 
-      // Emit step event and debit usage
-      await this.store.append({
-        type: 'step',
-        at: t(),
-        goalId: goal.id,
-        index: stepIndex,
-        outputKind: stepOutput.kind,
-        usage: stepOutput.usage,
+      const recordedStep = await recordStepOutput({
+        goal,
+        output: stepOutput,
+        state: { stepIndex, totalTokensUsed },
+        store: this.store,
+        now: t,
+        debitUsage: (usage) => debitTreeState(treeState, usage),
+        hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
       });
-      debitTreeState(treeState, stepOutput.usage);
-      // accumulate step token usage for tokens-budget debit.
-      totalTokensUsed += stepOutput.usage.promptTokens + stepOutput.usage.completionTokens;
-      stepIndex++;
-      // ceiling check after each step debit — surface ceiling-reached
-      // exactly once and short-circuit the loop.
-      if (hasReachedSpendCeiling(treeState)) {
+      ({ stepIndex, totalTokensUsed } = recordedStep.state);
+      if (recordedStep.kind === 'ceiling') {
         return { kind: 'ceiling', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
-      }
-
-      // Emit transport incidents if any
-      if (stepOutput.incidents) {
-        for (const incident of stepOutput.incidents) {
-          await this.store.append({
-            type: incident.kind,
-            at: incident.at,
-            goalId: goal.id,
-            detail: incident.detail,
-          });
-        }
       }
 
       if (stepOutput.kind === 'artifact') {
