@@ -25,7 +25,7 @@ import type { MemoryView } from '../contract/memory.js';
 import type { RiskClass, SensitivityFact } from '../contract/risk.js';
 import type { PatternStore } from '../contract/pattern.js';
 import type { ToolBroker, ToolDef } from '../contract/tool.js';
-import { subdivide, consume, consumeN, floorWallClock, COMPREHENSION_WALLCLOCK_FLOOR_MS } from './budget.js';
+import { consume, consumeN } from './budget.js';
 import { lintLibrary } from '../library/constitution.js';
 import { loadFamilySkill } from '../library/skills.js';
 import { classifyRisk } from '../library/risk.js';
@@ -88,8 +88,12 @@ import {
 } from './coverage-gate.js';
 import { checkpointVerifyArtifacts } from './coverage-checkpoint.js';
 import { appendGoldenCandidate, enrichRubric } from './judge-support.js';
-import { diveFactsAsMemories } from './knowledge-memory.js';
 import { runAuthorityGate } from './authority-gate.js';
+import {
+  appendChildSpawnedEvents,
+  buildSplitChildGoals,
+  runSplitChildren,
+} from './split-children.js';
 
 export { WORST_CASE_PRICE_PER_TOKEN };
 
@@ -2687,10 +2691,6 @@ export class Engine {
   }> {
     const t = this.now;
 
-    // Subdivide the budget by each child's share
-    const shares = children.map((c) => c.budgetShare);
-    const budgets = subdivide(goal.budget, shares);
-
     // The dive→build knowledge handoff (ADR-040) resolves the repo root once. The
     // ACTUAL injection happens at child-run time (after a child's dependency dives
     // have executed and persisted their RegionFacts), NOT here at construction — all
@@ -2702,169 +2702,29 @@ export class Engine {
       this._activeAssembly?.worktree.repoRoot ??
       (typeof spawnSpecRepoRoot === 'string' ? spawnSpecRepoRoot : '');
 
-    // Build child goals, injecting the spawner-mediated memory.query results. The dive
-    // facts a dependency comprehension produces are injected later, at run time.
-    const childGoals: Goal[] = await Promise.all(children.map(async (child, i) => {
-      const childMemories = await this.memory.query(child.title, child.scope);
-      let childBudget = budgets[i] ?? {
-        attempts: 1,
-        tokens: 1,
-        toolCalls: 1,
-        wallClockMs: 1,
-      };
-      // Comprehension dives are read-heavy work whose time-to-complete is set by
-      // the region's content, not by how many siblings the root fanned out into.
-      // Floor their wall-clock so a wide split does not starve them below a
-      // workable minimum (ADR-030 analogue; build run live-self-63daa9cf).
-      if (child.type === 'map-repo' || child.type === 'deep-dive-region') {
-        childBudget = floorWallClock(childBudget, COMPREHENSION_WALLCLOCK_FLOOR_MS, goal.budget.wallClockMs);
-      }
-      return {
-        id: `${goal.id}/${child.localId}`,
-        type: child.type,
-        parentId: goal.id,
-        title: child.title,
-        spec: child.spec,
-        intent: child.intent ?? goal.intent,
-        scope: child.scope,
-        budget: childBudget,
-        memories: childMemories,
-        ...(goal.spendCeilingUsd !== undefined ? { spendCeilingUsd: goal.spendCeilingUsd } : {}),
-      };
-    }));
-
-    // Emit child-spawned events
-    for (let i = 0; i < children.length; i++) {
-      const child = children[i]!;
-      const childGoal = childGoals[i]!;
-      await this.store.append({
-        type: 'child-spawned',
-        at: t(),
-        goalId: goal.id,
-        childId: childGoal.id,
-        childType: child.type,
-        dependsOn: child.dependsOn.map((localId) => `${goal.id}/${localId}`),
-      });
-    }
-
-    // Build a promise map: localId → Promise<Report>
-    // Children run when all dependsOn siblings' reports are available.
-    const reportMap = new Map<string, Promise<Report>>();
-    const localIdToIndex = new Map<string, number>();
-    children.forEach((c, i) => localIdToIndex.set(c.localId, i));
-
-    for (let i = 0; i < children.length; i++) {
-      const child = children[i]!;
-      const childGoal = childGoals[i]!;
-
-      const depLocalIds = child.dependsOn.slice();
-      const depPromises = depLocalIds.map((depLocalId) => {
-        const p = reportMap.get(depLocalId);
-        if (!p) throw new Error(`Dependency "${depLocalId}" not found — this should have been caught in validateSplit`);
-        return p;
-      });
-
-      // This child's promise awaits its deps then runs
-      const childPromise = (async () => {
-        try {
-          // Await all dependencies
-          const depReports = await Promise.all(depPromises);
-
-          // Dependency cascade with degraded delivery (ADR-037).
-          //
-          // A dependency that BLOCKED hard-blocks this child ONLY when it produced
-          // NOTHING (`artifact === null`) — a builder that truly needs a
-          // comprehension/result that never materialised must not run blind. But a
-          // dependency that blocked yet still produced a USABLE artifact (a partial
-          // comprehension, a green subtree) is degraded, not absent: this child
-          // proceeds on that partial knowledge. The dependency's blocker is carried
-          // forward as a FINDING (so it surfaces honestly at the root, never
-          // silently dropped) rather than propagated as a hard gate.
-          //
-          // Why this is the fix for the over-split cascade (run #9): one sub-dive
-          // blocked on a coverage nit, but `dive-tests` still merged a valid
-          // RegionFacts artifact from the sub-dive that ran. Under the old rule the
-          // implement leaves were hard-blocked before executing a single step;
-          // under this rule they proceed on the partial dive knowledge.
-          const fatalDep = depReports.find(
-            (r) => r.blockers.length > 0 && r.artifact === null,
-          );
-          if (fatalDep) {
-            const report = blockedReport(
-              `Blocked because a dependency failed without producing any usable artifact: ${fatalDep.blockers[0] ?? 'unknown'}`,
-            );
-            await this.store.append({
-              type: 'emitted',
-              at: t(),
-              goalId: childGoal.id,
-              report,
-            });
-            return report;
-          }
-
-          // Record each degraded dependency (blocked but produced a partial) so the
-          // proceed-on-partial decision is observable in the event log, and thread
-          // its blocker forward as a finding on this child.
-          const degradedFindings: string[] = [];
-          for (let d = 0; d < depReports.length; d++) {
-            const dep = depReports[d]!;
-            if (dep.blockers.length > 0 && dep.artifact !== null) {
-              const blocker = dep.blockers[0] ?? 'unknown';
-              await this.store.append({
-                type: 'dependency-degraded',
-                at: t(),
-                goalId: childGoal.id,
-                dependency: `${goal.id}/${depLocalIds[d]!}`,
-                blocker,
-              });
-              degradedFindings.push(
-                `Proceeded on a degraded dependency (${depLocalIds[d]!}) that blocked but produced a usable partial: ${blocker}`,
-              );
-            }
-          }
-
-          // The dive→build knowledge handoff (ADR-040): NOW that this child's
-          // dependency dives have run and persisted their RegionFacts, pull the facts
-          // for the child's scope and inject them as memory pointers — so a builder
-          // starts WITH the comprehension a dependency dive produced instead of
-          // re-reading the region. Done here (not at upfront construction) because the
-          // facts only exist after the dives execute. HEAD SHA is read now too, so the
-          // freshness/provenance gate sees the SHA the dives actually ran against.
-          let spawnHeadSha = '';
-          if (this.knowledge?.headSha !== undefined && spawnRepoRoot.length > 0) {
-            try { spawnHeadSha = await this.knowledge.headSha(spawnRepoRoot); } catch { spawnHeadSha = ''; }
-          }
-          const diveMemories = await diveFactsAsMemories({
-            factsForRegions: this.knowledge?.factsForRegions,
-            repoRoot: spawnRepoRoot,
-            scope: childGoal.scope,
-            headSha: spawnHeadSha,
-          });
-          const childGoalWithFacts: Goal =
-            diveMemories.length > 0
-              ? { ...childGoal, memories: [...childGoal.memories, ...diveMemories] }
-              : childGoal;
-
-          // Run the child through the engine (shares the tree-scoped accumulator)
-          const ran = await this._run(childGoalWithFacts, treeState);
-          if (degradedFindings.length > 0) {
-            return { ...ran, findings: [...ran.findings, ...degradedFindings] };
-          }
-          return ran;
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          const report = blockedReport(`child threw: ${msg}`);
-          await this.store.append({ type: 'emitted', at: t(), goalId: childGoal.id, report });
-          return report;
-        }
-      })();
-
-      reportMap.set(child.localId, childPromise);
-    }
-
-    // Await all children
-    const allPromises = children.map((c) => reportMap.get(c.localId)!);
-    const childReports = await Promise.all(allPromises);
+    const childGoals = await buildSplitChildGoals({
+      parent: goal,
+      children,
+      memory: this.memory,
+    });
+    await appendChildSpawnedEvents({
+      parent: goal,
+      children,
+      childGoals,
+      store: this.store,
+      now: t,
+    });
+    const childReports = await runSplitChildren({
+      parent: goal,
+      children,
+      childGoals,
+      store: this.store,
+      now: t,
+      repoRoot: spawnRepoRoot,
+      factsForRegions: this.knowledge?.factsForRegions,
+      headSha: this.knowledge?.headSha,
+      runChild: (childGoal) => this._run(childGoal, treeState),
+    });
 
     // ── INTEGRATE ────────────────────────────────────────────────────────────
     // Merge artifacts
