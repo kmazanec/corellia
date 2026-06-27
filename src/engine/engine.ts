@@ -60,6 +60,7 @@ import {
   type MissingRequirement,
 } from '../library/coverage.js';
 import { mergeComprehensionArtifacts, childShaFallback } from '../library/comprehend-merge.js';
+import { renormalizeShares, validateSplit } from './split-validation.js';
 
 /**
  * Per-tree spend ceiling default (learning phase, ADR-017).
@@ -4527,105 +4528,6 @@ function deriveToolDefs(
     }
   }
   return defs;
-}
-
-// ── HELPERS ─────────────────────────────────────────────────────────────────
-
-/**
- * Scale every child's `budgetShare` by `1/total` when the shares sum to more
- * than 1, so the sum becomes exactly 1 while each child keeps its RELATIVE
- * allocation. Used after the coverage gate injects comprehension/refresh
- * children onto a split whose original shares already summed to ~1. When the
- * total is already ≤ 1 the children are returned unchanged (a deliberate
- * under-allocation, e.g. a single small child, is preserved).
- */
-function renormalizeShares(children: ChildPlan[]): ChildPlan[] {
-  const total = children.reduce((s, c) => s + c.budgetShare, 0);
-  if (total <= 1 || total === 0) return children;
-  return children.map((c) => ({ ...c, budgetShare: c.budgetShare / total }));
-}
-
-/**
- * Validate structural constraints on a proposed split.
- * Returns an error message if invalid, or null if valid.
- */
-function validateSplit(
-  children: ChildPlan[],
-  resolveType?: (type: string) => GoalTypeDef | undefined,
-): string | null {
-  if (children.length === 0) return 'Split must have at least one child';
-
-  // No fan-out cap (ADR-033): budget never shapes the build, so width is never
-  // keyed to a count. A node decomposes into as many children as the brain
-  // proposes. The remaining checks guard correctness (cycles, duplicate ids,
-  // shares), not cost; cost is bounded only by the dollar ceiling and wall-clock.
-  const localIds = new Set(children.map((c) => c.localId));
-
-  // localIds must be unique
-  if (localIds.size !== children.length) return 'Duplicate localIds in split';
-
-  // Scope is load-bearing for the types that DECLARE it (ADR-039): a type carrying
-  // `requiresScope` must be spawned with a non-empty scope — empty scope means "no
-  // region", which leaves the child unbounded (no anchor for "I've read enough",
-  // and isInScope treats empty scope as allow-all). This is a per-type contract
-  // property, not a universal rule: a region-anchored producing leaf
-  // (author-acceptance-criteria, deep-dive-region, implement) declares it; a
-  // whole-repo map or a planner that refines scope downward does not. Checked only
-  // when a type resolver is supplied (the engine's call sites).
-  if (resolveType) {
-    for (const child of children) {
-      const def = resolveType(child.type);
-      if (!def) {
-        return `Child "${child.localId}" has unknown goal type "${child.type}"`;
-      }
-      if (def.requiresScope && child.scope.length === 0) {
-        return `Child "${child.localId}" (type "${child.type}") requires a non-empty scope — it must declare the region it touches (ADR-039)`;
-      }
-    }
-  }
-
-  // budgetShares must sum to ≤ 1
-  const totalShare = children.reduce((s, c) => s + c.budgetShare, 0);
-  if (totalShare > 1.0001) {
-    return `budgetShares sum to ${totalShare.toFixed(4)}, must be ≤ 1`;
-  }
-
-  // dependsOn must reference sibling localIds
-  for (const child of children) {
-    for (const dep of child.dependsOn) {
-      if (!localIds.has(dep)) {
-        return `Child "${child.localId}" depends on unknown sibling "${dep}"`;
-      }
-      if (dep === child.localId) {
-        return `Child "${child.localId}" depends on itself`;
-      }
-    }
-  }
-
-  // dependsOn must be acyclic (DFS cycle detection)
-  const visited = new Set<string>();
-  const inStack = new Set<string>();
-  const depMap = new Map(children.map((c) => [c.localId, c.dependsOn]));
-
-  function hasCycle(id: string): boolean {
-    if (inStack.has(id)) return true;
-    if (visited.has(id)) return false;
-    visited.add(id);
-    inStack.add(id);
-    for (const dep of depMap.get(id) ?? []) {
-      if (hasCycle(dep)) return true;
-    }
-    inStack.delete(id);
-    return false;
-  }
-
-  for (const child of children) {
-    if (hasCycle(child.localId)) {
-      return `Cyclic dependency detected in split`;
-    }
-  }
-
-  return null;
 }
 
 function blockedReport(reason: string, findings: string[] = []): Report {
