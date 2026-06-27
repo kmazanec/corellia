@@ -62,9 +62,7 @@ import {
 import { repoShapeHint as buildRepoShapeHint } from './repo-shape-hint.js';
 import { applyRootEmissionGate } from './root-emission-gate.js';
 import { finalizeSandboxedRun } from './sandbox-finalization.js';
-import {
-  runKnowledgeCoverageSplitGate,
-} from './coverage/split-gate.js';
+import { runSplitDispatch } from './split-dispatch.js';
 import { appendGoldenCandidate } from './judge-support.js';
 import { runAuthorityGate } from './authority-gate.js';
 import { runDeterministicGate } from './deterministic-gate.js';
@@ -556,78 +554,21 @@ export class Engine {
         return this.runAttemptLoop(goal, currentTier, currentTierIndex, tierLadder, deadline, entryRisk, treeState);
 
       case 'split': {
-        // ── COVERAGE GATE (ADR-021) ────────────────────────────────────────
-        // Mechanical pre-check: do we have enough knowledge to decompose?
-        // Only fires when knowledge wiring is present AND the goal's kind
-        // requires coverage (make-kind non-exempt). The check is a projection
-        // query only — no brain call, no side effect.
-        let childrenToSplit = decision.children;
-        if (this.knowledge !== undefined) {
-          try {
-            const repoRoot = this._activeAssembly?.worktree.repoRoot;
-            if (repoRoot !== undefined) {
-              childrenToSplit = await runKnowledgeCoverageSplitGate({
-                goal,
-                kind: typeDef.kind,
-                children: decision.children,
-                repoRoot,
-                knowledge: this.knowledge,
-                registry: this.registry,
-                store: this.store,
-                now: this.now,
-              });
-            }
-          } catch (gateErr) {
-            // coverage gate threw a structural split error (injection
-            // pushed children over the budget). Block through the existing
-            // structural-error block path rather than silently over-subdividing.
-            const msg = gateErr instanceof Error ? gateErr.message : String(gateErr);
-            const report = blockedReport(`Split structural validation failed after coverage injection: ${msg}`);
-            await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
-            return report;
-          }
-        }
-
-        // ── ITERATIVE DISPATCH (ADR-031 §4.4) ──────────────────────────────
-        // A type carrying `iterative` routes its split through the milestone
-        // loop instead of the single-pass runSplit. The constitution's `>= 1`
-        // floor is re-checked on the EFFECTIVE maxRounds (goal.maxRounds override
-        // or the type default) so an override cannot smuggle in 0; a bad value
-        // blocks through the structural-error path rather than looping.
-        let splitReport: Report;
-        if (typeDef.iterative) {
-          const effectiveMaxRounds = goal.maxRounds ?? typeDef.iterative.maxRounds;
-          if (!Number.isInteger(effectiveMaxRounds) || effectiveMaxRounds < 1) {
-            const report = blockedReport(
-              `iterative maxRounds must be an integer >= 1 (effective value ${effectiveMaxRounds})`,
-            );
-            await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
-            return report;
-          }
-          splitReport = await this.runMilestone(goal, childrenToSplit, treeState);
-        } else {
-          splitReport = await this.runSplit(goal, childrenToSplit, terracedLoserFindings, treeState);
-        }
-
-        // ── PATTERN RECORD ────────────────────────────────────────────────
-        // Record the outcome of the split against the shape so the flywheel
-        // accumulates evidence autonomously. Recording creates or updates a
-        // PROVISIONAL memo only — promotion to trusted is a human-signoff step
-        // the engine never performs (the authority gap).
-        if (this.patterns && goalShape !== null) {
-          const outcome: 'success' | 'failure' =
-            splitReport.blockers.length === 0 ? 'success' : 'failure';
-          await this.patterns.record(goalShape, decision, outcome);
-          await this.store.append({
-            type: 'pattern-recorded',
-            at: t(),
-            goalId: goal.id,
-            shape: goalShape,
-            outcome,
-          });
-        }
-
-        return splitReport;
+        return runSplitDispatch({
+          goal,
+          typeDef,
+          decision,
+          terracedLoserFindings,
+          goalShape,
+          repoRoot: this._activeAssembly?.worktree.repoRoot,
+          knowledge: this.knowledge,
+          patterns: this.patterns,
+          registry: this.registry,
+          store: this.store,
+          now: t,
+          runMilestone: (children) => this.runMilestone(goal, children, treeState),
+          runSplit: (children, findings) => this.runSplit(goal, children, findings, treeState),
+        });
       }
 
       case 'block':
