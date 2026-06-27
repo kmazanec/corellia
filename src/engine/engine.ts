@@ -88,6 +88,7 @@ import {
   gateMissingLabels,
   injectCoverageChildren,
 } from './coverage-gate.js';
+import { checkpointVerifyArtifacts } from './coverage-checkpoint.js';
 
 export { WORST_CASE_PRICE_PER_TOKEN };
 
@@ -2669,7 +2670,14 @@ export class Engine {
     // would consume. On drift, validate; pass → stale-validated event + proceed;
     // fail → invalid event + inject refresh child as a dependency.
     const { refreshChildren, validatedOk, refreshedCategories } =
-      await this.checkpointVerifyArtifacts(goal, knowledgeState, repoRoot, kw);
+      await checkpointVerifyArtifacts({
+        goal,
+        knowledge: knowledgeState,
+        repoRoot,
+        knowledgeGateway: kw,
+        store: this.store,
+        now: t,
+      });
 
     // Build a goal model for coverageCheck — the parent's kind and split status,
     // plus the scopes its make-leaf children touch (those leaves go straight to
@@ -2753,104 +2761,6 @@ export class Engine {
       mintComprehension: kw.mintComprehension,
       resolveType: (tp) => (this.registry.has(tp) ? this.registry.get(tp) : undefined),
     });
-  }
-
-  /**
-   * Checkpoint verify-on-read (ADR-019): for each artifact the goal's kind
-   * would consume, check SHA drift. On drift, run self-validation:
-   *   - pass → emit knowledge-checked {stale-validated}, proceed, mark validated
-   *   - fail → emit knowledge-checked {invalid}, return a refresh ChildPlan
-   *
-   * Returns:
-   *   - refreshChildren: ChildPlans to inject for invalid artifacts
-   *   - validatedOk: categories that were stale-validated (coverageCheck treats
-   *     these as fresh to avoid double-reporting)
-   *   - refreshedCategories: categories for which a refresh child was minted
-   *     (coverageCheck misses for these categories are filtered out before
-   *     mintComprehension so exactly one child is spawned per category)
-   *
-   * CHECKPOINT SCOPE: this checkpoint fires at the split gate only. There is no
-   * decide checkpoint or integrate checkpoint currently wired — the EngineOptions
-   * docstring describes the intended three-checkpoint design as a future target.
-   * The integrate checkpoint is deferred.
-   */
-  private async checkpointVerifyArtifacts(
-    goal: Goal,
-    knowledge: KnowledgeForCoverage,
-    repoRoot: string,
-    kw: NonNullable<EngineOptions['knowledge']>,
-  ): Promise<{
-    refreshChildren: ChildPlan[];
-    validatedOk: Set<import('../contract/knowledge.js').KnowledgeCategory>;
-    refreshedCategories: Set<import('../contract/knowledge.js').KnowledgeCategory>;
-  }> {
-    const t = this.now;
-    const refreshChildren: ChildPlan[] = [];
-    const validatedOk = new Set<import('../contract/knowledge.js').KnowledgeCategory>();
-    // track which categories already have a refresh child so
-    // mintComprehension does not spawn a second child for the same category.
-    const refreshedCategories = new Set<import('../contract/knowledge.js').KnowledgeCategory>();
-
-    for (const artifact of knowledge.artifacts) {
-      if (artifact.generatedAtSha === knowledge.headSha) {
-        // Fresh — no verification needed
-        continue;
-      }
-
-      // SHA drift detected — run self-validation
-      // Build a KnowledgeArtifact shape for the validate call
-      const fullArtifact: KnowledgeArtifact = {
-        repoRoot,
-        category: artifact.category,
-        generatedAtSha: artifact.generatedAtSha,
-        confidence: 'medium',
-        status: 'provisional',
-        pointers: [],
-        summary: '',
-      };
-
-      const valid = await kw.validate(fullArtifact);
-
-      if (valid) {
-        // Stale but still trustworthy — record and proceed
-        await this.store.append({
-          type: 'knowledge-checked',
-          at: t(),
-          goalId: goal.id,
-          repoRoot,
-          category: artifact.category,
-          sha: artifact.generatedAtSha,
-          outcome: 'stale-validated',
-        });
-        // Mark this category as validated-OK so coverageCheck does not
-        // re-flag it as stale
-        validatedOk.add(artifact.category);
-      } else {
-        // Invalid — must refresh before this split can proceed
-        await this.store.append({
-          type: 'knowledge-checked',
-          at: t(),
-          goalId: goal.id,
-          repoRoot,
-          category: artifact.category,
-          sha: artifact.generatedAtSha,
-          outcome: 'invalid',
-        });
-
-        // Mint a refresh comprehension child for this category
-        const refreshMissing: MissingRequirement[] = [{
-          category: artifact.category,
-          reason: `SHA-drift validation failed for ${artifact.category} at ${artifact.generatedAtSha}`,
-        }];
-        const minted = kw.mintComprehension(refreshMissing);
-        refreshChildren.push(...minted);
-        // Track the refreshed category so coverageCheck's missing list for this
-        // category is filtered out — exactly one child per category.
-        refreshedCategories.add(artifact.category);
-      }
-    }
-
-    return { refreshChildren, validatedOk, refreshedCategories };
   }
 
   // ── SPLIT PATH ────────────────────────────────────────────────────────────
