@@ -128,17 +128,28 @@ export function sliceForRead(content: string, offset: number, limit: number | un
  * sandbox root. The root is captured in a closure — the returned impls never
  * accept the root as an argument so a caller cannot escape it.
  */
-export function createFileTools(root: string): {
+export interface FileTools {
   readFile: ToolImpl;
   writeFile: ToolImpl;
   deleteFile: ToolImpl;
   listDir: ToolImpl;
   search: ToolImpl;
   headSha: ToolImpl;
-} {
-  // ── read_file ─────────────────────────────────────────────────────────────
+}
 
-  const readFileImpl: ToolImpl = {
+export function createFileTools(root: string): FileTools {
+  return {
+    readFile: createReadFileTool(root),
+    writeFile: createWriteFileTool(root),
+    deleteFile: createDeleteFileTool(root),
+    listDir: createListDirTool(root),
+    search: createSearchTool(root),
+    headSha: createHeadShaTool(root),
+  };
+}
+
+function createReadFileTool(root: string): ToolImpl {
+  return {
     def: {
       name: 'read_file',
       description:
@@ -174,25 +185,21 @@ export function createFileTools(root: string): {
         return { ok: false, output: `read_file: path "${rawPath}" is outside the sandbox root` };
       }
 
-      // Parse optional line-range args. A non-integer / out-of-range value is a
-      // soft error (the model can retry) rather than a silent whole-file read.
       const rangeResult = parseLineRange(args);
       if (!rangeResult.ok) return { ok: false, output: `read_file: ${rangeResult.detail}` };
-      const { offset, limit } = rangeResult;
 
       try {
         const content = await readFile(full, 'utf-8');
-        return { ok: true, output: sliceForRead(content, offset, limit) };
+        return { ok: true, output: sliceForRead(content, rangeResult.offset, rangeResult.limit) };
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { ok: false, output: `read_file: ${message}` };
+        return { ok: false, output: `read_file: ${errorMessage(err)}` };
       }
     },
   };
+}
 
-  // ── write_file ────────────────────────────────────────────────────────────
-
-  const writeFileImpl: ToolImpl = {
+function createWriteFileTool(root: string): ToolImpl {
+  return {
     def: {
       name: 'write_file',
       description: 'Write content to a file inside the sandbox root, within the goal\'s declared scope. The path must be relative and within scope.',
@@ -216,41 +223,22 @@ export function createFileTools(root: string): {
         return { ok: false, output: 'write_file: content must be a string' };
       }
 
-      // Refuse absolute paths and traversal before scope check.
-      const full = resolveSandboxPath(root, rawPath);
-      if (full === null) {
-        return { ok: false, output: `write_file: path "${rawPath}" is outside the sandbox root` };
-      }
-
-      // Scope check: the path must start with at least one of the goal's scope prefixes.
-      if (!isInScope(rawPath, goal.scope)) {
-        return {
-          ok: false,
-          output: `write_file: path "${rawPath}" is outside the goal's declared scope`,
-        };
-      }
+      const scoped = resolveScopedMutation(root, rawPath, goal.scope, 'write_file');
+      if (!scoped.ok) return scoped;
 
       try {
-        // Ensure parent directory exists.
-        await mkdir(dirname(full), { recursive: true });
-        await fsWriteFile(full, content, 'utf-8');
+        await mkdir(dirname(scoped.fullPath), { recursive: true });
+        await fsWriteFile(scoped.fullPath, content, 'utf-8');
         return { ok: true, output: `wrote ${rawPath}` };
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { ok: false, output: `write_file: ${message}` };
+        return { ok: false, output: `write_file: ${errorMessage(err)}` };
       }
     },
   };
+}
 
-  // ── delete_file ───────────────────────────────────────────────────────────
-  // The write-side counterpart to write_file: it REMOVES a file. Same path
-  // safety (relative, in-sandbox, in-scope) and the same fs.write grant, because
-  // deleting is a mutation of the product/repo. Refuses directories — it removes
-  // exactly one file (the OKF close-out case: a now-implemented ephemeral issue).
-  // The broker re-checks sandbox containment and goal scope before dispatch, the
-  // same belt-and-braces it applies to write_file.
-
-  const deleteFileImpl: ToolImpl = {
+function createDeleteFileTool(root: string): ToolImpl {
+  return {
     def: {
       name: 'delete_file',
       description: 'Delete a single file inside the sandbox root, within the goal\'s declared scope. The path must be relative, in-scope, and name a file (not a directory). Use to remove an implemented ephemeral issue file as part of OKF close-out.',
@@ -269,43 +257,25 @@ export function createFileTools(root: string): {
         return { ok: false, output: 'delete_file: path must be a non-empty string' };
       }
 
-      // Refuse absolute paths and traversal before scope check.
-      const full = resolveSandboxPath(root, rawPath);
-      if (full === null) {
-        return { ok: false, output: `delete_file: path "${rawPath}" is outside the sandbox root` };
-      }
-
-      // Scope check: the path must start with at least one of the goal's scope prefixes.
-      if (!isInScope(rawPath, goal.scope)) {
-        return {
-          ok: false,
-          output: `delete_file: path "${rawPath}" is outside the goal's declared scope`,
-        };
-      }
+      const scoped = resolveScopedMutation(root, rawPath, goal.scope, 'delete_file');
+      if (!scoped.ok) return scoped;
 
       try {
-        const info = await stat(full);
+        const info = await stat(scoped.fullPath);
         if (info.isDirectory()) {
           return { ok: false, output: `delete_file: "${rawPath}" is a directory; delete_file removes a single file only` };
         }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { ok: false, output: `delete_file: ${message}` };
-      }
-
-      try {
-        await unlink(full);
+        await unlink(scoped.fullPath);
         return { ok: true, output: `deleted ${rawPath}` };
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { ok: false, output: `delete_file: ${message}` };
+        return { ok: false, output: `delete_file: ${errorMessage(err)}` };
       }
     },
   };
+}
 
-  // ── list_dir ─────────────────────────────────────────────────────────────
-
-  const listDirImpl: ToolImpl = {
+function createListDirTool(root: string): ToolImpl {
+  return {
     def: {
       name: 'list_dir',
       description: 'List the entries of a directory inside the sandbox root. Returns one entry per line.',
@@ -329,18 +299,17 @@ export function createFileTools(root: string): {
       }
       try {
         const entries = await readdir(full, { withFileTypes: true });
-        const lines = entries.map((e) => (e.isDirectory() ? `${e.name}/` : e.name));
+        const lines = entries.map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name));
         return { ok: true, output: lines.join('\n') };
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { ok: false, output: `list_dir: ${message}` };
+        return { ok: false, output: `list_dir: ${errorMessage(err)}` };
       }
     },
   };
+}
 
-  // ── search ────────────────────────────────────────────────────────────────
-
-  const searchImpl: ToolImpl = {
+function createSearchTool(root: string): ToolImpl {
+  return {
     def: {
       name: 'search',
       description: 'Search file contents under the sandbox root for a pattern, returning path:line-prefixed matches suitable for a model transcript.',
@@ -360,88 +329,21 @@ export function createFileTools(root: string): {
         return { ok: false, output: 'search: pattern must be a non-empty string' };
       }
 
-      const rawPath = typeof args['path'] === 'string' && args['path'].length > 0
-        ? args['path']
-        : '.';
-
-      const searchRoot = rawPath === '.'
-        ? root
-        : resolveSandboxPath(root, rawPath);
-
+      const rawPath = typeof args['path'] === 'string' && args['path'].length > 0 ? args['path'] : '.';
+      const searchRoot = rawPath === '.' ? root : resolveSandboxPath(root, rawPath);
       if (searchRoot === null) {
         return { ok: false, output: `search: path "${rawPath}" is outside the sandbox root` };
       }
 
-      let regex: RegExp;
-      try {
-        regex = new RegExp(pattern);
-      } catch {
-        // Treat non-regex pattern as a literal substring search.
-        regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-      }
-
-      const matches: string[] = [];
-
-      async function scanFile(filePath: string, relPath: string): Promise<void> {
-        try {
-          const content = await readFile(filePath, 'utf-8');
-          const lines = content.split('\n');
-          for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (line !== undefined && regex.test(line)) {
-              matches.push(`${relPath}:${i + 1}: ${line}`);
-            }
-          }
-        } catch {
-          // Skip unreadable or binary files silently.
-        }
-      }
-
-      async function scanDir(dirPath: string, relPrefix: string): Promise<void> {
-        let entries;
-        try {
-          entries = await readdir(dirPath, { withFileTypes: true });
-        } catch {
-          return;
-        }
-        for (const entry of entries) {
-          const entryRel = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
-          const entryFull = join(dirPath, entry.name);
-          if (entry.isDirectory()) {
-            await scanDir(entryFull, entryRel);
-          } else if (entry.isFile()) {
-            await scanFile(entryFull, entryRel);
-          }
-        }
-      }
-
-      try {
-        const stats = await stat(searchRoot);
-        if (stats.isDirectory()) {
-          const relPrefix = rawPath === '.' ? '' : normalize(rawPath);
-          await scanDir(searchRoot, relPrefix);
-        } else {
-          await scanFile(searchRoot, rawPath === '.' ? '' : normalize(rawPath));
-        }
-      } catch {
-        // If the search root itself doesn't exist, return empty.
-        return { ok: true, output: '' };
-      }
-
+      const regex = compileSearchPattern(pattern);
+      const matches = await searchPath(searchRoot, rawPath, regex);
       return { ok: true, output: matches.join('\n') };
     },
   };
+}
 
-  // ── head_sha ───────────────────────────────────────────────────────────────
-  // The sanctioned way to obtain the sandbox's current HEAD SHA. Comprehension
-  // artifacts REQUIRE `generatedAtSha` = current HEAD, but a worktree's `.git` is
-  // a file-indirection and the real gitdir is outside the sandbox, so direct
-  // `.git/HEAD` reads fail and `git rev-parse` is not a declared script — the
-  // brain used to thrash to token death trying (AC-2 run #6 trace). This tool
-  // runs `git rev-parse HEAD` with cwd at the sandbox root (git resolves the
-  // worktree indirection itself) and returns the SHA. Read-only: gated by
-  // `fs.read`, which every comprehension goal already holds.
-  const headShaImpl: ToolImpl = {
+function createHeadShaTool(root: string): ToolImpl {
+  return {
     def: {
       name: 'head_sha',
       description:
@@ -459,19 +361,96 @@ export function createFileTools(root: string): {
         }).trim();
         return { ok: true, output: sha };
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { ok: false, output: `head_sha: ${message}` };
+        return { ok: false, output: `head_sha: ${errorMessage(err)}` };
       }
     },
   };
+}
 
-  return {
-    readFile: readFileImpl,
-    writeFile: writeFileImpl,
-    deleteFile: deleteFileImpl,
-    listDir: listDirImpl,
-    search: searchImpl,
-    headSha: headShaImpl,
-  };
+function resolveScopedMutation(
+  root: string,
+  rawPath: string,
+  scope: string[],
+  toolName: 'write_file' | 'delete_file',
+): { ok: true; fullPath: string } | { ok: false; output: string } {
+  const fullPath = resolveSandboxPath(root, rawPath);
+  if (fullPath === null) {
+    return { ok: false, output: `${toolName}: path "${rawPath}" is outside the sandbox root` };
+  }
+  if (!isInScope(rawPath, scope)) {
+    return { ok: false, output: `${toolName}: path "${rawPath}" is outside the goal's declared scope` };
+  }
+  return { ok: true, fullPath };
+}
+
+function compileSearchPattern(pattern: string): RegExp {
+  try {
+    return new RegExp(pattern);
+  } catch {
+    return new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  }
+}
+
+async function searchPath(searchRoot: string, rawPath: string, regex: RegExp): Promise<string[]> {
+  const matches: string[] = [];
+  try {
+    const stats = await stat(searchRoot);
+    if (stats.isDirectory()) {
+      const relPrefix = rawPath === '.' ? '' : normalize(rawPath);
+      await scanDir(searchRoot, relPrefix, regex, matches);
+    } else {
+      await scanFile(searchRoot, rawPath === '.' ? '' : normalize(rawPath), regex, matches);
+    }
+  } catch {
+    return [];
+  }
+  return matches;
+}
+
+async function scanFile(
+  filePath: string,
+  relPath: string,
+  regex: RegExp,
+  matches: string[],
+): Promise<void> {
+  try {
+    const content = await readFile(filePath, 'utf-8');
+    const lines = content.split('\n');
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index];
+      if (line !== undefined && regex.test(line)) {
+        matches.push(`${relPath}:${index + 1}: ${line}`);
+      }
+    }
+  } catch {
+    // Skip unreadable or binary files silently.
+  }
+}
+
+async function scanDir(
+  dirPath: string,
+  relPrefix: string,
+  regex: RegExp,
+  matches: string[],
+): Promise<void> {
+  let entries;
+  try {
+    entries = await readdir(dirPath, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const entryRel = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
+    const entryFull = join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      await scanDir(entryFull, entryRel, regex, matches);
+    } else if (entry.isFile()) {
+      await scanFile(entryFull, entryRel, regex, matches);
+    }
+  }
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
