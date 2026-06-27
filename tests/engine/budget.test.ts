@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { subdivide, consume, floorWallClock, COMPREHENSION_WALLCLOCK_FLOOR_MS } from '../../src/engine/budget.js';
+import { subdivide, consume, consumeN, floorWallClock, COMPREHENSION_WALLCLOCK_FLOOR_MS } from '../../src/engine/budget.js';
 import type { Budget } from '../../src/contract/goal.js';
 import { Engine } from '../../src/engine/engine.js';
 import {
@@ -127,6 +127,20 @@ describe('consume', () => {
 
     const { budget: b3 } = consume(base, 'wallClockMs');
     expect(b3.wallClockMs).toBe(59_999);
+  });
+
+  it('can consume multiple units at once', () => {
+    const { budget, exhausted } = consumeN(base, 'tokens', 40);
+
+    expect(budget.tokens).toBe(960);
+    expect(exhausted).toBe(false);
+  });
+
+  it('reports exhausted when a multi-unit consume reaches zero', () => {
+    const { budget, exhausted } = consumeN({ ...base, toolCalls: 5 }, 'toolCalls', 5);
+
+    expect(budget.toolCalls).toBe(0);
+    expect(exhausted).toBe(true);
   });
 });
 

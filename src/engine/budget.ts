@@ -68,3 +68,15 @@ export function consume(
   const next: Budget = { ...budget, [dim]: budget[dim] - 1 };
   return { budget: next, exhausted: next[dim] <= 0 };
 }
+
+/**
+ * Consume N units of a budget dimension at once.
+ */
+export function consumeN(
+  budget: Budget,
+  dim: BudgetDimension,
+  n: number,
+): { budget: Budget; exhausted: boolean } {
+  const next: Budget = { ...budget, [dim]: budget[dim] - n };
+  return { budget: next, exhausted: next[dim] <= 0 };
+}

@@ -27,7 +27,7 @@ import type { MemoryView } from '../contract/memory.js';
 import type { RiskClass, SensitivityFact } from '../contract/risk.js';
 import type { PatternStore } from '../contract/pattern.js';
 import type { ToolBroker, ToolDef } from '../contract/tool.js';
-import { subdivide, consume, floorWallClock, COMPREHENSION_WALLCLOCK_FLOOR_MS } from './budget.js';
+import { subdivide, consume, consumeN, floorWallClock, COMPREHENSION_WALLCLOCK_FLOOR_MS } from './budget.js';
 import { lintLibrary } from '../library/constitution.js';
 import { loadFamilySkill } from '../library/skills.js';
 import { classifyRisk } from '../library/risk.js';
@@ -75,43 +75,16 @@ import {
   nonConvergenceBrief,
   unknownTypeBrief,
 } from './reports.js';
+import {
+  DEFAULT_SPEND_CEILING_USD,
+  WORST_CASE_PRICE_PER_TOKEN,
+  createTreeState,
+  debitTreeState,
+  hasReachedSpendCeiling,
+  type TreeState,
+} from './tree-spend.js';
 
-/**
- * Per-tree spend ceiling default (learning phase, ADR-017).
- * Applied at the root when Goal.spendCeilingUsd is absent.
- */
-const DEFAULT_SPEND_CEILING_USD = 15;
-
-/**
- * Worst-case price constant for the conservative token-only ceiling fallback
- * (ADR-017). Used when an endpoint reports tokens but not cost.
- * Covers output-token worst-case for high-tier models (~$0.000025/token).
- * The fallback fires only on cost-silent endpoints; over-conservatism just
- * halts earlier, which is preferable to under-bounding real spend.
- */
-export const WORST_CASE_PRICE_PER_TOKEN = 0.000025;
-
-/**
- * Mutable tree-scoped accumulator for the dollar ceiling. Created once at the
- * root run() call and passed by reference through all recursive child runs so
- * the whole tree shares a single spend counter. Never subdivided.
- */
-interface TreeState {
-  /** Running total of reported costUsd across all brain calls in the tree. */
-  spentUsd: number;
-  /**
-   * The dollar ceiling for this tree. When spentUsd reaches ceilingUsd the
-   * tree halts via runBlock with a decision brief and a ceiling-reached event.
-   */
-  ceilingUsd: number;
-  /**
-   * Set to true after the first 'ceiling-reached' event is emitted for this
-   * tree. Prevents duplicate emission when concurrent branches all find the
-   * ceiling tripped (ADR-017 one-in-flight exception — at most one event per
-   * tree, not one per branch that trips it).
-   */
-  ceilingEmitted?: boolean;
-}
+export { WORST_CASE_PRICE_PER_TOKEN };
 
 export interface EngineOptions {
   registry: Registry;
@@ -398,7 +371,7 @@ export class Engine {
 
   async run(goal: Goal): Promise<Report> {
     const ceilingUsd = goal.spendCeilingUsd ?? DEFAULT_SPEND_CEILING_USD;
-    const treeState: TreeState = { spentUsd: 0, ceilingUsd };
+    const treeState = createTreeState(ceilingUsd);
 
     // No sandbox configured → byte-identical to a plain run: no worktree, no
     // assembly, no new events.
@@ -586,7 +559,7 @@ export class Engine {
     // 'ceiling-reached' once per tree; if it was already emitted by a sibling
     // the treeState is already over ceiling and this child returns the same report
     // shape without a second event.
-    if (await this.checkCeiling(goal, treeState)) {
+    if (hasReachedSpendCeiling(treeState)) {
       return this.ceilingReport(goal, treeState);
     }
 
@@ -720,8 +693,8 @@ export class Engine {
           const decideResult = await this.brain.decide(goal, baseCtx);
           decision = decideResult.value;
           decideUsage = decideResult.usage;
-          this.debitTreeState(treeState, decideResult.usage);
-          if (await this.checkCeiling(goal, treeState)) {
+          debitTreeState(treeState, decideResult.usage);
+          if (hasReachedSpendCeiling(treeState)) {
             await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision, usage: decideResult.usage });
             return this.ceilingReport(goal, treeState);
           }
@@ -786,8 +759,8 @@ export class Engine {
         ...(correctionRepoShape ? { repoShape: correctionRepoShape } : {}),
       };
       const retry = await this.brain.decide(goal, correctionCtx);
-      this.debitTreeState(treeState, retry.usage);
-      if (await this.checkCeiling(goal, treeState)) {
+      debitTreeState(treeState, retry.usage);
+      if (hasReachedSpendCeiling(treeState)) {
         await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision: retry.value, usage: retry.usage });
         return this.ceilingReport(goal, treeState);
       }
@@ -890,8 +863,8 @@ export class Engine {
           const reDecideResult = await this.brain.decide(goal, reDecideCtx);
           decision = reDecideResult.value;
           decideUsage = reDecideResult.usage;
-          this.debitTreeState(treeState, reDecideResult.usage);
-          if (await this.checkCeiling(goal, treeState)) {
+          debitTreeState(treeState, reDecideResult.usage);
+          if (hasReachedSpendCeiling(treeState)) {
             await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision, usage: reDecideResult.usage });
             return this.ceilingReport(goal, treeState);
           }
@@ -942,7 +915,7 @@ export class Engine {
             judgeCtx,
           );
           const splitVerdict = splitJudgeResult.value;
-          this.debitTreeState(treeState, splitJudgeResult.usage);
+          debitTreeState(treeState, splitJudgeResult.usage);
           await this.store.append({
             type: 'judge-verdict',
             at: t(),
@@ -953,7 +926,7 @@ export class Engine {
             usage: splitJudgeResult.usage,
           });
           await this.maybeAppendGoldenCandidate(goal.id, 'judge-split', splitPlanArtifact, rubric, splitVerdict, currentTier);
-          if (await this.checkCeiling(goal, treeState)) {
+          if (hasReachedSpendCeiling(treeState)) {
             return this.ceilingReport(goal, treeState);
           }
 
@@ -1011,8 +984,8 @@ export class Engine {
             const reDecideResult2 = await this.brain.decide(goal, reDecideCtx2);
             decision = reDecideResult2.value;
             decideUsage = reDecideResult2.usage;
-            this.debitTreeState(treeState, reDecideResult2.usage);
-            if (await this.checkCeiling(goal, treeState)) {
+            debitTreeState(treeState, reDecideResult2.usage);
+            if (hasReachedSpendCeiling(treeState)) {
               await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision, usage: reDecideResult2.usage });
               return this.ceilingReport(goal, treeState);
             }
@@ -1154,9 +1127,9 @@ export class Engine {
       const lensCtx: BrainContext = { ...baseCtx, lens };
       const decideResult = await this.brain.decide(goal, lensCtx);
       const candidate = decideResult.value;
-      this.debitTreeState(treeState, decideResult.usage);
+      debitTreeState(treeState, decideResult.usage);
       // ceiling check after each terraced-scan decide debit.
-      if (await this.checkCeiling(goal, treeState)) {
+      if (hasReachedSpendCeiling(treeState)) {
         return { ceiling: true };
       }
 
@@ -1173,9 +1146,9 @@ export class Engine {
       const judgeCtx: BrainContext = { tier: currentTier, memories: goal.memories };
       const judgeResult = await this.brain.judge(goal, splitArtifact, rubric, judgeCtx);
       const verdict = judgeResult.value;
-      this.debitTreeState(treeState, judgeResult.usage);
+      debitTreeState(treeState, judgeResult.usage);
       // ceiling check after each terraced-scan judge debit.
-      if (await this.checkCeiling(goal, treeState)) {
+      if (hasReachedSpendCeiling(treeState)) {
         return { ceiling: true };
       }
       await this.store.append({
@@ -1234,9 +1207,9 @@ export class Engine {
       priorAttempt: { artifact: fallbackArtifact, verdict: bestLoser.verdict },
     };
     const fallbackResult = await this.brain.decide(goal, fallbackCtx);
-    this.debitTreeState(treeState, fallbackResult.usage);
+    debitTreeState(treeState, fallbackResult.usage);
     // ceiling check after terraced-scan fallback debit.
-    if (await this.checkCeiling(goal, treeState)) {
+    if (hasReachedSpendCeiling(treeState)) {
       return { ceiling: true };
     }
     return { decision: fallbackResult.value, loserFindings, winnerUsage: fallbackResult.usage };
@@ -1305,7 +1278,7 @@ export class Engine {
     tierLadder: Tier[],
     deadline: number,
     entryRisk: RiskClass = 'low',
-    treeState: TreeState = { spentUsd: 0, ceilingUsd: DEFAULT_SPEND_CEILING_USD },
+    treeState: TreeState = createTreeState(),
   ): Promise<Report> {
     const t = this.now;
     const typeDef = this.registry.get(goal.type);
@@ -1470,9 +1443,9 @@ export class Engine {
         // Classic produce path
         const produceResult = await this.brain.produce(goal, ctx);
         artifact = produceResult.value;
-        this.debitTreeState(treeState, produceResult.usage);
+        debitTreeState(treeState, produceResult.usage);
         await this.store.append({ type: 'produced', at: t(), goalId: goal.id, usage: produceResult.usage });
-        if (await this.checkCeiling(goal, treeState)) {
+        if (hasReachedSpendCeiling(treeState)) {
           return this.ceilingReport(goal, treeState);
         }
         // Track reported tokens on the tokens counter for observability
@@ -1699,7 +1672,7 @@ export class Engine {
         const judgeResult = await this.brain.judge(goal, artifact, rubric, judgeCtx);
         const verdict = judgeResult.value;
 
-        this.debitTreeState(treeState, judgeResult.usage);
+        debitTreeState(treeState, judgeResult.usage);
         await this.store.append({
           type: 'judge-verdict',
           at: t(),
@@ -1710,7 +1683,7 @@ export class Engine {
           usage: judgeResult.usage,
         });
         await this.maybeAppendGoldenCandidate(goal.id, typeDef.judgeType, artifact, rubric, verdict, tier);
-        if (await this.checkCeiling(goal, treeState)) {
+        if (hasReachedSpendCeiling(treeState)) {
           return this.ceilingReport(goal, treeState);
         }
 
@@ -1874,8 +1847,8 @@ export class Engine {
         const lensCtx: BrainContext = { ...ctx, lens };
         const produceResult = await this.brain.produce(goal, lensCtx);
         candidateArtifact = produceResult.value;
-        this.debitTreeState(treeState, produceResult.usage);
-        if (await this.checkCeiling(goal, treeState)) {
+        debitTreeState(treeState, produceResult.usage);
+        if (hasReachedSpendCeiling(treeState)) {
           return { ceiling: true };
         }
         // Track reported tokens on the tokens counter for observability
@@ -1896,7 +1869,7 @@ export class Engine {
       // Judge this candidate.
       const judgeResult = await this.brain.judge(goal, candidateArtifact, rubric, judgeCtx);
       const verdict = judgeResult.value;
-      this.debitTreeState(treeState, judgeResult.usage);
+      debitTreeState(treeState, judgeResult.usage);
 
       await this.store.append({
         type: 'judge-verdict',
@@ -1909,7 +1882,7 @@ export class Engine {
       });
       await this.maybeAppendGoldenCandidate(goal.id, judgeType, candidateArtifact, rubric, verdict, tier);
 
-      if (await this.checkCeiling(goal, treeState)) {
+      if (hasReachedSpendCeiling(treeState)) {
         return { ceiling: true };
       }
 
@@ -2032,7 +2005,7 @@ export class Engine {
     budget: Budget,
     ctx: BrainContext,
     _priorAttempt: { artifact: Artifact | null; verdict: Verdict } | undefined,
-    treeState: TreeState = { spentUsd: 0, ceilingUsd: DEFAULT_SPEND_CEILING_USD },
+    treeState: TreeState = createTreeState(),
     priorTranscript?: StepTranscript,
   ): Promise<
     | { kind: 'artifact'; artifact: Artifact; budget: Budget; transcript: StepTranscript; tokensUsed: number }
@@ -2169,8 +2142,8 @@ export class Engine {
           store: this.store,
           now: t,
           state: { remainingToolCalls, stepIndex, totalTokensUsed, exploreReadCalls },
-          debitUsage: (usage) => this.debitTreeState(treeState, usage),
-          checkCeiling: () => this.checkCeiling(goal, treeState),
+          debitUsage: (usage) => debitTreeState(treeState, usage),
+          checkCeiling: async () => hasReachedSpendCeiling(treeState),
         });
         ({ stepIndex, totalTokensUsed } = forcedEmit.state);
         if (forcedEmit.kind === 'ceiling') {
@@ -2211,7 +2184,7 @@ export class Engine {
         summarizeRead: this.brain.summarize !== undefined
           ? (text) => this.brain.summarize!(text, ctx)
           : undefined,
-        debitUsage: (usage) => this.debitTreeState(treeState, usage),
+        debitUsage: (usage) => debitTreeState(treeState, usage),
       });
 
       let stepOutput: import('../contract/brain.js').StepOutput;
@@ -2282,13 +2255,13 @@ export class Engine {
         outputKind: stepOutput.kind,
         usage: stepOutput.usage,
       });
-      this.debitTreeState(treeState, stepOutput.usage);
+      debitTreeState(treeState, stepOutput.usage);
       // accumulate step token usage for tokens-budget debit.
       totalTokensUsed += stepOutput.usage.promptTokens + stepOutput.usage.completionTokens;
       stepIndex++;
       // ceiling check after each step debit — surface ceiling-reached
       // exactly once and short-circuit the loop.
-      if (await this.checkCeiling(goal, treeState)) {
+      if (hasReachedSpendCeiling(treeState)) {
         return { kind: 'ceiling', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
       }
 
@@ -2324,8 +2297,8 @@ export class Engine {
             now: t,
             enforceToolCallBudget: this.enforceToolCallBudget,
             state: { remainingToolCalls, stepIndex, totalTokensUsed, exploreReadCalls },
-            debitUsage: (usage) => this.debitTreeState(treeState, usage),
-            checkCeiling: () => this.checkCeiling(goal, treeState),
+            debitUsage: (usage) => debitTreeState(treeState, usage),
+            checkCeiling: async () => hasReachedSpendCeiling(treeState),
           });
           ({ stepIndex, totalTokensUsed } = structuredEmit.state);
           if (structuredEmit.kind === 'exhausted') {
@@ -2394,7 +2367,7 @@ export class Engine {
     artifact: Artifact,
     budget: Budget,
     tier: Tier,
-    treeState: TreeState = { spentUsd: 0, ceilingUsd: DEFAULT_SPEND_CEILING_USD },
+    treeState: TreeState = createTreeState(),
   ): Promise<{ passed: boolean; budget: Budget; verdict: Verdict | null; tier: Tier; ceiling?: true }> {
     const t = this.now;
     const typeDef = this.registry.get(goal.type);
@@ -2452,7 +2425,7 @@ export class Engine {
       const judgeResult = await this.brain.judge(goal, artifact, rubric, judgeCtx);
       const verdict = judgeResult.value;
 
-      this.debitTreeState(treeState, judgeResult.usage);
+      debitTreeState(treeState, judgeResult.usage);
       await this.store.append({
         type: 'judge-verdict',
         at: t(),
@@ -2464,7 +2437,7 @@ export class Engine {
       });
       await this.maybeAppendGoldenCandidate(goal.id, typeDef.judgeType, artifact, rubric, verdict, tier);
       // ceiling check after recheckAfterRepair judge debit.
-      if (await this.checkCeiling(goal, treeState)) {
+      if (hasReachedSpendCeiling(treeState)) {
         return { passed: false, budget, verdict: null, tier, ceiling: true };
       }
 
@@ -2492,7 +2465,7 @@ export class Engine {
     tierIndex: number,
     tierLadder: Tier[],
     priorAttempt: { artifact: Artifact | null; verdict: Verdict } | undefined,
-    treeState: TreeState = { spentUsd: 0, ceilingUsd: DEFAULT_SPEND_CEILING_USD },
+    treeState: TreeState = createTreeState(),
   ): Promise<
     | { kind: 'repaired'; artifact: Artifact; budget: Budget }
     | { kind: 'escalated'; tier: Tier; budget: Budget }
@@ -2560,7 +2533,7 @@ export class Engine {
         repairCtx,
       );
       const repairedArtifact = repairResult.value;
-      this.debitTreeState(treeState, repairResult.usage);
+      debitTreeState(treeState, repairResult.usage);
       await this.store.append({
         type: 'repair-applied',
         at: t(),
@@ -2569,7 +2542,7 @@ export class Engine {
         usage: repairResult.usage,
       });
       // ceiling check after handleFailure repair debit.
-      if (await this.checkCeiling(goal, treeState)) {
+      if (hasReachedSpendCeiling(treeState)) {
         const ceilingRpt = await this.ceilingReport(goal, treeState);
         return { kind: 'blocked', report: ceilingRpt };
       }
@@ -3079,7 +3052,7 @@ export class Engine {
     goal: Goal,
     children: ChildPlan[],
     extraFindings: string[] = [],
-    treeState: TreeState = { spentUsd: 0, ceilingUsd: DEFAULT_SPEND_CEILING_USD },
+    treeState: TreeState = createTreeState(),
   ): Promise<{
     report: Report;
     mergedArtifact: Artifact | null;
@@ -3486,7 +3459,7 @@ export class Engine {
     goal: Goal,
     children: ChildPlan[],
     extraFindings: string[] = [],
-    treeState: TreeState = { spentUsd: 0, ceilingUsd: DEFAULT_SPEND_CEILING_USD },
+    treeState: TreeState = createTreeState(),
   ): Promise<Report> {
     const { report } = await this.runRound(goal, children, extraFindings, treeState);
     await this.store.append({ type: 'emitted', at: this.now(), goalId: goal.id, report });
@@ -3501,8 +3474,8 @@ export class Engine {
    * type carries `iterative`.
    *
    * Reused verbatim: `runRound` (one split pass), `brain.decide`/`brain.judge`,
-   * `subdivide`, `persistLeafKnowledge`, `checkCeiling`/`debitTreeState`/
-   * `ceilingReport`, the comprehend merge, the lesson/memory promotion edge,
+   * budget/spend accounting, `persistLeafKnowledge`, `ceilingReport`, the
+   * comprehend merge, the lesson/memory promotion edge, and
    * `commitRound`/`diffBodiesWithinScope`.
    *
    * The loop (step 6): round 0 mints + freezes the criteria; round N>0 re-decides
@@ -3538,7 +3511,7 @@ export class Engine {
     while (true) {
       // (a) GUARD 4 (CEILING) at the TOP of every round — the per-round top gate
       // the termination tradeoff requires; the bound spend cannot exceed.
-      if (await this.checkCeiling(goal, treeState)) {
+      if (hasReachedSpendCeiling(treeState)) {
         if (lastAssessment === null) {
           // Tripped before any round ran — a plain ceiling block, no partial yet.
           return this.ceilingReport(goal, treeState);
@@ -3730,7 +3703,7 @@ export class Engine {
     };
 
     const decideResult = await this.brain.decide(goal, ctx);
-    this.debitTreeState(treeState, decideResult.usage);
+    debitTreeState(treeState, decideResult.usage);
     await this.store.append({
       type: 'decided',
       at: t(),
@@ -3840,7 +3813,7 @@ export class Engine {
         });
         await this.maybeAppendGoldenCandidate(goal.id, judgeType, mergedArtifact, rubric, value, judgeTier);
       }
-      this.debitTreeState(treeState, usage);
+      debitTreeState(treeState, usage);
     }
 
     // diff DIGEST: pointers, not bodies — the failing criteria ids (the honest
@@ -3908,23 +3881,7 @@ export class Engine {
     return report;
   }
 
-  // ── TREE-SPEND ACCOUNTING ─────────────────────────────────────────────────
-
-  private debitTreeState(treeState: TreeState, usage: Usage): void {
-    if (usage.costUsd !== undefined) {
-      treeState.spentUsd += usage.costUsd;
-    } else {
-      // Conservative token-only fallback (ADR-017): when the endpoint
-      // reports tokens but not cost, use the documented worst-case price constant
-      // to bound spend. This prevents uncapped execution on cost-silent endpoints.
-      const tokens = usage.promptTokens + usage.completionTokens;
-      treeState.spentUsd += tokens * WORST_CASE_PRICE_PER_TOKEN;
-    }
-  }
-
-  private async checkCeiling(goal: Goal, treeState: TreeState): Promise<boolean> {
-    return treeState.spentUsd >= treeState.ceilingUsd;
-  }
+  // ── TREE-SPEND EVENTS ─────────────────────────────────────────────────────
 
   /**
    * Emit the 'ceiling-reached' event exactly once per tree (ADR-017 guard:
@@ -3983,16 +3940,4 @@ function iterativeAcceptanceJudge(registry: Registry, goalType: string): string 
  */
 function encodeMissing(m: MissingRequirement): string {
   return m.region !== undefined ? `${m.category}:${m.region}` : m.category;
-}
-
-/**
- * Consume N units of a budget dimension at once.
- */
-function consumeN(
-  budget: Budget,
-  dim: keyof Budget,
-  n: number,
-): { budget: Budget; exhausted: boolean } {
-  const next: Budget = { ...budget, [dim]: budget[dim] - n };
-  return { budget: next, exhausted: next[dim] <= 0 };
 }
