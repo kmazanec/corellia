@@ -27,7 +27,6 @@ import type { MemoryView } from '../contract/memory.js';
 import type { RiskClass, SensitivityFact } from '../contract/risk.js';
 import type { PatternStore } from '../contract/pattern.js';
 import type { ToolBroker, ToolDef } from '../contract/tool.js';
-import { GRANT_TOOL_MAP } from '../contract/tool.js';
 import { subdivide, consume, floorWallClock, COMPREHENSION_WALLCLOCK_FLOOR_MS } from './budget.js';
 import { lintLibrary } from '../library/constitution.js';
 import { loadFamilySkill, loadSharedPreamble, loadExploreEconomy } from '../library/skills.js';
@@ -68,6 +67,7 @@ import {
   isExploreThenEmitLeaf,
   releaseGuardForCallId,
 } from './step-loop-guards.js';
+import { NOTE_TOOL_DEF, deriveToolDefs, isToolGranted } from './step-loop-tools.js';
 
 /**
  * Per-tree spend ceiling default (learning phase, ADR-017).
@@ -2123,19 +2123,7 @@ export class Engine {
     // `note` (ADR-036) is available to every leaf, engine-intercepted (not broker-
     // routed, not grant-gated): distill what a read meant so the raw read can be
     // evicted without losing the substance. Appended to the model's tool surface.
-    tools.push({
-      name: 'note',
-      description:
-        'Record a short note in your durable working memory (your scratchpad). Use it to ' +
-        'distill what a file you read MEANS for the task (e.g. "collectTree is called at ' +
-        'engine.ts ~563 in the success branch") so the raw file can be dropped from context ' +
-        'without losing the insight. Notes persist across steps; raw reads may be evicted.',
-      parameters: {
-        type: 'object',
-        properties: { text: { type: 'string', description: 'The note to remember.' } },
-        required: ['text'],
-      },
-    });
+    tools.push(NOTE_TOOL_DEF);
     const transcript: StepTranscript = [];
     let remainingToolCalls = budget.toolCalls;
     // Warn-only runaway backstop: even when the toolCalls budget is not enforced
@@ -4360,54 +4348,6 @@ export class Engine {
  */
 function iterativeAcceptanceJudge(registry: Registry, goalType: string): string {
   return registry.get(goalType).iterative!.acceptanceJudge;
-}
-
-/**
- * Whether a goal type's grants include at least one grant that maps to a known
- * tool in GRANT_TOOL_MAP. This is the predicate that selects the step-loop path.
- */
-function isToolGranted(grants: string[]): boolean {
-  const allGranted = Object.values(GRANT_TOOL_MAP).flat();
-  return grants.some((g) => allGranted.includes(g as never));
-}
-
-/**
- * Derive the ToolDef array the brain receives for a step, from the intersection
- * of the type's grants and GRANT_TOOL_MAP. The brain uses these as a menu of
- * available tools; the broker's dispatch table is the executor.
- *
- * When a broker that exposes a `defs()` method is provided (e.g. the concrete
- * Broker class), its real ToolDefs are used for the granted tools — giving the
- * brain the true JSON-Schema parameter shapes (e.g. run_script's `script`
- * property). Otherwise, the synthesized stub shape is used as a fallback so the
- * step loop stays functional without a real broker.
- */
-function deriveToolDefs(
-  grants: string[],
-  broker?: { defs?: () => ToolDef[] },
-): ToolDef[] {
-  // Build a lookup from the broker's real defs when available.
-  const brokerDefMap = new Map<string, ToolDef>();
-  if (broker?.defs) {
-    for (const def of broker.defs()) {
-      brokerDefMap.set(def.name, def);
-    }
-  }
-
-  const defs: ToolDef[] = [];
-  for (const [toolName, toolGrants] of Object.entries(GRANT_TOOL_MAP)) {
-    if (toolGrants.some((tg) => grants.includes(tg))) {
-      const real = brokerDefMap.get(toolName);
-      defs.push(
-        real ?? {
-          name: toolName,
-          description: `Tool: ${toolName}`,
-          parameters: { type: 'object', properties: {}, additionalProperties: true },
-        },
-      );
-    }
-  }
-  return defs;
 }
 
 function blockedReport(reason: string, findings: string[] = []): Report {
