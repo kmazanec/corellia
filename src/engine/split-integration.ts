@@ -1,9 +1,11 @@
 import type { EventStore } from '../contract/events.js';
 import type { Goal } from '../contract/goal.js';
-import type { CheckContext, GoalTypeDef } from '../contract/goal-type.js';
+import type { Brain, BrainContext } from '../contract/brain.js';
+import type { CheckContext, GoalTypeDef, Registry } from '../contract/goal-type.js';
 import type { Artifact, Report } from '../contract/report.js';
 import type { Verdict } from '../contract/verdict.js';
 import { childShaFallback, mergeComprehensionArtifacts } from '../library/comprehend-merge.js';
+import { appendGoldenCandidate, enrichRubric } from './judge-support.js';
 
 export interface ComprehendMergeHandled {
   kind: 'handled';
@@ -17,6 +19,11 @@ export interface ComprehendMergeSkipped {
 }
 
 export type ComprehendMergeResult = ComprehendMergeHandled | ComprehendMergeSkipped;
+
+export interface SplitIntegrationJudgment {
+  findings: string[];
+  blockers: string[];
+}
 
 export function mergeGenericChildArtifacts(childReports: Report[]): Artifact | null {
   const allFiles: { path: string; content: string }[] = [];
@@ -96,6 +103,68 @@ export async function mergeComprehendChildArtifacts(params: {
 
   await params.persist(params.goal, merged);
   return { kind: 'handled', mergedArtifact: merged, blockers: [], findings };
+}
+
+export async function judgeSplitIntegration(params: {
+  goal: Goal;
+  artifact: Artifact | null;
+  registry: Registry;
+  brain: Brain;
+  goldenCapture: boolean;
+  store: EventStore;
+  now: () => number;
+  brainConfig?: { modelByTier?: Record<string, string> };
+}): Promise<SplitIntegrationJudgment> {
+  if (!params.registry.has('judge-integration') || params.artifact === null) {
+    return { findings: [], blockers: [] };
+  }
+
+  const rubric = enrichRubric(params.registry,
+    `Does the integrated artifact satisfy the original goal: "${params.goal.title}"?`,
+    'judge-integration',
+    params.goal.intent,
+  );
+  const goalTypeDef = params.registry.get(params.goal.type);
+  const tier = goalTypeDef.tier.default;
+  const judgeCtx: BrainContext = {
+    tier,
+    memories: params.goal.memories,
+  };
+  const { value: verdict, usage } = await params.brain.judge(
+    params.goal,
+    params.artifact,
+    rubric,
+    judgeCtx,
+  );
+
+  if (params.goldenCapture) {
+    await params.store.append({
+      type: 'judge-verdict',
+      at: params.now(),
+      goalId: params.goal.id,
+      judgeType: 'judge-integration',
+      verdict,
+      tier,
+      usage,
+    });
+    await appendGoldenCandidate({
+      enabled: params.goldenCapture,
+      store: params.store,
+      now: params.now,
+      goalId: params.goal.id,
+      judgeType: 'judge-integration',
+      artifact: params.artifact,
+      rubric,
+      verdict,
+      tier,
+      ...(params.brainConfig !== undefined ? { brainConfig: params.brainConfig } : {}),
+    });
+  }
+
+  if (verdict.pass) return { findings: [], blockers: [] };
+
+  const msg = `Integration eval failed: ${verdict.findings.map((f) => f.title).join(', ')}`;
+  return { findings: [msg], blockers: [msg] };
 }
 
 function comprehendMergeType(

@@ -1,10 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import type { Report } from '../../src/contract/report.js';
 import {
+  judgeSplitIntegration,
   mergeComprehendChildArtifacts,
   mergeGenericChildArtifacts,
 } from '../../src/engine/split-integration.js';
-import { MemoryEventStore, leafTypeDef, makeGoal, textArtifact } from './stubs.js';
+import {
+  buildRegistry,
+  failVerdict,
+  MemoryEventStore,
+  nonLeafTypeDef,
+  leafTypeDef,
+  makeGoal,
+  passVerdict,
+  ScriptedBrain,
+  textArtifact,
+} from './stubs.js';
 
 const report = (overrides: Partial<Report> = {}): Report => ({
   artifact: null,
@@ -122,6 +133,66 @@ describe('split integration', () => {
       mergedArtifact: null,
       blockers: ['Comprehension integrate merge failed its deterministic gate: comprehend-merge anchor-check: missing anchor'],
       findings: ['comprehend-merge anchor-check: missing anchor'],
+    });
+  });
+
+  it('skips integration judgment when no judge type or artifact is present', async () => {
+    const result = await judgeSplitIntegration({
+      goal: makeGoal({ type: 'splitter' }),
+      artifact: textArtifact('merged'),
+      registry: buildRegistry([nonLeafTypeDef()]),
+      brain: new ScriptedBrain(),
+      goldenCapture: true,
+      store: new MemoryEventStore(),
+      now: () => 4,
+    });
+
+    expect(result).toEqual({ findings: [], blockers: [] });
+  });
+
+  it('records golden integration judgments on non-scripted runs', async () => {
+    const store = new MemoryEventStore();
+    const brain = new ScriptedBrain().queueJudge(passVerdict());
+
+    const result = await judgeSplitIntegration({
+      goal: makeGoal({ type: 'splitter' }),
+      artifact: textArtifact('merged'),
+      registry: buildRegistry([
+        nonLeafTypeDef(),
+        leafTypeDef({ name: 'judge-integration', family: 'judge' }),
+      ]),
+      brain,
+      goldenCapture: true,
+      store,
+      now: () => 5,
+    });
+
+    expect(result).toEqual({ findings: [], blockers: [] });
+    expect((await store.list()).map((event) => event.type)).toEqual([
+      'judge-verdict',
+      'golden-candidate',
+    ]);
+  });
+
+  it('returns hard blockers for failing integration judgments', async () => {
+    const brain = new ScriptedBrain().queueJudge(failVerdict('missing final output'));
+
+    const result = await judgeSplitIntegration({
+      goal: makeGoal({ type: 'splitter' }),
+      artifact: textArtifact('merged'),
+      registry: buildRegistry([
+        nonLeafTypeDef(),
+        leafTypeDef({ name: 'judge-integration', family: 'judge' }),
+      ]),
+      brain,
+      goldenCapture: false,
+      store: new MemoryEventStore(),
+      now: () => 6,
+    });
+
+    expect(result).toEqual({
+      findings: ['Integration eval failed: missing final output'],
+      blockers: ['Integration eval failed: missing final output'],
     });
   });
 });
