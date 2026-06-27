@@ -68,7 +68,6 @@ import {
   buildReport,
   escalatedBrief,
   exhaustedBrief,
-  gateDeniedBrief,
   isomorphicBrief,
   nonConvergenceBrief,
   unknownTypeBrief,
@@ -90,6 +89,7 @@ import {
 import { checkpointVerifyArtifacts } from './coverage-checkpoint.js';
 import { appendGoldenCandidate, enrichRubric } from './judge-support.js';
 import { diveFactsAsMemories } from './knowledge-memory.js';
+import { runAuthorityGate } from './authority-gate.js';
 
 export { WORST_CASE_PRICE_PER_TOKEN };
 
@@ -604,23 +604,18 @@ export class Engine {
     // requirement (gated: true) OR when instance risk is high. An act whose
     // consequences outrun any eval must route through a human before the tree
     // opens — fail-safe: no handler means denied.
-    const needsGate = typeDef.gated === true || entryRisk === 'high';
-    if (needsGate) {
-      const gateDecision = this.onGate
-        ? await this.onGate(goal, entryRisk)
-        : 'denied';
-      await this.store.append({ type: 'gate-decision', at: t(), goalId: goal.id, resolution: gateDecision });
-      if (gateDecision === 'denied') {
-        const brief = gateDeniedBrief(goal, entryRisk, typeDef.gated === true);
-        const report = blockedReport(
-          `Authority gate denied: ${brief.question}`,
-        );
-        const resolution = this.effectiveOnBrief ? await this.effectiveOnBrief(brief) : brief.onTimeout;
-        await this.store.append({ type: 'blocked', at: t(), goalId: goal.id, brief, resolution });
-        await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
-        return report;
-      }
-    }
+    const authorityReport = await runAuthorityGate({
+      shouldGate: typeDef.gated === true || entryRisk === 'high',
+      goal,
+      risk: entryRisk,
+      typeGated: typeDef.gated === true,
+      store: this.store,
+      now: t,
+      onGate: this.onGate,
+      onBrief: this.effectiveOnBrief,
+      deniedMessage: (brief) => `Authority gate denied: ${brief.question}`,
+    });
+    if (authorityReport !== null) return authorityReport;
 
     // ── DECIDE ─────────────────────────────────────────────────────────────
     // leafOnly types go straight to the attempt loop; non-leaf types decide.
@@ -1610,22 +1605,19 @@ export class Engine {
 
         // Gate fires when artifact risk is high and entry scope was not — the
         // scope declaration did not cover the sensitive surface actually touched.
-        if (emitRisk === 'high' && entryRisk !== 'high') {
-          const gateDecision = this.onGate
-            ? await this.onGate(goal, emitRisk)
-            : 'denied';
-          await this.store.append({ type: 'gate-decision', at: t(), goalId: goal.id, resolution: gateDecision });
-          if (gateDecision === 'denied') {
-            const brief = gateDeniedBrief(goal, emitRisk, false);
-            const report = blockedReport(
-              `Authority gate denied at emission (artifact touched sensitive paths): ${brief.question}`,
-            );
-            const resolution = this.effectiveOnBrief ? await this.effectiveOnBrief(brief) : brief.onTimeout;
-            await this.store.append({ type: 'blocked', at: t(), goalId: goal.id, brief, resolution });
-            await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
-            return report;
-          }
-        }
+        const emissionAuthorityReport = await runAuthorityGate({
+          shouldGate: emitRisk === 'high' && entryRisk !== 'high',
+          goal,
+          risk: emitRisk,
+          typeGated: false,
+          store: this.store,
+          now: t,
+          onGate: this.onGate,
+          onBrief: this.effectiveOnBrief,
+          deniedMessage: (brief) =>
+            `Authority gate denied at emission (artifact touched sensitive paths): ${brief.question}`,
+        });
+        if (emissionAuthorityReport !== null) return emissionAuthorityReport;
       }
 
       // ── LLM JUDGE (only if deterministic passed) ─────────────────────────
