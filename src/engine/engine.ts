@@ -13,7 +13,7 @@
  * human-signoff step the engine never performs.
  */
 
-import type { Goal, Tier, Usage } from '../contract/goal.js';
+import type { Goal } from '../contract/goal.js';
 import type { Artifact, Report } from '../contract/report.js';
 import type { EventStore } from '../contract/events.js';
 import type { Brain } from '../contract/brain.js';
@@ -31,23 +31,12 @@ import {
 } from './assembly.js';
 import {
   WORST_CASE_PRICE_PER_TOKEN,
-  debitTreeState,
-  hasReachedSpendCeiling,
   type TreeState,
 } from './tree-spend.js';
 import { repoShapeHint as buildRepoShapeHint } from './repo-shape-hint.js';
-import { runSplitDispatch } from './split-dispatch.js';
-import { enterGoal } from './goal-entry.js';
-import { createAttemptRunner } from './attempt/loop.js';
-import { resolveDecisionPhase } from './decision/phase.js';
-import { createSplitRunner } from './split-runner.js';
 import { runRootGoal } from './root-runner.js';
 import type { EngineOptions } from './options.js';
-import {
-  ceilingReachedOnce,
-  ceilingReport,
-  runBlock,
-} from './blocking.js';
+import { createRecursiveRunner } from './recursive-runner.js';
 
 export { WORST_CASE_PRICE_PER_TOKEN };
 export type { EngineOptions, EngineKnowledge } from './options.js';
@@ -184,106 +173,28 @@ export class Engine {
   }
 
   private async _run(goal: Goal, treeState: TreeState): Promise<Report> {
-    const t = this.now;
-    const entry = await enterGoal({
-      goal,
-      registry: this.registry,
-      store: this.store,
-      now: t,
-      sensitivity: this.sensitivity,
-      onGate: this.onGate,
-      onBrief: this.effectiveOnBrief,
-      hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
-    });
-    if (entry.kind === 'ceiling') {
-      return ceilingReport({
-        goal,
-        treeState,
-        store: this.store,
-        now: t,
-        onBrief: this.effectiveOnBrief,
-      });
-    }
-    if (entry.kind === 'emitted') {
-      return entry.report;
-    }
-    const { typeDef, tier, tierIndex, tierLadder, entryRisk, deadline } = entry;
-
-    const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
-    const decisionPhase = await resolveDecisionPhase({
-      goal,
-      typeDef,
-      tier,
+    return createRecursiveRunner({
       registry: this.registry,
       brain: this.brain,
       store: this.store,
-      now: t,
-      patterns: this.patterns,
+      memory: this.memory,
+      now: this.now,
       goldenCapture: this.goldenCapture,
-      ...(brainConfig !== undefined ? { brainConfig } : {}),
-      skillForGoalType: (goalType) => this.decideSkillBlock(goalType),
-      repoShapeForGoal: (goalForShape) => this.repoShapeHint(goalForShape),
-      debitUsage: (usage) => debitTreeState(treeState, usage),
-      hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
-    });
-    if (decisionPhase.kind === 'ceiling') {
-      return ceilingReport({
-        goal,
-        treeState,
-        store: this.store,
-        now: t,
-        onBrief: this.effectiveOnBrief,
-      });
-    }
-    if (decisionPhase.kind === 'emitted') {
-      return decisionPhase.report;
-    }
-
-    const { decision, decideUsage, terracedLoserFindings, goalShape } = decisionPhase;
-    await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision, ...(decideUsage !== undefined ? { usage: decideUsage } : {}) });
-
-    // ── DISPATCH on decision kind ──────────────────────────────────────────
-    switch (decision.kind) {
-      case 'satisfy':
-        return this.attemptRunner().runAttemptLoop({
-          goal,
-          initialTier: tier,
-          initialTierIndex: tierIndex,
-          tierLadder,
-          deadline,
-          entryRisk,
-          treeState,
-        });
-
-      case 'split': {
-        const splitRunner = this.splitRunner();
-        return runSplitDispatch({
-          goal,
-          typeDef,
-          decision,
-          terracedLoserFindings,
-          goalShape,
-          repoRoot: this._activeAssembly?.worktree.repoRoot,
-          knowledge: this.knowledge,
-          patterns: this.patterns,
-          registry: this.registry,
-          store: this.store,
-          now: t,
-          runMilestone: (children) => splitRunner.runMilestone(goal, children, treeState),
-          runSplit: (children, findings) =>
-            splitRunner.runSplit(goal, children, findings, treeState),
-        });
-      }
-
-      case 'block':
-        return runBlock({
-          goal,
-          brief: decision.brief,
-          store: this.store,
-          now: t,
-          onBrief: this.effectiveOnBrief,
-        });
-    }
+      enforceToolCallBudget: this.enforceToolCallBudget,
+      sensitivity: this.sensitivity,
+      onGate: this.onGate,
+      onBrief: () => this.effectiveOnBrief,
+      patterns: this.patterns,
+      knowledge: this.knowledge,
+      effectiveBroker: () => this.effectiveBroker,
+      activeWorktree: () => this._activeAssembly?.worktree,
+      checkContextFor: (goalId) => this.checkContextFor(goalId),
+      persistLeafKnowledge: (persistGoal, artifact) =>
+        this.persistLeafKnowledge(persistGoal, artifact),
+      runChild: (childGoal, childTreeState) => this._run(childGoal, childTreeState),
+      decideSkillBlock: (goalType) => this.decideSkillBlock(goalType),
+      repoShapeHint: (goalForShape) => this.repoShapeHint(goalForShape),
+    }).run(goal, treeState);
   }
 
   /**
@@ -301,73 +212,6 @@ export class Engine {
     const persist = this.knowledge?.persist;
     if (persist === undefined) return;
     await persist(goal, artifact);
-  }
-
-  private attemptRunner() {
-    return createAttemptRunner({
-      registry: this.registry,
-      brain: this.brain,
-      store: this.store,
-      now: this.now,
-      effectiveBroker: () => this.effectiveBroker,
-      sandboxRepoRoot: () => this._activeAssembly?.worktree.repoRoot,
-      checkContextFor: (goalId) => this.checkContextFor(goalId),
-      sensitivity: this.sensitivity,
-      onGate: this.onGate,
-      onBrief: () => this.effectiveOnBrief,
-      enforceToolCallBudget: this.enforceToolCallBudget,
-      goldenCapture: this.goldenCapture,
-      persistLeafKnowledge: (goal, artifact) => this.persistLeafKnowledge(goal, artifact),
-      runBlock: (goal, brief) =>
-        runBlock({
-          goal,
-          brief,
-          store: this.store,
-          now: this.now,
-          onBrief: this.effectiveOnBrief,
-        }),
-      ceilingReport: (goal, treeState) =>
-        ceilingReport({
-          goal,
-          treeState,
-          store: this.store,
-          now: this.now,
-          onBrief: this.effectiveOnBrief,
-        }),
-    });
-  }
-
-  private splitRunner() {
-    return createSplitRunner({
-      memory: this.memory,
-      registry: this.registry,
-      brain: this.brain,
-      goldenCapture: this.goldenCapture,
-      store: this.store,
-      now: this.now,
-      activeWorktree: () => this._activeAssembly?.worktree,
-      factsForRegions: this.knowledge?.factsForRegions,
-      headSha: this.knowledge?.headSha,
-      checkContextFor: (goalId) => this.checkContextFor(goalId),
-      persistLeafKnowledge: (goal, artifact) => this.persistLeafKnowledge(goal, artifact),
-      runChild: (childGoal, treeState) => this._run(childGoal, treeState),
-      decideSkillBlock: (goalType) => this.decideSkillBlock(goalType),
-      ceilingReachedOnce: (goal, treeState) =>
-        ceilingReachedOnce({
-          goal,
-          treeState,
-          store: this.store,
-          now: this.now,
-        }),
-      ceilingReport: (goal, treeState) =>
-        ceilingReport({
-          goal,
-          treeState,
-          store: this.store,
-          now: this.now,
-          onBrief: this.effectiveOnBrief,
-        }),
-    });
   }
 
   /**
