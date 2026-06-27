@@ -36,13 +36,8 @@ import {
   type SandboxConfig,
   type SandboxAssembly,
 } from './assembly.js';
-import { diffWithinScope, collectTree, preserveTree, commitRound, diffBodiesWithinScope, treeChangedWithinScope } from './worktree.js';
+import { diffWithinScope, collectTree, preserveTree, commitRound, treeChangedWithinScope } from './worktree.js';
 import { createIterationRecord, deleteProvenanceIssue } from './iteration-tools.js';
-import {
-  parseAcceptanceCriteria,
-  criterionToCheck,
-  type AcceptanceCriterion,
-} from '../library/acceptance-criteria.js';
 import type { KnowledgeArtifact, RegionFacts } from '../contract/knowledge.js';
 import {
   coverageCheck,
@@ -87,7 +82,7 @@ import {
   injectCoverageChildren,
 } from './coverage-gate.js';
 import { checkpointVerifyArtifacts } from './coverage-checkpoint.js';
-import { appendGoldenCandidate, enrichRubric } from './judge-support.js';
+import { appendGoldenCandidate } from './judge-support.js';
 import { runAuthorityGate } from './authority-gate.js';
 import { runDeterministicGate } from './deterministic-gate.js';
 import { judgeLeafArtifact } from './leaf-judge.js';
@@ -128,6 +123,11 @@ import {
   mergeComprehendChildArtifacts,
   mergeGenericChildArtifacts,
 } from './split-integration.js';
+import {
+  assessMilestoneRound,
+  type RoundAssessment,
+} from './milestone/round-assessment.js';
+import { reDecideMilestoneRound } from './milestone/redecide-round.js';
 
 export { WORST_CASE_PRICE_PER_TOKEN };
 
@@ -2183,7 +2183,7 @@ export class Engine {
     // carry-state across rounds.
     let criteriaArtifact: Artifact | null = null;
     let roundReport: Report = blockedReport('milestone loop produced no round');
-    let lastAssessment: Awaited<ReturnType<Engine['assessRound']>> | null = null;
+    let lastAssessment: RoundAssessment | null = null;
     let priorPassingCount = -1; // -1 so round 0 is always a "strict increase" baseline
     let flatRounds = 0;
     let priorRoundRef: string | null = null;
@@ -2345,67 +2345,22 @@ export class Engine {
   private async reDecideRound(
     goal: Goal,
     treeState: TreeState,
-    priorAssessment: Awaited<ReturnType<Engine['assessRound']>>,
+    priorAssessment: RoundAssessment,
     priorRoundRef: string | null,
   ): Promise<{ children: ChildPlan[] } | { halt: true }> {
-    const t = this.now;
-
-    // Build the diff-bodies digest of what the prior round changed (in-scope).
-    let diffBodies = '';
-    const worktree = this._activeAssembly?.worktree;
-    if (worktree !== undefined && priorRoundRef !== null) {
-      const bodies = diffBodiesWithinScope(worktree.root, goal.scope, priorRoundRef);
-      diffBodies = bodies
-        .map((b) => `--- ${b.path}${b.truncated ? ' (truncated)' : ''} ---\n${b.body}`)
-        .join('\n\n');
-    }
-
-    // The unmet criteria + judge findings as a priorAttempt verdict the brain
-    // weighs. This is the re-decide hint: target the next round at the gap.
-    const unmetFindings: Finding[] = priorAssessment.checkResults
-      .filter((r) => !r.ok)
-      .map((r) => ({
-        title: `Unmet criterion ${r.id}`,
-        dimension: 'spec' as const,
-        severity: 'high' as const,
-        gating: true,
-        prescription: r.detail,
-      }));
-    const reDecideVerdict: Verdict = {
-      pass: false,
-      findings: [...unmetFindings, ...priorAssessment.judgeVerdict.findings],
-    };
-
-    const decideSkill = this.decideSkillBlock(goal.type);
-    const ctx: BrainContext = {
+    return reDecideMilestoneRound({
+      goal,
+      priorAssessment,
+      priorRoundRef,
+      worktreeRoot: this._activeAssembly?.worktree.root,
+      registry: this.registry,
+      brain: this.brain,
+      store: this.store,
+      now: this.now,
+      decideSkill: this.decideSkillBlock(goal.type),
       tier: this.registry.get(goal.type).tier.default,
-      memories: goal.memories,
-      ...(decideSkill ? { skill: decideSkill } : {}),
-      priorAttempt: {
-        artifact: diffBodies.length > 0 ? { kind: 'text', text: diffBodies } : null,
-        verdict: reDecideVerdict,
-      },
-    };
-
-    const decideResult = await this.brain.decide(goal, ctx);
-    debitTreeState(treeState, decideResult.usage);
-    await this.store.append({
-      type: 'decided',
-      at: t(),
-      goalId: goal.id,
-      decision: decideResult.value,
-      usage: decideResult.usage,
+      debitUsage: (usage) => debitTreeState(treeState, usage),
     });
-
-    const decision = decideResult.value;
-    if (decision.kind !== 'split') {
-      return { halt: true };
-    }
-    const structErr = validateSplit(decision.children, (tp) => (this.registry.has(tp) ? this.registry.get(tp) : undefined));
-    if (structErr !== null) {
-      return { halt: true };
-    }
-    return { children: decision.children };
   }
 
   /**
@@ -2446,73 +2401,21 @@ export class Engine {
     criteriaArtifact: Artifact | null,
     mergedArtifact: Artifact | null,
     treeState: TreeState,
-  ): Promise<{
-    passingCount: number;
-    criteriaTotal: number;
-    judgeVerdict: Verdict;
-    criteria: AcceptanceCriterion[];
-    checkResults: { id: string; ok: boolean; detail: string }[];
-    diffDigest: string[];
-  }> {
-    const parsed = parseAcceptanceCriteria(criteriaArtifact);
-    const criteria = parsed.ok ? parsed.criteria : [];
-    const checkCtx = this.checkContextFor(goal.id);
-
-    const checkResults: { id: string; ok: boolean; detail: string }[] = [];
-    for (const criterion of criteria) {
-      const result = await criterionToCheck(criterion).run(goal, mergedArtifact, checkCtx);
-      checkResults.push({ id: criterion.id, ok: result.ok, detail: result.detail });
-    }
-    const passingCount = checkResults.filter((r) => r.ok).length;
-
-    // judge-acceptance: the ship-gate judge (decision 1). Reads the cumulative
-    // artifact + the frozen criteria + this round's deterministic check RESULTS.
-    let judgeVerdict: Verdict = { pass: false, findings: [] };
-    if (this.registry.has(iterativeAcceptanceJudge(this.registry, goal.type)) && mergedArtifact) {
-      const judgeType = iterativeAcceptanceJudge(this.registry, goal.type);
-      const criteriaSummary = criteria
-        .map((c) => {
-          const r = checkResults.find((x) => x.id === c.id);
-          return `- [${r?.ok ? 'PASS' : 'FAIL'}] ${c.id}: ${c.claim} (${r?.detail ?? 'not run'})`;
-        })
-        .join('\n');
-      const rubric = enrichRubric(this.registry,
-        `Are the frozen acceptance criteria satisfied to a shippable bar for the intent: "${goal.title}"?\n\nFrozen criteria and this round's deterministic check results:\n${criteriaSummary}`,
-        judgeType,
-        goal.intent,
-      );
-      const judgeTypeDef = this.registry.get(judgeType);
-      const judgeTier = judgeTypeDef.tier.default;
-      const judgeCtx: BrainContext = { tier: judgeTier, memories: goal.memories };
-      const { value, usage } = await this.brain.judge(goal, mergedArtifact, rubric, judgeCtx);
-      judgeVerdict = value;
-      if (this.goldenCapture) {
-        await this.store.append({
-          type: 'judge-verdict',
-          at: this.now(),
-          goalId: goal.id,
-          judgeType,
-          verdict: value,
-          tier: judgeTier,
-          usage,
-        });
-        await this.maybeAppendGoldenCandidate(goal.id, judgeType, mergedArtifact, rubric, value, judgeTier);
-      }
-      debitTreeState(treeState, usage);
-    }
-
-    // diff DIGEST: pointers, not bodies — the failing criteria ids (the honest
-    // per-round log of what is still unmet).
-    const diffDigest = checkResults.filter((r) => !r.ok).map((r) => `unmet:${r.id}`);
-
-    return {
-      passingCount,
-      criteriaTotal: criteria.length,
-      judgeVerdict,
-      criteria,
-      checkResults,
-      diffDigest,
-    };
+  ): Promise<RoundAssessment> {
+    const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
+    return assessMilestoneRound({
+      goal,
+      criteriaArtifact,
+      mergedArtifact,
+      registry: this.registry,
+      brain: this.brain,
+      store: this.store,
+      now: this.now,
+      checkContext: this.checkContextFor(goal.id),
+      goldenCapture: this.goldenCapture,
+      ...(brainConfig !== undefined ? { brainConfig } : {}),
+      debitUsage: (usage) => debitTreeState(treeState, usage),
+    });
   }
 
   /**
@@ -2601,15 +2504,4 @@ export class Engine {
     };
     return this.runBlock(goal, brief);
   }
-}
-
-// ── STEP LOOP HELPERS ────────────────────────────────────────────────────────
-
-/**
- * The acceptance-judge type name an iterative type names. The dispatch guard
- * guarantees the type carries `iterative`; the constitution guarantees the named
- * judge is a registered `kind:'judge'` type.
- */
-function iterativeAcceptanceJudge(registry: Registry, goalType: string): string {
-  return registry.get(goalType).iterative!.acceptanceJudge;
 }
