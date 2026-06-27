@@ -42,7 +42,7 @@ import {
 import { diffWithinScope, collectTree, preserveTree, commitRound, diffBodiesWithinScope, treeChangedWithinScope } from './worktree.js';
 import { createIterationRecord, deleteProvenanceIssue } from './iteration-tools.js';
 import {
-  newScratchpad, addNote, renderScratchpad, evictTranscript, evictTranscriptWithSummary,
+  newScratchpad, renderScratchpad, evictTranscript, evictTranscriptWithSummary,
   type Scratchpad, type EvictionResult,
 } from './scratchpad.js';
 import {
@@ -59,13 +59,11 @@ import {
 import { mergeComprehensionArtifacts, childShaFallback } from '../library/comprehend-merge.js';
 import { renormalizeShares, validateSplit } from './split-validation.js';
 import {
-  READ_ONLY_TOOL_NAMES,
-  dupKey,
-  invalidateReadGuardForPath,
   isExploreThenEmitLeaf,
   releaseGuardForCallId,
 } from './step-loop-guards.js';
 import { buildStepLoopInitialTranscript } from './step-loop-context.js';
+import { routeStepToolCalls } from './step-loop-router.js';
 import { NOTE_TOOL_DEF, deriveToolDefs, isToolGranted } from './step-loop-tools.js';
 
 /**
@@ -2488,129 +2486,25 @@ export class Engine {
         };
       }
 
-      // Tool-calls path: append assistant turn to transcript, then route each call.
-      // check remaining BEFORE dispatching each call so that a step that
-      // returns multiple calls cannot drive the counter negative when only one
-      // slot remains. When the counter hits 0 with calls left, stop routing and
-      // surface exhaustion exactly like the pre-step gate above.
-      transcript.push({
-        role: 'assistant',
-        content: '',
-        toolCalls: stepOutput.calls,
+      const routing = await routeStepToolCalls({
+        goal,
+        calls: stepOutput.calls,
+        budget,
+        transcript,
+        scratchpad,
+        broker: this.effectiveBroker!,
+        store: this.store,
+        now: t,
+        enforceToolCallBudget: this.enforceToolCallBudget,
+        isExploreThenEmit,
+        seenCalls,
+        callKeyByCallId,
+        state: { remainingToolCalls, toolCallsMade, exploreReadCalls },
       });
-
-      for (const call of stepOutput.calls) {
-        // `note` (ADR-036): engine-intercepted, NOT broker-routed and NOT
-        // grant-gated. The model distills what a read meant into its scratchpad; the
-        // note is always retained (re-injected each step) so it survives eviction of
-        // the raw read. Does not touch the worktree, does not debit the toolCall
-        // budget (it produces no product and reads nothing). Acknowledged inline.
-        if (call.name === 'note') {
-          const text = typeof call.args['text'] === 'string' ? call.args['text'] : '';
-          const landed = addNote(scratchpad, text);
-          await this.store.append({
-            type: 'tool-call', at: t(), goalId: goal.id, tool: 'note', callId: call.id,
-            outcome: landed ? 'ran' : 'refused',
-            ...(landed ? {} : { reason: 'note: empty text ignored' }),
-          });
-          transcript.push({
-            role: 'tool', callId: call.id,
-            content: landed ? 'Noted.' : 'note: empty text ignored',
-          });
-          continue;
-        }
-
-        // When enforced, stop routing once the budget is spent (a multi-call step
-        // cannot drive the counter past 0). When WARN-ONLY (default), keep
-        // routing — the pre-step gate already emitted the budget-exhausted signal
-        // once; the dollar ceiling (checked each step) and tokens budget remain
-        // the hard stops.
-        if (this.enforceToolCallBudget && remainingToolCalls <= 0) {
-          return { kind: 'exhausted', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
-        }
-
-        // Duplicate-call guard (F-64 / ADR-017): refuse byte-identical re-reads of
-        // read-only tools within the same attempt. The guard does NOT debit toolCalls
-        // so the budget counter accurately reflects real work performed. The refused
-        // result is appended to the transcript so the brain can see why it was denied.
-        //
-        // run_script repeats are always allowed (red→green requires re-running tests).
-        // write_file is not read-only and passes through; after a write_file the guard
-        // is invalidated for the written path so a subsequent re-read is allowed.
-        if (READ_ONLY_TOOL_NAMES.has(call.name)) {
-          const key = dupKey(call.name, call.args);
-          if (seenCalls.has(key)) {
-            // Refused — byte-identical read-only call already seen this attempt.
-            const refusalReason =
-              `Duplicate read refused (F-64): an identical call to ${call.name} with the ` +
-              `same arguments was already executed this attempt. Use the earlier result ` +
-              `already in the transcript instead of re-reading.`;
-            // Emit tool-call event with outcome:'refused' — reuses existing variant,
-            // no schema change (ADR-017 barrier).
-            await this.store.append({
-              type: 'tool-call',
-              at: t(),
-              goalId: goal.id,
-              tool: call.name,
-              callId: call.id,
-              outcome: 'refused',
-              reason: refusalReason,
-            });
-            // NOT debiting remainingToolCalls — refused calls do not consume budget.
-            transcript.push({
-              role: 'tool',
-              callId: call.id,
-              content: refusalReason,
-            });
-            continue;
-          }
-          // First occurrence of this read-only call: record it (and map the
-          // callId → key so eviction can release the guard, ADR-036).
-          seenCalls.add(key);
-          callKeyByCallId.set(call.id, key);
-        }
-
-        const result = await this.effectiveBroker!.execute(goal, call);
-        remainingToolCalls--;
-        toolCallsMade++;
-        // Count successful read-class calls for an explore-then-emit leaf — used
-        // ONLY for the honest read-count phrase if a malform-recovery emit fires.
-        // No force-emit ceiling any more: the working-memory bound keeps the
-        // transcript bounded, so an unbounded read no longer balloons to truncation,
-        // and forcing a partial emit was failing thorough dives (see the comment at
-        // the top of the loop). Refused calls `continue` before here, so they don't
-        // count. Build leaves (fs.write) are not explore-then-emit and skip this.
-        if (isExploreThenEmit && READ_ONLY_TOOL_NAMES.has(call.name)) {
-          exploreReadCalls++;
-        }
-
-        // Log the tool-call event
-        await this.store.append({
-          type: 'tool-call',
-          at: t(),
-          goalId: goal.id,
-          tool: call.name,
-          callId: call.id,
-          outcome: result.ok ? 'ran' : 'refused',
-          ...(result.ok ? {} : { reason: result.output }),
-        });
-
-        // write_file success: invalidate the duplicate guard for the written path
-        // so a subsequent read_file of the same path is allowed (content changed).
-        if (call.name === 'write_file' && result.ok) {
-          const writtenPath = typeof call.args['path'] === 'string' ? call.args['path'] : undefined;
-          if (writtenPath !== undefined) {
-            invalidateReadGuardForPath(seenCalls, writtenPath);
-          }
-        }
-
-        // Append result to transcript regardless of ok/refusal (refusal is data)
-        transcript.push({
-          role: 'tool',
-          callId: call.id,
-          content: result.output,
-        });
+      if (routing.kind === 'exhausted') {
+        return routing;
       }
+      ({ remainingToolCalls, toolCallsMade, exploreReadCalls } = routing.state);
 
       // After routing all calls, update remaining in context for next step
       // (the context message is prepended at the top of the next iteration)
