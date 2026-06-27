@@ -2,6 +2,7 @@ import type { FactoryEvent } from './events.js';
 import type { KnowledgeCategory } from './knowledge.js';
 
 type JsonObject = Record<string, unknown>;
+type EventEnvelope = JsonObject & { type: FactoryEvent['type']; at: number; goalId: string };
 
 const EVENT_TYPES = new Set([
   'goal-received',
@@ -70,154 +71,102 @@ const ROUND_OUTCOMES = new Set(['done', 'continue', 'halt-no-progress', 'halt-ma
 export function parseFactoryEvent(value: unknown): FactoryEvent | null {
   const event = baseEvent(value);
   if (event === null) return null;
-
-  switch (event['type']) {
-    case 'goal-received':
-      return hasObject(event, 'goal') ? asFactoryEvent(event) : null;
-    case 'gate-checked':
-      return hasBoolean(event, 'ok') && hasStringArray(event, 'missing') ? asFactoryEvent(event) : null;
-    case 'decided':
-      return hasObject(event, 'decision') && hasOptionalObject(event, 'usage') ? asFactoryEvent(event) : null;
-    case 'child-spawned':
-      return hasString(event, 'childId') && hasString(event, 'childType') && hasStringArray(event, 'dependsOn')
-        ? asFactoryEvent(event)
-        : null;
-    case 'deterministic-checked':
-      return hasObject(event, 'verdict') ? asFactoryEvent(event) : null;
-    case 'judge-verdict':
-      return hasString(event, 'judgeType') &&
-        hasObject(event, 'verdict') &&
-        hasSetValue(event, 'tier', TIERS) &&
-        hasOptionalObject(event, 'usage')
-        ? asFactoryEvent(event)
-        : null;
-    case 'repair-applied':
-      return hasStringArray(event, 'prescriptions') && hasOptionalObject(event, 'usage') ? asFactoryEvent(event) : null;
-    case 'tier-escalated':
-      return hasSetValue(event, 'from', TIERS) && hasSetValue(event, 'to', TIERS) ? asFactoryEvent(event) : null;
-    case 'blocked':
-      return hasObject(event, 'brief') && hasSetValue(event, 'resolution', BRIEF_RESOLUTIONS) ? asFactoryEvent(event) : null;
-    case 'memory-written':
-      return hasObject(event, 'pointer') ? asFactoryEvent(event) : null;
-    case 'memory-reinforced':
-      return hasString(event, 'memoryId') && hasSetValue(event, 'outcome', OUTCOMES) ? asFactoryEvent(event) : null;
-    case 'emitted':
-      return hasObject(event, 'report') ? asFactoryEvent(event) : null;
-    case 'budget-exhausted':
-      return hasSetValue(event, 'dimension', BUDGET_DIMENSIONS) ? asFactoryEvent(event) : null;
-    case 'risk-classified':
-      return hasSetValue(event, 'risk', RISK_CLASSES) ? asFactoryEvent(event) : null;
-    case 'gate-decision':
-      return hasSetValue(event, 'resolution', GATE_RESOLUTIONS) ? asFactoryEvent(event) : null;
-    case 'parked':
-      return hasObject(event, 'brief') && hasFiniteNumber(event, 'ttlMs') ? asFactoryEvent(event) : null;
-    case 'resumed':
-      return hasString(event, 'answer') ? asFactoryEvent(event) : null;
-    case 'pattern-consulted':
-      return hasString(event, 'shape') && hasSetValue(event, 'status', PATTERN_STATUSES) ? asFactoryEvent(event) : null;
-    case 'pattern-recorded':
-      return hasString(event, 'shape') && hasSetValue(event, 'outcome', OUTCOMES) ? asFactoryEvent(event) : null;
-    case 'tool-call':
-      return hasString(event, 'tool') &&
-        hasString(event, 'callId') &&
-        hasSetValue(event, 'outcome', TOOL_OUTCOMES) &&
-        hasOptionalString(event, 'reason')
-        ? asFactoryEvent(event)
-        : null;
-    case 'step':
-      return hasFiniteNumber(event, 'index') &&
-        hasSetValue(event, 'outputKind', STEP_OUTPUT_KINDS) &&
-        hasOptionalObject(event, 'usage')
-        ? asFactoryEvent(event)
-        : null;
-    case 'script-ran':
-      return hasString(event, 'command') &&
-        hasNullableNumber(event, 'exitStatus') &&
-        hasFiniteNumber(event, 'durationMs') &&
-        hasString(event, 'outputRef')
-        ? asFactoryEvent(event)
-        : null;
-    case 'worktree-created':
-      return hasString(event, 'treeId') && hasString(event, 'branch') && hasString(event, 'path')
-        ? asFactoryEvent(event)
-        : null;
-    case 'worktree-collected':
-      return hasString(event, 'treeId') && hasString(event, 'branch') && hasStringArray(event, 'commits')
-        ? asFactoryEvent(event)
-        : null;
-    case 'worktree-preserved':
-      return hasString(event, 'treeId') &&
-        hasString(event, 'branch') &&
-        hasString(event, 'path') &&
-        hasString(event, 'reason')
-        ? asFactoryEvent(event)
-        : null;
-    case 'produced':
-      return hasObject(event, 'usage') ? asFactoryEvent(event) : null;
-    case 'ceiling-reached':
-      return hasFiniteNumber(event, 'spentUsd') && hasFiniteNumber(event, 'ceilingUsd') ? asFactoryEvent(event) : null;
-    case 'transport-retry':
-    case 'malformation-reprompt':
-    case 'context-evicted':
-      return hasString(event, 'detail') ? asFactoryEvent(event) : null;
-    case 'dependency-degraded':
-      return hasString(event, 'dependency') && hasString(event, 'blocker') ? asFactoryEvent(event) : null;
-    case 'knowledge-written':
-      return hasObject(event, 'artifact') ? asFactoryEvent(event) : null;
-    case 'knowledge-facts-written':
-      return hasObject(event, 'facts') ? asFactoryEvent(event) : null;
-    case 'knowledge-checked':
-      return hasString(event, 'repoRoot') &&
-        hasSetValue(event, 'category', KNOWLEDGE_CATEGORIES) &&
-        hasString(event, 'sha') &&
-        hasSetValue(event, 'outcome', KNOWLEDGE_CHECK_OUTCOMES)
-        ? asFactoryEvent(event)
-        : null;
-    case 'golden-candidate':
-      return hasString(event, 'judgeType') &&
-        hasString(event, 'artifactDigest') &&
-        hasString(event, 'rubricDigest') &&
-        hasBoolean(event, 'verdictPass') &&
-        hasSetValue(event, 'tier', TIERS) &&
-        hasOptionalString(event, 'model')
-        ? asFactoryEvent(event)
-        : null;
-    case 'branch-pushed':
-      return hasString(event, 'treeId') && hasString(event, 'branch') && hasString(event, 'remote')
-        ? asFactoryEvent(event)
-        : null;
-    case 'pr-opened':
-      return hasString(event, 'treeId') && hasString(event, 'branch') && hasString(event, 'url')
-        ? asFactoryEvent(event)
-        : null;
-    case 'blocker-routed':
-      return hasString(event, 'blocker') && hasString(event, 'commissionId') ? asFactoryEvent(event) : null;
-    case 'round-started':
-      return hasFiniteNumber(event, 'round') &&
-        hasFiniteNumber(event, 'spentUsd') &&
-        hasFiniteNumber(event, 'roundWallClockMs')
-        ? asFactoryEvent(event)
-        : null;
-    case 'round-assessed':
-      return hasFiniteNumber(event, 'round') &&
-        hasFiniteNumber(event, 'passingCount') &&
-        hasFiniteNumber(event, 'criteriaTotal') &&
-        hasObject(event, 'judgeVerdict') &&
-        hasSetValue(event, 'outcome', ROUND_OUTCOMES) &&
-        hasStringArray(event, 'diffDigest')
-        ? asFactoryEvent(event)
-        : null;
-    default:
-      return null;
-  }
+  return EVENT_VALIDATORS[event['type']](event) ? asFactoryEvent(event) : null;
 }
 
-function baseEvent(value: unknown): JsonObject | null {
+type EventValidator = (event: JsonObject) => boolean;
+
+const EVENT_VALIDATORS = {
+  'goal-received': (event) => hasObject(event, 'goal'),
+  'gate-checked': (event) => hasBoolean(event, 'ok') && hasStringArray(event, 'missing'),
+  decided: (event) => hasObject(event, 'decision') && hasOptionalObject(event, 'usage'),
+  'child-spawned': (event) => hasString(event, 'childId') && hasString(event, 'childType') && hasStringArray(event, 'dependsOn'),
+  'deterministic-checked': (event) => hasObject(event, 'verdict'),
+  'judge-verdict': (event) =>
+    hasString(event, 'judgeType') &&
+    hasObject(event, 'verdict') &&
+    hasSetValue(event, 'tier', TIERS) &&
+    hasOptionalObject(event, 'usage'),
+  'repair-applied': (event) => hasStringArray(event, 'prescriptions') && hasOptionalObject(event, 'usage'),
+  'tier-escalated': (event) => hasSetValue(event, 'from', TIERS) && hasSetValue(event, 'to', TIERS),
+  blocked: (event) => hasObject(event, 'brief') && hasSetValue(event, 'resolution', BRIEF_RESOLUTIONS),
+  'memory-written': (event) => hasObject(event, 'pointer'),
+  'memory-reinforced': (event) => hasString(event, 'memoryId') && hasSetValue(event, 'outcome', OUTCOMES),
+  emitted: (event) => hasObject(event, 'report'),
+  'budget-exhausted': (event) => hasSetValue(event, 'dimension', BUDGET_DIMENSIONS),
+  'risk-classified': (event) => hasSetValue(event, 'risk', RISK_CLASSES),
+  'gate-decision': (event) => hasSetValue(event, 'resolution', GATE_RESOLUTIONS),
+  parked: (event) => hasObject(event, 'brief') && hasFiniteNumber(event, 'ttlMs'),
+  resumed: (event) => hasString(event, 'answer'),
+  'pattern-consulted': (event) => hasString(event, 'shape') && hasSetValue(event, 'status', PATTERN_STATUSES),
+  'pattern-recorded': (event) => hasString(event, 'shape') && hasSetValue(event, 'outcome', OUTCOMES),
+  'tool-call': (event) =>
+    hasString(event, 'tool') &&
+    hasString(event, 'callId') &&
+    hasSetValue(event, 'outcome', TOOL_OUTCOMES) &&
+    hasOptionalString(event, 'reason'),
+  step: (event) =>
+    hasFiniteNumber(event, 'index') &&
+    hasSetValue(event, 'outputKind', STEP_OUTPUT_KINDS) &&
+    hasOptionalObject(event, 'usage'),
+  'script-ran': (event) =>
+    hasString(event, 'command') &&
+    hasNullableNumber(event, 'exitStatus') &&
+    hasFiniteNumber(event, 'durationMs') &&
+    hasString(event, 'outputRef'),
+  'worktree-created': (event) => hasString(event, 'treeId') && hasString(event, 'branch') && hasString(event, 'path'),
+  'worktree-collected': (event) => hasString(event, 'treeId') && hasString(event, 'branch') && hasStringArray(event, 'commits'),
+  'worktree-preserved': (event) =>
+    hasString(event, 'treeId') &&
+    hasString(event, 'branch') &&
+    hasString(event, 'path') &&
+    hasString(event, 'reason'),
+  produced: (event) => hasObject(event, 'usage'),
+  'ceiling-reached': (event) => hasFiniteNumber(event, 'spentUsd') && hasFiniteNumber(event, 'ceilingUsd'),
+  'transport-retry': hasDetail,
+  'malformation-reprompt': hasDetail,
+  'context-evicted': hasDetail,
+  'dependency-degraded': (event) => hasString(event, 'dependency') && hasString(event, 'blocker'),
+  'knowledge-written': (event) => hasObject(event, 'artifact'),
+  'knowledge-facts-written': (event) => hasObject(event, 'facts'),
+  'knowledge-checked': (event) =>
+    hasString(event, 'repoRoot') &&
+    hasSetValue(event, 'category', KNOWLEDGE_CATEGORIES) &&
+    hasString(event, 'sha') &&
+    hasSetValue(event, 'outcome', KNOWLEDGE_CHECK_OUTCOMES),
+  'golden-candidate': (event) =>
+    hasString(event, 'judgeType') &&
+    hasString(event, 'artifactDigest') &&
+    hasString(event, 'rubricDigest') &&
+    hasBoolean(event, 'verdictPass') &&
+    hasSetValue(event, 'tier', TIERS) &&
+    hasOptionalString(event, 'model'),
+  'branch-pushed': (event) => hasString(event, 'treeId') && hasString(event, 'branch') && hasString(event, 'remote'),
+  'pr-opened': (event) => hasString(event, 'treeId') && hasString(event, 'branch') && hasString(event, 'url'),
+  'blocker-routed': (event) => hasString(event, 'blocker') && hasString(event, 'commissionId'),
+  'round-started': (event) =>
+    hasFiniteNumber(event, 'round') &&
+    hasFiniteNumber(event, 'spentUsd') &&
+    hasFiniteNumber(event, 'roundWallClockMs'),
+  'round-assessed': (event) =>
+    hasFiniteNumber(event, 'round') &&
+    hasFiniteNumber(event, 'passingCount') &&
+    hasFiniteNumber(event, 'criteriaTotal') &&
+    hasObject(event, 'judgeVerdict') &&
+    hasSetValue(event, 'outcome', ROUND_OUTCOMES) &&
+    hasStringArray(event, 'diffDigest'),
+} satisfies Record<FactoryEvent['type'], EventValidator>;
+
+function hasDetail(event: JsonObject): boolean {
+  return hasString(event, 'detail');
+}
+
+function baseEvent(value: unknown): EventEnvelope | null {
   if (!isObject(value)) return null;
   if (!hasSetValue(value, 'type', EVENT_TYPES)) return null;
   if (!hasFiniteNumber(value, 'at')) return null;
   if (!hasString(value, 'goalId')) return null;
-  return value;
+  return value as EventEnvelope;
 }
 
 function asFactoryEvent(event: JsonObject): FactoryEvent {
