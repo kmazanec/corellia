@@ -105,6 +105,7 @@ import {
   memoStatus as deriveMemoStatus,
   shouldRunTerracedScan,
 } from './decision/context.js';
+import { produceClassicArtifact } from './attempt/classic-produce.js';
 import {
   invalidSplitStructureVerdict,
   isomorphicSplitFailure,
@@ -1192,23 +1193,21 @@ export class Engine {
         }
       } else {
         // Classic produce path
-        const produceResult = await this.brain.produce(goal, ctx);
-        artifact = produceResult.value;
-        debitTreeState(treeState, produceResult.usage);
-        await this.store.append({ type: 'produced', at: t(), goalId: goal.id, usage: produceResult.usage });
-        if (hasReachedSpendCeiling(treeState)) {
-          return this.ceilingReport(goal, treeState);
-        }
-        // Track reported tokens on the tokens counter for observability
-        // (ADR-033). Tokens never block work; the dollar ceiling (checked above)
-        // is the real bound on spend.
-        budget = await debitTokenUsage({
-          budget,
-          usage: produceResult.usage,
+        const produceResult = await produceClassicArtifact({
           goal,
+          ctx,
+          budget,
+          brain: this.brain,
           store: this.store,
           now: t,
+          debitUsage: (usage) => debitTreeState(treeState, usage),
+          hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
         });
+        if (produceResult.kind === 'ceiling') {
+          return this.ceilingReport(goal, treeState);
+        }
+        artifact = produceResult.artifact;
+        budget = produceResult.budget;
 
         // ── LEAF TOURNAMENT (F-65 A9) ───────────────────────────────────────
         // When the type declares scan.k > 1 and has a judgeType, run a
