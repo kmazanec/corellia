@@ -89,6 +89,7 @@ import { checkpointVerifyArtifacts } from './coverage-checkpoint.js';
 import { appendGoldenCandidate, enrichRubric } from './judge-support.js';
 import { runAuthorityGate } from './authority-gate.js';
 import { runDeterministicGate } from './deterministic-gate.js';
+import { judgeLeafArtifact } from './leaf-judge.js';
 import {
   appendChildSpawnedEvents,
   buildSplitChildGoals,
@@ -1604,26 +1605,23 @@ export class Engine {
       // Skipped when the leaf tournament already ran (the tournament IS the judge
       // for scan.k > 1 types — the winner was selected by k judge calls).
       if (typeDef.judgeType !== null && !tournamentRan) {
-        const rubric = enrichRubric(this.registry,
-          `Judge this artifact as a ${typeDef.judgeType} for goal type ${typeDef.name}`,
-          typeDef.judgeType,
-          goal.intent,
-        );
-        const judgeCtx: BrainContext = { tier, memories: goal.memories };
-        const judgeResult = await this.brain.judge(goal, artifact, rubric, judgeCtx);
-        const verdict = judgeResult.value;
+        const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
+        const judgeResult = await judgeLeafArtifact({
+          goal,
+          artifact,
+          typeDef,
+          judgeType: typeDef.judgeType,
+          tier,
+          registry: this.registry,
+          brain: this.brain,
+          store: this.store,
+          now: t,
+          goldenCapture: this.goldenCapture,
+          ...(brainConfig !== undefined ? { brainConfig } : {}),
+        });
+        const verdict = judgeResult.verdict;
 
         debitTreeState(treeState, judgeResult.usage);
-        await this.store.append({
-          type: 'judge-verdict',
-          at: t(),
-          goalId: goal.id,
-          judgeType: typeDef.judgeType,
-          verdict,
-          tier,
-          usage: judgeResult.usage,
-        });
-        await this.maybeAppendGoldenCandidate(goal.id, typeDef.judgeType, artifact, rubric, verdict, tier);
         if (hasReachedSpendCeiling(treeState)) {
           return this.ceilingReport(goal, treeState);
         }
@@ -2270,26 +2268,23 @@ export class Engine {
 
     // Re-run judge
     if (typeDef.judgeType !== null) {
-      const rubric = enrichRubric(this.registry,
-        `Judge this artifact as a ${typeDef.judgeType} for goal type ${typeDef.name}`,
-        typeDef.judgeType,
-        goal.intent,
-      );
-      const judgeCtx: BrainContext = { tier, memories: goal.memories };
-      const judgeResult = await this.brain.judge(goal, artifact, rubric, judgeCtx);
-      const verdict = judgeResult.value;
+      const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
+      const judgeResult = await judgeLeafArtifact({
+        goal,
+        artifact,
+        typeDef,
+        judgeType: typeDef.judgeType,
+        tier,
+        registry: this.registry,
+        brain: this.brain,
+        store: this.store,
+        now: t,
+        goldenCapture: this.goldenCapture,
+        ...(brainConfig !== undefined ? { brainConfig } : {}),
+      });
+      const verdict = judgeResult.verdict;
 
       debitTreeState(treeState, judgeResult.usage);
-      await this.store.append({
-        type: 'judge-verdict',
-        at: t(),
-        goalId: goal.id,
-        judgeType: typeDef.judgeType,
-        verdict,
-        tier,
-        usage: judgeResult.usage,
-      });
-      await this.maybeAppendGoldenCandidate(goal.id, typeDef.judgeType, artifact, rubric, verdict, tier);
       // ceiling check after recheckAfterRepair judge debit.
       if (hasReachedSpendCeiling(treeState)) {
         return { passed: false, budget, verdict: null, tier, ceiling: true };
