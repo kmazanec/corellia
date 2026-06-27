@@ -67,7 +67,7 @@ export function validateScriptTarget(raw: string): string | null {
  * - Output is captured from both stdout and stderr.
  * - A wall-clock timer kills the immediate child on timeout.
  * - `output` is the trailing truncated slice (≤ OUTPUT_TRUNCATION_CAP bytes);
- *   `fullOutput` is the complete capture.
+ *   `fullOutput` is bounded and `outputTruncated` marks a hard-cap kill.
  *
  * The optional `env` controls the child process environment. When omitted the
  * child inherits the parent's environment (current behavior). Assembly passes a
@@ -388,7 +388,7 @@ export async function verifyEntryPoints(
 /**
  * Wraps a ScriptRunner so every run appends exactly one `script-ran` event to
  * the store. The `outputRef` is the `goalId:name:timestamp` key — opaque, no
- * new store is introduced. Full output is retained on the ScriptResult itself.
+ * new store is introduced. Bounded output is retained on the ScriptResult itself.
  */
 export function loggingScriptRunner(
   store: EventStore,

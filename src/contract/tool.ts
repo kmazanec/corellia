@@ -86,8 +86,8 @@ export interface ToolBroker {
 
 /**
  * The result of running a repo-declared script (e.g. a test entry point) in the
- * tree's sandbox. `output` is the truncated tail surfaced to the model; the
- * `fullOutput` is retained for the event log and artifacts.
+ * tree's sandbox. `output` is the truncated tail surfaced to the model;
+ * `fullOutput` is the bounded capture retained for the event log and artifacts.
  */
 export interface ScriptResult {
   /** Whether the script exited successfully (exit status 0 and no timeout). */
@@ -96,8 +96,10 @@ export interface ScriptResult {
   exitStatus: number | null;
   /** The truncated, model-facing output (typically the tail of the stream). */
   output: string;
-  /** The complete captured output, retained for the log and artifacts. */
+  /** The bounded captured output, retained for the log and artifacts. */
   fullOutput: string;
+  /** Whether the child exceeded the hard output cap and was killed. */
+  outputTruncated?: boolean;
   /** Wall-clock duration of the run in milliseconds. */
   durationMs: number;
   /** Whether the run was killed for exceeding its time bound. */

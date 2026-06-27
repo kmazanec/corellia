@@ -3,6 +3,8 @@ import type { ScriptResult } from '../contract/tool.js';
 
 /** Truncation cap for model-facing process output. */
 export const OUTPUT_TRUNCATION_CAP = 4096;
+/** Hard cap for retained child-process output before the child is killed. */
+export const FULL_OUTPUT_CAPTURE_CAP = 256 * 1024;
 
 export interface CapturedProcessOptions {
   command: string;
@@ -35,7 +37,10 @@ export function runCapturedProcess(options: CapturedProcessOptions): Promise<Scr
 
   return new Promise<ScriptResult>((resolve) => {
     const chunks: Buffer[] = [];
+    let capturedBytes = 0;
+    let outputTruncated = false;
     let settled = false;
+    let timer: NodeJS.Timeout | undefined;
 
     const child = spawn(options.command, args, {
       cwd: options.cwd,
@@ -43,9 +48,6 @@ export function runCapturedProcess(options: CapturedProcessOptions): Promise<Scr
       stdio: ['ignore', 'pipe', 'pipe'],
       ...(options.env !== undefined ? { env: options.env } : {}),
     });
-
-    child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
-    child.stderr.on('data', (chunk: Buffer) => chunks.push(chunk));
 
     const finish = (result: Pick<ScriptResult, 'ok' | 'exitStatus' | 'timedOut'>): void => {
       const durationMs = Date.now() - started;
@@ -56,11 +58,32 @@ export function runCapturedProcess(options: CapturedProcessOptions): Promise<Scr
           output: truncateOutput(fullOutput),
           fullOutput,
           durationMs,
+          ...(outputTruncated ? { outputTruncated: true } : {}),
         }),
       );
     };
 
-    const timer = setTimeout(() => {
+    const capture = (chunk: Buffer): void => {
+      if (settled) return;
+      const remaining = FULL_OUTPUT_CAPTURE_CAP - capturedBytes;
+      if (remaining > 0) {
+        const captured = chunk.byteLength > remaining ? chunk.subarray(0, remaining) : chunk;
+        chunks.push(captured);
+        capturedBytes += captured.byteLength;
+      }
+      if (chunk.byteLength > remaining) {
+        outputTruncated = true;
+        settled = true;
+        if (timer !== undefined) clearTimeout(timer);
+        child.kill('SIGKILL');
+        finish({ ok: false, exitStatus: null, timedOut: false });
+      }
+    };
+
+    child.stdout.on('data', capture);
+    child.stderr.on('data', capture);
+
+    timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       child.kill('SIGKILL');

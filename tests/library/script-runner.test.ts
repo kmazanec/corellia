@@ -22,6 +22,7 @@ import {
   networkCommandBlock,
   OUTPUT_TRUNCATION_CAP,
 } from '../../src/library/script-runner.js';
+import { FULL_OUTPUT_CAPTURE_CAP } from '../../src/library/process-runner.js';
 import { InMemoryEventStore } from '../../src/eventlog/memory-store.js';
 import type { FactoryEvent } from '../../src/contract/events.js';
 import type { Goal } from '../../src/contract/goal.js';
@@ -260,6 +261,24 @@ describe('createScriptRunner — output truncation', () => {
     expect(result.ok).toBe(true);
     expect(result.output.length).toBeLessThanOrEqual(OUTPUT_TRUNCATION_CAP);
     expect(result.fullOutput.length).toBeGreaterThan(OUTPUT_TRUNCATION_CAP);
+  });
+
+  it('kills a script that exceeds the hard full-output capture cap', async () => {
+    const repoRoot = makeTmp();
+    const rel = writeScript(
+      repoRoot,
+      'too-much-output',
+      `process.stdout.write('x'.repeat(${FULL_OUTPUT_CAPTURE_CAP + 4096}));`,
+    );
+    const runner = createScriptRunner(repoRoot, { noisy: rel });
+
+    const result = await runner.run('noisy');
+
+    expect(result.ok).toBe(false);
+    expect(result.exitStatus).toBeNull();
+    expect(result.outputTruncated).toBe(true);
+    expect(Buffer.byteLength(result.fullOutput)).toBeLessThanOrEqual(FULL_OUTPUT_CAPTURE_CAP);
+    expect(result.output.length).toBeLessThanOrEqual(OUTPUT_TRUNCATION_CAP);
   });
 });
 
