@@ -36,7 +36,7 @@ import {
   type SandboxConfig,
   type SandboxAssembly,
 } from './assembly.js';
-import { diffWithinScope, collectTree, preserveTree, commitRound, treeChangedWithinScope } from './worktree.js';
+import { collectTree, preserveTree, commitRound } from './worktree.js';
 import { createIterationRecord, deleteProvenanceIssue } from './iteration-tools.js';
 import type { KnowledgeArtifact, RegionFacts } from '../contract/knowledge.js';
 import {
@@ -72,6 +72,7 @@ import {
   type TreeState,
 } from './tree-spend.js';
 import { repoShapeHint as buildRepoShapeHint } from './repo-shape-hint.js';
+import { applyRootEmissionGate } from './root-emission-gate.js';
 import {
   runKnowledgeCoverageSplitGate,
 } from './coverage/split-gate.js';
@@ -472,81 +473,14 @@ export class Engine {
     try {
       report = await this._run(goal, treeState);
 
-      // ── EMISSION diff ⊆ scope (tree-level) ──────────────────────────
-      // The worktree is shared by the whole tree, so a per-leaf diff check would
-      // see siblings' work. The sound v1 enforcement is at the TREE ROOT's
-      // emission against the ROOT goal's scope: the worktree's total diff must
-      // fall within the root goal's declared scope. (Per-leaf scope stays
-      // enforced by the broker's write_file check and the filesWithinScope
-      // deterministic check on each leaf's artifact.) A violation downgrades a
-      // would-be success to a scope-insufficiency block and preserves the tree.
-      if (report.blockers.length === 0) {
-        const diff = diffWithinScope(assembly.worktree.root, goal.scope);
-        // HOLLOW-EMIT GATE: a make-kind root that "succeeds" but changed NO files
-        // within scope did not actually deliver — every slice emitted plausible
-        // text (or tried to open a PR) without writing the product. The integration
-        // judge reads artifact TEXT and can be fooled; this is the deterministic
-        // ground truth (build run live-self-a2397f0f: slice A did 0 write_file,
-        // only open_pr, and the tree would otherwise have claimed success). Scoped
-        // to make goals: a learn root (comprehension) legitimately produces
-        // knowledge artifacts, not worktree files. Skips when no sandbox/worktree.
-        const rootKind = this.registry.has(goal.type) ? this.registry.get(goal.type).kind : undefined;
-        const changedSinceBase = treeChangedWithinScope(
-          assembly.worktree.root, assembly.worktree.baseSha, goal.scope,
-        );
-        // A make delivery is real if EITHER the worktree changed since base (the
-        // step-loop write_file path + committed milestone rounds) OR the final
-        // report carries a non-empty files artifact (the deliver-via-files-artifact
-        // path, which the collect step materializes). Only when BOTH are empty is
-        // it a hollow emit — a success claim with no product anywhere.
-        const artifactHasFiles =
-          report.artifact?.kind === 'files' && (report.artifact.files?.length ?? 0) > 0;
-        if (diff.ok && rootKind === 'make' && changedSinceBase === 0 && !artifactHasFiles) {
-          const reason =
-            `Hollow emit: "${goal.type}" reported success but produced NO change within ` +
-            `scope (${goal.scope.join(', ') || '(none)'}). A make goal must deliver a real ` +
-            `worktree change or a files artifact — its children emitted text/PR calls ` +
-            `without writing the product.`;
-          report = blockedReport(reason);
-          await this.store.append({
-            type: 'blocked',
-            at: this.now(),
-            goalId: goal.id,
-            brief: {
-              question: reason,
-              options: ['deny', 'park', 'bounce'],
-              links: [goal.id],
-              deadlineMs: 0,
-              onTimeout: 'deny',
-            },
-            resolution: 'deny',
-          });
-        } else if (!diff.ok) {
-          // Downgrade: _run already emitted a 'emitted' success event. Rather than
-          // appending a second contradictory 'emitted', replace the in-flight report
-          // with the scope-insufficiency block and let the finally/preserve path handle
-          // it. The existing 'emitted' success from _run is superseded — the store
-          // carries the full history and the returned report is the authoritative one.
-          report = blockedReport(
-            `Scope insufficiency at tree emission: ${diff.scopeInsufficiency ?? 'diff exceeds declared scope'}`,
-          );
-          // Append a 'blocked' event (not a second 'emitted') to represent the
-          // scope-downgrade so the event log is honest without two 'emitted' entries.
-          await this.store.append({
-            type: 'blocked',
-            at: this.now(),
-            goalId: goal.id,
-            brief: {
-              question: `Scope insufficiency at tree emission: ${diff.scopeInsufficiency ?? 'diff exceeds declared scope'}`,
-              options: ['deny', 'park', 'bounce'],
-              links: [goal.id],
-              deadlineMs: 0,
-              onTimeout: 'deny',
-            },
-            resolution: 'deny',
-          });
-        }
-      }
+      report = await applyRootEmissionGate({
+        goal,
+        report,
+        worktree: assembly.worktree,
+        registry: this.registry,
+        store: this.store,
+        now: this.now,
+      });
       return report;
     } finally {
       const failedOrBlocked =
