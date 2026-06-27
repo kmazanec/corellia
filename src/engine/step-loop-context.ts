@@ -1,6 +1,7 @@
 import type { StepTranscript } from '../contract/brain.js';
 import type { Goal } from '../contract/goal.js';
 import type { GoalTypeDef } from '../contract/goal-type.js';
+import { codeShapeHint } from '../library/code-shape.js';
 import { renderPersonaBlock } from '../library/personas.js';
 import { loadExploreEconomy, loadFamilySkill, loadSharedPreamble } from '../library/skills.js';
 import { loadHostConventions } from './host-conventions.js';
@@ -32,6 +33,7 @@ export function buildStepLoopInitialTranscript(input: StepLoopInitialTranscriptI
         personaBlock(input.goal) +
         memoryBlock(input.goal) +
         conventionsBlock(input.typeDef, input.sandboxRepoRoot) +
+        codeShapeBlock(input.goal, input.typeDef, input.sandboxRepoRoot) +
         priorEvidenceBlock(input.priorTranscript),
     },
     {
@@ -84,6 +86,21 @@ function conventionsBlock(typeDef: GoalTypeDef, sandboxRepoRoot: string | undefi
     (hostConventions
       ? `\n\nHost repo conventions (override global on conflict):\n` + hostConventions
       : '');
+}
+
+function codeShapeBlock(
+  goal: Goal,
+  typeDef: GoalTypeDef,
+  sandboxRepoRoot: string | undefined,
+): string {
+  if (typeDef.kind !== 'make' || sandboxRepoRoot === undefined) {
+    return '';
+  }
+
+  const hint = codeShapeHint({ root: sandboxRepoRoot, scope: goal.scope });
+  return hint === undefined
+    ? ''
+    : `\n\nCode-shape evidence (quoted data - advisory context to weigh):\n${hint}`;
 }
 
 function sandboxPathsBlock(hasSandbox: boolean): string {

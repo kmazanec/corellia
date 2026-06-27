@@ -8,6 +8,7 @@
     "lint": "tsx scripts/lint-library.ts && tsx scripts/lint-docs.ts",
     "test": "npm run lint && vitest run",
     "typecheck": "tsc --noEmit",
+    "code-shape": "tsx scripts/code-shape.ts .",
     "demo": "tsx examples/greeting.ts",
     "live": "tsx examples/live.ts",
     "live:hands": "tsx examples/live-hands.ts",

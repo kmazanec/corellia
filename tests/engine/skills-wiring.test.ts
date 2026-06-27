@@ -33,7 +33,7 @@
  */
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -280,6 +280,38 @@ describe('explore-then-emit economy injection (ADR-039)', () => {
     });
     await engine.run(makeGoal({ id: 'eco-impl', type: 'implement', scope: ['src/'] }));
     expect(brain.harness[0]).not.toContain(ECONOMY_MARKER);
+  });
+});
+
+describe('code-shape evidence injection', () => {
+  it('injects scoped code-shape pressure into make-goal harnesses', async () => {
+    const impl = ALL_TYPES.find((d) => d.name === 'implement')!;
+    const repo = makeTempRepo();
+    mkdirSync(join(repo, 'src'));
+    writeFileSync(
+      join(repo, 'src', 'large.ts'),
+      Array.from({ length: 301 }, (_, index) => `export const value${index} = ${index};`).join('\n'),
+    );
+    execFileSync('git', ['add', 'src/large.ts'], { cwd: repo, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'large source'], { cwd: repo, stdio: 'pipe' });
+
+    const store = new MemoryEventStore();
+    const brain = harnessCaptureBrain();
+    const defs: GoalTypeDef[] = [impl];
+    if (impl.judgeType) defs.push(leafTypeDef({ name: impl.judgeType, kind: 'judge', family: impl.family, judgeType: null }));
+    const engine = new Engine({
+      registry: registryOf(defs),
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      sandbox: { repoRoot: repo, declaredScripts: {} },
+    });
+
+    await engine.run(makeGoal({ id: 'shape-impl', type: 'implement', scope: ['src/'] }));
+
+    expect(brain.harness[0]).toContain('Code-shape evidence');
+    expect(brain.harness[0]).toContain('src/large.ts (301 lines)');
+    expect(brain.harness[0]).toContain('domain-verb modules');
   });
 });
 
