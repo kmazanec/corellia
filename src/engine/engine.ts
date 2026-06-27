@@ -63,7 +63,7 @@ import {
   releaseGuardForCallId,
 } from './step-loop-guards.js';
 import { buildStepLoopInitialTranscript } from './step-loop-context.js';
-import { runForcedEmit } from './step-loop-emit.js';
+import { runForcedEmit, runStructuredArtifactEmit } from './step-loop-emit.js';
 import { routeStepToolCalls } from './step-loop-router.js';
 import { NOTE_TOOL_DEF, deriveToolDefs, isToolGranted } from './step-loop-tools.js';
 
@@ -2345,93 +2345,37 @@ export class Engine {
         // If the emit call returns tool-calls, treat as a failed step into the
         // existing control loop (return kind:'failed').
         if (typeDef.outputSchema !== undefined) {
-          // Exploration complete: append the emit instruction message.
-          transcript.push({
-            role: 'context',
-            content: 'Emit the final artifact now: respond with ONLY the JSON object matching the required schema.',
+          const structuredEmit = await runStructuredArtifactEmit({
+            goal,
+            outputSchema: typeDef.outputSchema,
+            ctx,
+            transcript,
+            brain: this.brain,
+            store: this.store,
+            now: t,
+            enforceToolCallBudget: this.enforceToolCallBudget,
+            state: { remainingToolCalls, stepIndex, totalTokensUsed, exploreReadCalls },
+            debitUsage: (usage) => this.debitTreeState(treeState, usage),
+            checkCeiling: () => this.checkCeiling(goal, treeState),
           });
-
-          // Budget gate for the emit call. When enforced, a depleted budget
-          // blocks the emit. When WARN-ONLY (default), never block the emit on
-          // toolCalls: the model has signalled exploration-complete and reaching
-          // the artifact is exactly what we want — blocking here is the precise
-          // failure the eyes-on-cats checkpoint hit (explore past budget, then
-          // get denied at emit). The tokens budget and dollar ceiling still bound
-          // this one extra call.
-          if (this.enforceToolCallBudget && remainingToolCalls <= 0) {
+          ({ stepIndex, totalTokensUsed } = structuredEmit.state);
+          if (structuredEmit.kind === 'exhausted') {
             return { kind: 'exhausted', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
           }
-
-          // Update the rolling budget context message.
-          const lastMsgBeforeEmit = transcript[transcript.length - 1];
-          // The emit instruction we just pushed is the last — add the rolling count after it.
-          transcript.push({
-            role: 'context',
-            content:
-              remainingToolCalls > 0
-                ? `${remainingToolCalls} tool calls remaining`
-                : `tool-call budget exceeded; emit the final artifact now`,
-          });
-
-          // Make the emit call with outputSchema set AND no tools (ADR-039): the
-          // dedicated two-phase emit must produce the structured artifact, not more
-          // tool calls. Passing the tool set let the model return tool-calls instead
-          // of the artifact (run live-self-c15e0c98: "emit call returned tool-calls
-          // instead of an artifact"). With no tools the json_schema response_format
-          // is the only valid output — the same escape-hatch fix as the forced emit.
-          const emitCtx: BrainContext = { ...ctx, outputSchema: typeDef.outputSchema };
-          let emitOutput: import('../contract/brain.js').StepOutput;
-          try {
-            emitOutput = await this.brain.step(goal, transcript, [], emitCtx);
-          } catch (err) {
-            const error = err instanceof Error ? err.message : String(err);
-            return { kind: 'failed', error, budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
-          }
-
-          // Emit step event and debit usage for the emit call.
-          await this.store.append({
-            type: 'step',
-            at: t(),
-            goalId: goal.id,
-            index: stepIndex,
-            outputKind: emitOutput.kind,
-            usage: emitOutput.usage,
-          });
-          this.debitTreeState(treeState, emitOutput.usage);
-          totalTokensUsed += emitOutput.usage.promptTokens + emitOutput.usage.completionTokens;
-          stepIndex++;
-          // Ceiling check after emit call debit.
-          if (await this.checkCeiling(goal, treeState)) {
+          if (structuredEmit.kind === 'ceiling') {
             return { kind: 'ceiling', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
           }
-
-          // Emit transport incidents if any.
-          if (emitOutput.incidents) {
-            for (const incident of emitOutput.incidents) {
-              await this.store.append({
-                type: incident.kind,
-                at: incident.at,
-                goalId: goal.id,
-                detail: incident.detail,
-              });
-            }
-          }
-
-          // If the emit call returned tool-calls instead of an artifact, treat
-          // as a failed step — fall into the existing control loop failure path.
-          if (emitOutput.kind !== 'artifact') {
+          if (structuredEmit.kind === 'failed') {
             return {
               kind: 'failed',
-              error: 'emit call returned tool-calls instead of an artifact',
+              error: structuredEmit.error,
               budget: { ...budget, toolCalls: remainingToolCalls },
               transcript,
             };
           }
-
-          // Use the emit call's artifact as the final artifact.
           return {
             kind: 'artifact',
-            artifact: emitOutput.artifact,
+            artifact: structuredEmit.artifact,
             budget: { ...budget, toolCalls: remainingToolCalls },
             transcript,
             tokensUsed: totalTokensUsed,

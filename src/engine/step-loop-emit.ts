@@ -16,6 +16,12 @@ export type ForcedEmitResult =
   | { kind: 'failed'; error: string; state: StepEmitState }
   | { kind: 'ceiling'; state: StepEmitState };
 
+export type StructuredArtifactEmitResult =
+  | { kind: 'artifact'; artifact: Artifact; state: StepEmitState }
+  | { kind: 'exhausted'; state: StepEmitState }
+  | { kind: 'failed'; error: string; state: StepEmitState }
+  | { kind: 'ceiling'; state: StepEmitState };
+
 export interface ForcedEmitParams {
   goal: Goal;
   typeDef: GoalTypeDef;
@@ -24,6 +30,20 @@ export interface ForcedEmitParams {
   brain: Brain;
   store: EventStore;
   now: () => number;
+  state: StepEmitState;
+  debitUsage: (usage: Usage) => void;
+  checkCeiling: () => Promise<boolean>;
+}
+
+export interface StructuredArtifactEmitParams {
+  goal: Goal;
+  outputSchema: Record<string, unknown>;
+  ctx: BrainContext;
+  transcript: StepTranscript;
+  brain: Brain;
+  store: EventStore;
+  now: () => number;
+  enforceToolCallBudget: boolean;
   state: StepEmitState;
   debitUsage: (usage: Usage) => void;
   checkCeiling: () => Promise<boolean>;
@@ -41,20 +61,12 @@ export async function runForcedEmit(params: ForcedEmitParams): Promise<ForcedEmi
       ? { ...params.ctx, outputSchema: params.typeDef.outputSchema }
       : params.ctx;
 
-  const forcedOutput = await runForcedBrainStep(params, forceCtx);
+  const forcedOutput = await runNoToolBrainStep(params.brain, params.goal, params.transcript, forceCtx);
   if (!forcedOutput.ok) {
     return { kind: 'failed', error: forcedOutput.error, state };
   }
 
-  await params.store.append({
-    type: 'step',
-    at: params.now(),
-    goalId: params.goal.id,
-    index: state.stepIndex,
-    outputKind: forcedOutput.value.kind,
-    usage: forcedOutput.value.usage,
-  });
-  params.debitUsage(forcedOutput.value.usage);
+  await recordStepOutput(params, state, forcedOutput.value);
   state.totalTokensUsed += forcedOutput.value.usage.promptTokens + forcedOutput.value.usage.completionTokens;
   state.stepIndex++;
 
@@ -75,6 +87,52 @@ export async function runForcedEmit(params: ForcedEmitParams): Promise<ForcedEmi
   };
 }
 
+export async function runStructuredArtifactEmit(
+  params: StructuredArtifactEmitParams,
+): Promise<StructuredArtifactEmitResult> {
+  const state = { ...params.state };
+  params.transcript.push({
+    role: 'context',
+    content: 'Emit the final artifact now: respond with ONLY the JSON object matching the required schema.',
+  });
+
+  if (params.enforceToolCallBudget && state.remainingToolCalls <= 0) {
+    return { kind: 'exhausted', state };
+  }
+
+  params.transcript.push({
+    role: 'context',
+    content:
+      state.remainingToolCalls > 0
+        ? `${state.remainingToolCalls} tool calls remaining`
+        : `tool-call budget exceeded; emit the final artifact now`,
+  });
+
+  const emitOutput = await runNoToolBrainStep(params.brain, params.goal, params.transcript, {
+    ...params.ctx,
+    outputSchema: params.outputSchema,
+  });
+  if (!emitOutput.ok) {
+    return { kind: 'failed', error: emitOutput.error, state };
+  }
+
+  await recordStepOutput(params, state, emitOutput.value);
+  state.totalTokensUsed += emitOutput.value.usage.promptTokens + emitOutput.value.usage.completionTokens;
+  state.stepIndex++;
+
+  if (await params.checkCeiling()) {
+    return { kind: 'ceiling', state };
+  }
+
+  await recordTransportIncidents(params, emitOutput.value);
+
+  if (emitOutput.value.kind !== 'artifact') {
+    return { kind: 'failed', error: 'emit call returned tool-calls instead of an artifact', state };
+  }
+
+  return { kind: 'artifact', artifact: emitOutput.value.artifact, state };
+}
+
 function forcedEmitInstruction(exploreReadCalls: number, typeDef: GoalTypeDef): string {
   const readCountPhrase =
     exploreReadCalls > 0
@@ -88,16 +146,51 @@ function forcedEmitInstruction(exploreReadCalls: number, typeDef: GoalTypeDef): 
       : 'Respond with ONLY the artifact as your message content, no tool calls.');
 }
 
-async function runForcedBrainStep(
-  params: ForcedEmitParams,
-  forceCtx: BrainContext,
+async function runNoToolBrainStep(
+  brain: Brain,
+  goal: Goal,
+  transcript: StepTranscript,
+  ctx: BrainContext,
 ): Promise<
   | { ok: true; value: Awaited<ReturnType<Brain['step']>> }
   | { ok: false; error: string }
 > {
   try {
-    return { ok: true, value: await params.brain.step(params.goal, params.transcript, [], forceCtx) };
+    return { ok: true, value: await brain.step(goal, transcript, [], ctx) };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function recordStepOutput(
+  params: Pick<ForcedEmitParams, 'goal' | 'store' | 'now' | 'debitUsage'>,
+  state: Pick<StepEmitState, 'stepIndex'>,
+  output: Awaited<ReturnType<Brain['step']>>,
+): Promise<void> {
+  await params.store.append({
+    type: 'step',
+    at: params.now(),
+    goalId: params.goal.id,
+    index: state.stepIndex,
+    outputKind: output.kind,
+    usage: output.usage,
+  });
+  params.debitUsage(output.usage);
+}
+
+async function recordTransportIncidents(
+  params: Pick<StructuredArtifactEmitParams, 'goal' | 'store'>,
+  output: Awaited<ReturnType<Brain['step']>>,
+): Promise<void> {
+  if (output.incidents === undefined) {
+    return;
+  }
+  for (const incident of output.incidents) {
+    await params.store.append({
+      type: incident.kind,
+      at: incident.at,
+      goalId: params.goal.id,
+      detail: incident.detail,
+    });
   }
 }
