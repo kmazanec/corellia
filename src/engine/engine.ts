@@ -42,8 +42,7 @@ import {
 import { diffWithinScope, collectTree, preserveTree, commitRound, diffBodiesWithinScope, treeChangedWithinScope } from './worktree.js';
 import { createIterationRecord, deleteProvenanceIssue } from './iteration-tools.js';
 import {
-  newScratchpad, renderScratchpad, evictTranscript, evictTranscriptWithSummary,
-  type Scratchpad, type EvictionResult,
+  newScratchpad,
 } from './scratchpad.js';
 import {
   parseAcceptanceCriteria,
@@ -60,11 +59,11 @@ import { mergeComprehensionArtifacts, childShaFallback } from '../library/compre
 import { renormalizeShares, validateSplit } from './split-validation.js';
 import {
   isExploreThenEmitLeaf,
-  releaseGuardForCallId,
 } from './step-loop-guards.js';
 import { buildStepLoopInitialTranscript } from './step-loop-context.js';
 import { runForcedEmit, runStructuredArtifactEmit } from './step-loop-emit.js';
 import { routeStepToolCalls } from './step-loop-router.js';
+import { boundStepLoopTranscript, evictTranscriptAfterTruncation } from './step-loop-transcript.js';
 import { NOTE_TOOL_DEF, deriveToolDefs, isToolGranted } from './step-loop-tools.js';
 import {
   blockedReport,
@@ -82,25 +81,6 @@ import {
  * Applied at the root when Goal.spendCeilingUsd is absent.
  */
 const DEFAULT_SPEND_CEILING_USD = 15;
-
-/**
- * Keep a single notes `context` message updated in the transcript (ADR-036). The
- * notes block is injected right after the first (immutable harness) message so it
- * is always in context regardless of how much raw read content is evicted below it.
- * Re-runs each step: updates the existing notes message in place, or inserts one.
- */
-function syncScratchpadMessage(transcript: StepTranscript, pad: Scratchpad): void {
-  const rendered = renderScratchpad(pad);
-  if (rendered.length === 0) return; // no notes yet → nothing to inject
-  const NOTE_PREFIX = 'YOUR NOTES';
-  const idx = transcript.findIndex((m) => m.role === 'context' && m.content.startsWith(NOTE_PREFIX));
-  if (idx >= 0) {
-    (transcript[idx] as { role: 'context'; content: string }).content = rendered;
-  } else {
-    // Insert just after the first message (the immutable harness/goal block).
-    transcript.splice(1, 0, { role: 'context', content: rendered });
-  }
-}
 
 /**
  * Worst-case price constant for the conservative token-only ceiling fallback
@@ -2046,31 +2026,6 @@ export class Engine {
     });
   }
 
-  /**
-   * Bound the transcript under the working-memory cap (ADR-036). When the brain
-   * provides `summarize`, each evicted read is distilled to a gist so the leaf keeps
-   * orientation without re-reading (run live-self-bcc825bb: blind eviction forced a
-   * read/evict thrash). The summarizer's tokens are debited to the tree spend like
-   * any other call. When `summarize` is absent (test brains, or a provider without
-   * it), falls back to the pure blind-stub eviction — behavior as before.
-   */
-  private async evictBoundedTranscript(
-    transcript: StepTranscript,
-    ctx: BrainContext,
-    treeState: TreeState,
-  ): Promise<EvictionResult & { summarized: boolean }> {
-    const summarizeFn = this.brain.summarize?.bind(this.brain);
-    if (summarizeFn === undefined) {
-      return { ...evictTranscript(transcript), summarized: false };
-    }
-    const result = await evictTranscriptWithSummary(transcript, async (text) => {
-      const metered = await summarizeFn(text, ctx);
-      this.debitTreeState(treeState, metered.usage);
-      return { gist: metered.value, tokens: metered.usage.completionTokens };
-    });
-    return { ...result, summarized: result.evicted };
-  }
-
   private async runStepLoop(
     goal: Goal,
     grants: string[],
@@ -2245,15 +2200,19 @@ export class Engine {
       // response truncates (build #8: ~117K tokens → truncated JSON → block). Notes
       // (distilled by the model) and recent reads survive; evicted paths are
       // released from the duplicate-read guard so the model may re-read on demand.
-      syncScratchpadMessage(transcript, scratchpad);
-      const eviction = await this.evictBoundedTranscript(transcript, ctx, treeState);
-      if (eviction.evicted) {
-        for (const cid of eviction.evictedCallIds) releaseGuardForCallId(seenCalls, callKeyByCallId, cid);
-        await this.store.append({
-          type: 'context-evicted', at: t(), goalId: goal.id,
-          detail: `${eviction.beforeTokens}→${eviction.afterTokens} est. tokens; ${eviction.evictedCallIds.length} read(s) ${eviction.summarized ? 'summarized' : 'stubbed'}`,
-        });
-      }
+      await boundStepLoopTranscript({
+        goal,
+        transcript,
+        scratchpad,
+        store: this.store,
+        now: t,
+        seenCalls,
+        callKeyByCallId,
+        summarizeRead: this.brain.summarize !== undefined
+          ? (text) => this.brain.summarize!(text, ctx)
+          : undefined,
+        debitUsage: (usage) => this.debitTreeState(treeState, usage),
+      });
 
       let stepOutput: import('../contract/brain.js').StepOutput;
       try {
@@ -2277,15 +2236,15 @@ export class Engine {
           // If the output was truncated by size, shed context first so the forced
           // emit has room; then drive the emit on the next iteration.
           if (err.truncated) {
-            syncScratchpadMessage(transcript, scratchpad);
-            const ev = evictTranscript(transcript);
-            if (ev.evicted) {
-              for (const cid of ev.evictedCallIds) releaseGuardForCallId(seenCalls, callKeyByCallId, cid);
-              await this.store.append({
-                type: 'context-evicted', at: t(), goalId: goal.id,
-                detail: `${ev.beforeTokens}→${ev.afterTokens} est. tokens; ${ev.evictedCallIds.length} read(s) stubbed (post-truncation)`,
-              });
-            }
+            await evictTranscriptAfterTruncation({
+              goal,
+              transcript,
+              scratchpad,
+              store: this.store,
+              now: t,
+              seenCalls,
+              callKeyByCallId,
+            });
           }
           transcript.push({
             role: 'context',
