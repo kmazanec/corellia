@@ -12,6 +12,7 @@
 
 import pg from 'pg';
 import type { EventStore, FactoryEvent } from '../contract/events.js';
+import { parseFactoryEvent } from '../contract/event-parser.js';
 
 const { Pool } = pg;
 
@@ -90,8 +91,13 @@ export class PgEventStore implements EventStore {
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const sql = `SELECT payload FROM corellia_events ${where} ORDER BY id`;
 
-    const result = await this.#pool.query<{ payload: FactoryEvent }>(sql, params);
-    return result.rows.map((row) => row.payload);
+    const result = await this.#pool.query<{ payload: unknown }>(sql, params);
+    const events: FactoryEvent[] = [];
+    for (const row of result.rows) {
+      const event = parseFactoryEvent(row.payload);
+      if (event !== null) events.push(event);
+    }
+    return events;
   }
 
   /** End the pool. No-op when the pool was supplied externally. */

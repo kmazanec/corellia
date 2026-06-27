@@ -10,6 +10,7 @@
 import { mkdir, appendFile, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { EventStore, FactoryEvent } from '../contract/events.js';
+import { parseFactoryEvent } from '../contract/event-parser.js';
 
 export class JsonlEventStore implements EventStore {
   readonly #path: string;
@@ -38,7 +39,8 @@ export class JsonlEventStore implements EventStore {
       const trimmed = line.trim();
       if (!trimmed) continue;
       try {
-        events.push(JSON.parse(trimmed) as FactoryEvent);
+        const event = parseFactoryEvent(JSON.parse(trimmed));
+        if (event !== null) events.push(event);
       } catch {
         // Skip unparseable lines (e.g. partial writes at crash boundary).
       }

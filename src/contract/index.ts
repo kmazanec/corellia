@@ -10,6 +10,7 @@ export type { ChildPlan, DecisionBrief, Decision } from './decision.js';
 export type { Artifact, Report } from './report.js';
 export type { Finding, Verdict } from './verdict.js';
 export type { FactoryEvent, EventStore } from './events.js';
+export { parseFactoryEvent } from './event-parser.js';
 export type { BrainContext, Brain, StepMessage, StepTranscript, StepOutput } from './brain.js';
 export type { DeterministicCheck, CheckContext, GoalTypeDef, Registry } from './goal-type.js';
 export type { ToolDef, ToolCall, ToolResult, ToolImpl, ToolBroker, ScriptResult } from './tool.js';

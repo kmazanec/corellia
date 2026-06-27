@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import pg from 'pg';
 import { InMemoryEventStore } from '../../src/eventlog/memory-store.js';
 import { JsonlEventStore } from '../../src/eventlog/jsonl-store.js';
+import { parseFactoryEvent } from '../../src/contract/event-parser.js';
 import type { FactoryEvent } from '../../src/contract/events.js';
 import type { KnowledgeArtifact, RegionFacts, DiveFact } from '../../src/contract/knowledge.js';
 
@@ -323,6 +324,21 @@ describe('JsonlEventStore', () => {
     expect(all[0]?.type).toBe('goal-received');
   });
 
+  it('skips parseable JSON that is not a valid FactoryEvent', async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'corellia-test-'));
+    const path = join(tmpDir, 'events.jsonl');
+    const store = new JsonlEventStore(path);
+    await store.append(goalA);
+
+    appendFileSync(path, `${JSON.stringify({ type: 'not-real', at: 1, goalId: 'bad' })}\n`, 'utf8');
+    appendFileSync(path, `${JSON.stringify({ type: 'knowledge-written', at: 2, goalId: 'bad' })}\n`, 'utf8');
+    appendFileSync(path, `${JSON.stringify({ type: 'script-ran', at: 3, goalId: 'bad', command: 'test' })}\n`, 'utf8');
+
+    const all = await store.list();
+    expect(all).toHaveLength(1);
+    expect(all[0]?.type).toBe('goal-received');
+  });
+
   it('returns empty array when file does not exist', async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'corellia-test-'));
     const store = new JsonlEventStore(join(tmpDir, 'missing.jsonl'));
@@ -392,6 +408,18 @@ describe('JsonlEventStore', () => {
     expect(ev.category).toBe('architecture');
     expect(ev.sha).toBe('cafecafe');
     expect(ev.outcome).toBe('stale-validated');
+  });
+});
+
+describe('parseFactoryEvent', () => {
+  it('accepts a valid event', () => {
+    expect(parseFactoryEvent(scriptRan)).toEqual(scriptRan);
+  });
+
+  it('rejects unknown discriminants and missing required payload fields', () => {
+    expect(parseFactoryEvent({ type: 'unknown', at: 1, goalId: 'g1' })).toBeNull();
+    expect(parseFactoryEvent({ type: 'knowledge-written', at: 1, goalId: 'g1' })).toBeNull();
+    expect(parseFactoryEvent({ type: 'script-ran', at: 1, goalId: 'g1', command: 'test' })).toBeNull();
   });
 });
 
