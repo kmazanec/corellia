@@ -106,6 +106,7 @@ import {
   shouldRunTerracedScan,
 } from './decision/context.js';
 import { produceClassicArtifact } from './attempt/classic-produce.js';
+import { checkEmissionAuthority } from './attempt/emission-authority.js';
 import {
   invalidSplitStructureVerdict,
   isomorphicSplitFailure,
@@ -1349,27 +1350,17 @@ export class Engine {
       // artifact file paths. If the artifact touches sensitive territory that
       // the declared scope did not (scope escape into sensitive paths), the
       // authority gate fires again before proceeding to the judge.
-      if (artifact.kind === 'files' && artifact.files && artifact.files.length > 0) {
-        const artifactPaths = artifact.files.map((f) => f.path);
-        const emitRisk = classifyRisk(artifactPaths, this.sensitivity);
-        await this.store.append({ type: 'risk-classified', at: t(), goalId: goal.id, risk: emitRisk });
-
-        // Gate fires when artifact risk is high and entry scope was not — the
-        // scope declaration did not cover the sensitive surface actually touched.
-        const emissionAuthorityReport = await runAuthorityGate({
-          shouldGate: emitRisk === 'high' && entryRisk !== 'high',
-          goal,
-          risk: emitRisk,
-          typeGated: false,
-          store: this.store,
-          now: t,
-          onGate: this.onGate,
-          onBrief: this.effectiveOnBrief,
-          deniedMessage: (brief) =>
-            `Authority gate denied at emission (artifact touched sensitive paths): ${brief.question}`,
-        });
-        if (emissionAuthorityReport !== null) return emissionAuthorityReport;
-      }
+      const emissionAuthorityReport = await checkEmissionAuthority({
+        goal,
+        artifact,
+        entryRisk,
+        sensitivity: this.sensitivity,
+        store: this.store,
+        now: t,
+        onGate: this.onGate,
+        onBrief: this.effectiveOnBrief,
+      });
+      if (emissionAuthorityReport !== null) return emissionAuthorityReport;
 
       // ── LLM JUDGE (only if deterministic passed) ─────────────────────────
       // Skipped when the leaf tournament already ran (the tournament IS the judge
