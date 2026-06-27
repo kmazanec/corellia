@@ -23,7 +23,7 @@ import type { Registry, GoalTypeDef } from '../contract/goal-type.js';
 import type { MemoryView } from '../contract/memory.js';
 import type { RiskClass, SensitivityFact } from '../contract/risk.js';
 import type { PatternStore } from '../contract/pattern.js';
-import type { ToolBroker, ToolDef } from '../contract/tool.js';
+import type { ToolBroker } from '../contract/tool.js';
 import { debitAttempt, debitTokenCount, debitTokenUsage } from './budget-events.js';
 import { lintLibrary } from '../library/constitution.js';
 import { loadFamilySkill } from '../library/skills.js';
@@ -42,21 +42,11 @@ import {
   type KnowledgeForCoverage,
   type MissingRequirement,
 } from '../library/coverage.js';
-import { runForcedEmit, runStructuredArtifactEmit } from './step-loop-emit.js';
-import { handleStepLoopStepError } from './step-loop-errors.js';
-import { routeStepToolCalls } from './step-loop-router.js';
-import {
-  checkStepLoopToolBudget,
-  updateRemainingToolCallContext,
-} from './step-loop-budget.js';
-import { createStepLoopSession } from './step-loop-session.js';
-import { recordStepOutput } from './step-loop-step.js';
-import { boundStepLoopTranscript } from './step-loop-transcript.js';
 import { isToolGranted } from './step-loop-tools.js';
 import {
   stepLoopTranscriptFinding,
-  type StepLoopResult,
 } from './step-loop-result.js';
+import { runStepLoop } from './step-loop.js';
 import {
   blockedReport,
   exhaustedBrief,
@@ -897,15 +887,22 @@ export class Engine {
       let tournamentRan = false;
 
       if (isToolGranted(typeDef.grants) && this.effectiveBroker !== undefined) {
-        const loopResult = await this.runStepLoop(
+        const loopResult = await runStepLoop({
           goal,
-          typeDef.grants,
-          attemptState.budget,
+          grants: typeDef.grants,
+          budget: attemptState.budget,
           ctx,
-          attemptState.priorAttempt,
-          treeState,
-          attemptState.priorLoopTranscript,
-        );
+          typeDef,
+          broker: this.effectiveBroker,
+          sandboxRepoRoot: this._activeAssembly?.worktree.repoRoot,
+          priorTranscript: attemptState.priorLoopTranscript,
+          brain: this.brain,
+          store: this.store,
+          now: t,
+          enforceToolCallBudget: this.enforceToolCallBudget,
+          debitUsage: (usage) => debitTreeState(treeState, usage),
+          hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
+        });
 
         if (loopResult.kind === 'ceiling') {
           // step loop tripped the ceiling — surface ceiling-reached once
@@ -1256,255 +1253,6 @@ export class Engine {
       tier,
       ...(brainConfig !== undefined ? { brainConfig } : {}),
     });
-  }
-
-  private async runStepLoop(
-    goal: Goal,
-    grants: string[],
-    budget: Budget,
-    ctx: BrainContext,
-    _priorAttempt: { artifact: Artifact | null; verdict: Verdict } | undefined,
-    treeState: TreeState = createTreeState(),
-    priorTranscript?: StepTranscript,
-  ): Promise<StepLoopResult> {
-    const t = this.now;
-    const typeDef = this.registry.get(goal.type);
-    const session = createStepLoopSession({
-      goal,
-      grants,
-      budget,
-      typeDef,
-      broker: this.effectiveBroker as { defs?: () => ToolDef[] },
-      sandboxRepoRoot: this._activeAssembly?.worktree.repoRoot,
-      priorTranscript,
-    });
-    const {
-      tools,
-      transcript,
-      scratchpad,
-      seenCalls,
-      callKeyByCallId,
-      isExploreThenEmit,
-      hardToolCallCap,
-    } = session;
-    let {
-      remainingToolCalls,
-      toolCallsMade,
-      stepIndex,
-      exploreReadCalls,
-      totalTokensUsed,
-      toolBudgetWarned,
-      forceEmitNext,
-      malformRecoveryUsed,
-    } = session.counters;
-
-    while (true) {
-      const budgetGate = await checkStepLoopToolBudget({
-        goal,
-        budget,
-        transcript,
-        store: this.store,
-        now: t,
-        enforceToolCallBudget: this.enforceToolCallBudget,
-        state: {
-          remainingToolCalls,
-          toolCallsMade,
-          warned: toolBudgetWarned,
-          hardToolCallCap,
-        },
-      });
-      if (budgetGate.kind === 'exhausted') {
-        return budgetGate;
-      }
-      toolBudgetWarned = budgetGate.state.warned;
-
-      updateRemainingToolCallContext(transcript, remainingToolCalls);
-
-      // Comprehend over-explore backstop: the read ceiling was crossed. Instead of
-      // nudging the model and HOPING it volunteers the artifact (it may keep
-      // reading, and two such failures trip the isomorphic-failure detector into a
-      // block — AC-4 run #7), DIRECTLY drive the emit from what has already been
-      // read. For an outputSchema type this is the two-phase emit's emit call,
-      // forced now: append the emit instruction and set the schema so the brain
-      // MUST return the structured artifact. For a no-schema type the same
-      // instruction is appended and the brain returns the artifact as content. The
-      // forced flag is consumed (a single forced emit per attempt) so we never loop
-      // on it. This GUARANTEES the dive of a bounded region converges to an
-      // artifact rather than read-looping to exhaustion.
-      if (forceEmitNext) {
-        forceEmitNext = false; // consume — one forced emit per attempt
-        const forcedEmit = await runForcedEmit({
-          goal,
-          typeDef,
-          ctx,
-          transcript,
-          brain: this.brain,
-          store: this.store,
-          now: t,
-          state: { remainingToolCalls, stepIndex, totalTokensUsed, exploreReadCalls },
-          debitUsage: (usage) => debitTreeState(treeState, usage),
-          checkCeiling: async () => hasReachedSpendCeiling(treeState),
-        });
-        ({ stepIndex, totalTokensUsed } = forcedEmit.state);
-        if (forcedEmit.kind === 'ceiling') {
-          return { kind: 'ceiling', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
-        }
-        if (forcedEmit.kind === 'artifact') {
-          return {
-            kind: 'artifact',
-            artifact: forcedEmit.artifact,
-            budget: { ...budget, toolCalls: remainingToolCalls },
-            transcript,
-            tokensUsed: totalTokensUsed,
-          };
-        }
-        return {
-          kind: 'failed',
-          error: forcedEmit.error,
-          budget: { ...budget, toolCalls: remainingToolCalls },
-          transcript,
-        };
-      }
-
-      // ── WORKING-MEMORY BOUND (ADR-036) ──────────────────────────────────────
-      // Refresh the always-retained notes block, then bound the transcript before
-      // sending it: evict the oldest raw tool reads to stubs once the transcript
-      // crosses the token cap, so the prompt never balloons to the point a tool-call
-      // response truncates (build #8: ~117K tokens → truncated JSON → block). Notes
-      // (distilled by the model) and recent reads survive; evicted paths are
-      // released from the duplicate-read guard so the model may re-read on demand.
-      await boundStepLoopTranscript({
-        goal,
-        transcript,
-        scratchpad,
-        store: this.store,
-        now: t,
-        seenCalls,
-        callKeyByCallId,
-        summarizeRead: this.brain.summarize !== undefined
-          ? (text) => this.brain.summarize!(text, ctx)
-          : undefined,
-        debitUsage: (usage) => debitTreeState(treeState, usage),
-      });
-
-      let stepOutput: import('../contract/brain.js').StepOutput;
-      try {
-        stepOutput = await this.brain.step(goal, transcript, tools, ctx);
-      } catch (err) {
-        const stepError = await handleStepLoopStepError({
-          err,
-          goal,
-          budget,
-          remainingToolCalls,
-          transcript,
-          scratchpad,
-          store: this.store,
-          now: t,
-          seenCalls,
-          callKeyByCallId,
-          malformRecoveryUsed,
-        });
-        if (stepError.kind === 'recover') {
-          malformRecoveryUsed = stepError.malformRecoveryUsed;
-          forceEmitNext = stepError.forceEmitNext;
-          continue;
-        }
-        return stepError.result;
-      }
-
-      const recordedStep = await recordStepOutput({
-        goal,
-        output: stepOutput,
-        state: { stepIndex, totalTokensUsed },
-        store: this.store,
-        now: t,
-        debitUsage: (usage) => debitTreeState(treeState, usage),
-        hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
-      });
-      ({ stepIndex, totalTokensUsed } = recordedStep.state);
-      if (recordedStep.kind === 'ceiling') {
-        return { kind: 'ceiling', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
-      }
-
-      if (stepOutput.kind === 'artifact') {
-        // ── TWO-PHASE EMIT (ADR-023) ──────────────────────────────────────────
-        // When the goal-type declares outputSchema, this artifact-kind output is
-        // the exploration-complete signal — not the final artifact yet. Append
-        // the emit instruction context message, make ONE more brain.step call
-        // with ctx.outputSchema set (budget-gated, debited, evented like any
-        // step), and use THAT call's artifact-kind text as the final artifact.
-        // If the emit call returns tool-calls, treat as a failed step into the
-        // existing control loop (return kind:'failed').
-        if (typeDef.outputSchema !== undefined) {
-          const structuredEmit = await runStructuredArtifactEmit({
-            goal,
-            outputSchema: typeDef.outputSchema,
-            ctx,
-            transcript,
-            brain: this.brain,
-            store: this.store,
-            now: t,
-            enforceToolCallBudget: this.enforceToolCallBudget,
-            state: { remainingToolCalls, stepIndex, totalTokensUsed, exploreReadCalls },
-            debitUsage: (usage) => debitTreeState(treeState, usage),
-            checkCeiling: async () => hasReachedSpendCeiling(treeState),
-          });
-          ({ stepIndex, totalTokensUsed } = structuredEmit.state);
-          if (structuredEmit.kind === 'exhausted') {
-            return { kind: 'exhausted', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
-          }
-          if (structuredEmit.kind === 'ceiling') {
-            return { kind: 'ceiling', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
-          }
-          if (structuredEmit.kind === 'failed') {
-            return {
-              kind: 'failed',
-              error: structuredEmit.error,
-              budget: { ...budget, toolCalls: remainingToolCalls },
-              transcript,
-            };
-          }
-          return {
-            kind: 'artifact',
-            artifact: structuredEmit.artifact,
-            budget: { ...budget, toolCalls: remainingToolCalls },
-            transcript,
-            tokensUsed: totalTokensUsed,
-          };
-        }
-
-        return {
-          kind: 'artifact',
-          artifact: stepOutput.artifact,
-          budget: { ...budget, toolCalls: remainingToolCalls },
-          transcript,
-          tokensUsed: totalTokensUsed,
-        };
-      }
-
-      const routing = await routeStepToolCalls({
-        goal,
-        calls: stepOutput.calls,
-        budget,
-        transcript,
-        scratchpad,
-        broker: this.effectiveBroker!,
-        store: this.store,
-        now: t,
-        enforceToolCallBudget: this.enforceToolCallBudget,
-        isExploreThenEmit,
-        seenCalls,
-        callKeyByCallId,
-        state: { remainingToolCalls, toolCallsMade, exploreReadCalls },
-      });
-      if (routing.kind === 'exhausted') {
-        return routing;
-      }
-      ({ remainingToolCalls, toolCallsMade, exploreReadCalls } = routing.state);
-
-      // After routing all calls, update remaining in context for next step
-      // (the context message is prepended at the top of the next iteration)
-    }
   }
 
   private async recheckArtifactAfterRepair(
