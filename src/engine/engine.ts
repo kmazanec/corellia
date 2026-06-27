@@ -99,7 +99,12 @@ import { judgeLeafArtifact } from './leaf-judge.js';
 import {
   rejectedSplitSatisfyReport,
   runMustDecomposeGuard,
-} from './must-decompose-guard.js';
+} from './decision/must-decompose-guard.js';
+import {
+  buildDecisionContext,
+  memoStatus as deriveMemoStatus,
+  shouldRunTerracedScan,
+} from './decision/context.js';
 import {
   appendChildSpawnedEvents,
   buildSplitChildGoals,
@@ -661,8 +666,7 @@ export class Engine {
 
       // ── PATTERN STORE CONSULTATION ─────────────────────────────────────
       const memo = this.patterns ? await this.patterns.match(shape) : null;
-      const memoStatus: 'none' | 'provisional' | 'trusted' =
-        memo === null ? 'none' : memo.status;
+      const memoStatus = deriveMemoStatus(memo);
 
       await this.store.append({
         type: 'pattern-consulted',
@@ -686,23 +690,21 @@ export class Engine {
         // (e.g. comprehension over-splits: a map-repo splitting needlessly).
         const decideSkill = this.decideSkillBlock(goal.type);
         const repoShape = this.repoShapeHint(goal);
-        const baseCtx: BrainContext = {
+        const baseCtx = buildDecisionContext({
+          goal,
+          typeDef,
           tier: currentTier,
-          memories: goal.memories,
-          ...(decideSkill ? { skill: decideSkill } : {}),
-          ...(repoShape ? { repoShape } : {}),
-          // Tell the brain at decide time that this type cannot satisfy, so it
-          // chooses split/block and never wastes a decision on a satisfy the
-          // cannot-satisfy guard would have to block (prevention paired with that
-          // guard).
-          ...(typeDef.mustDecompose ? { mustDecompose: true } : {}),
-          ...(memoStatus === 'provisional' && memo !== null
-            ? { patternHint: memo }
-            : {}),
-        };
+          memo,
+          skill: decideSkill,
+          repoShape,
+        });
 
         const scan = typeDef.scan;
-        if (scan && scan.k > 1 && memoStatus === 'none' && this.registry.has('judge-split')) {
+        if (scan !== undefined && shouldRunTerracedScan({
+          scan,
+          memoStatus,
+          hasJudgeSplit: this.registry.has('judge-split'),
+        })) {
           // ── TERRACED SCAN — novel shape, k > 1 ────────────────────────
           // Generate k lens-diverse candidates and rank them with judge-split.
           // The winning candidate (first pass, tie-broken by fewest findings)

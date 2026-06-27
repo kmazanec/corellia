@@ -1,9 +1,9 @@
-import type { Brain, BrainContext } from '../contract/brain.js';
-import type { Decision } from '../contract/decision.js';
-import type { EventStore } from '../contract/events.js';
-import type { Goal, Tier, Usage } from '../contract/goal.js';
-import type { Report } from '../contract/report.js';
-import { blockedReport } from './reports.js';
+import type { Brain, BrainContext } from '../../contract/brain.js';
+import type { Decision } from '../../contract/decision.js';
+import type { EventStore } from '../../contract/events.js';
+import type { Goal, Tier, Usage } from '../../contract/goal.js';
+import type { Report } from '../../contract/report.js';
+import { blockedReport } from '../reports.js';
 
 export type MustDecomposeGuardResult =
   | { kind: 'unchanged'; decision: Decision; decideUsage: Usage | undefined }

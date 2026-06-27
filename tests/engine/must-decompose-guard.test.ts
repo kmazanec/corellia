@@ -4,7 +4,7 @@ import type { Decision } from '../../src/contract/decision.js';
 import {
   rejectedSplitSatisfyReport,
   runMustDecomposeGuard,
-} from '../../src/engine/must-decompose-guard.js';
+} from '../../src/engine/decision/must-decompose-guard.js';
 import {
   failVerdict,
   makeGoal,
