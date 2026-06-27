@@ -72,6 +72,7 @@ export interface LlmBrainConfig {
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
+const STEP_MAX_RETRIES = 3;
 
 // ---------------------------------------------------------------------------
 // Internal types for the OpenAI-compatible shape
@@ -204,6 +205,28 @@ interface StepRequest {
    * ignore it). Plumbed from per-tier binding config by F-64.
    */
   provider?: { order: string[]; allow_fallbacks: boolean };
+}
+
+type ProviderRoutingConfig = { order: string[]; allow_fallbacks: boolean };
+type SleepFn = (ms: number) => Promise<void>;
+
+interface StepFetchParams {
+  transcript: StepTranscript;
+  tools: ToolDef[];
+  model: string;
+  outputSchema: Record<string, unknown> | undefined;
+  providerConfig: ProviderRoutingConfig | undefined;
+  transportIncidents: TransportIncident[];
+}
+
+interface MalformedStepRetryParams {
+  transcript: StepTranscript;
+  tools: ToolDef[];
+  model: string;
+  outputSchema: Record<string, unknown> | undefined;
+  providerConfig: ProviderRoutingConfig | undefined;
+  incidents: TransportIncident[];
+  firstResponse: StepResponse;
 }
 
 interface StepChoiceMessage {
@@ -405,6 +428,113 @@ function translateStepResponse(
   const artifact: Artifact =
     files.length > 0 ? { kind: 'files', files } : { kind: 'text', text: content };
   return { kind: 'artifact', artifact, usage, ...incidentField };
+}
+
+function parseStepResponseBody(bodyText: string): StepResponse {
+  try {
+    return JSON.parse(bodyText) as StepResponse;
+  } catch {
+    throw new Error(
+      `LLM step response was truncated or invalid JSON (likely output-length ` +
+        `truncation under a large context — ADR-036). Body length: ${bodyText.length}.`,
+    );
+  }
+}
+
+function isTimeoutError(err: unknown): boolean {
+  return err instanceof Error &&
+    (err.name === 'AbortError' ||
+      err.name === 'TimeoutError' ||
+      err.message.includes('timeout'));
+}
+
+function retryDelayMs(attempt: number): number {
+  return Math.pow(2, attempt) * 200 + Math.random() * 100;
+}
+
+async function retryNetworkStepRequest(
+  incidents: TransportIncident[],
+  sleepFn: SleepFn,
+  attempt: number,
+  networkErr: unknown,
+  isTimeout: boolean,
+): Promise<boolean> {
+  if (attempt >= STEP_MAX_RETRIES) {
+    return false;
+  }
+
+  incidents.push({
+    kind: 'transport-retry',
+    detail: isTimeout ? 'network timeout' : String(networkErr),
+    at: Date.now(),
+  });
+  await sleepFn(retryDelayMs(attempt));
+  return true;
+}
+
+async function retryHttpStepRequest(
+  incidents: TransportIncident[],
+  sleepFn: SleepFn,
+  attempt: number,
+  response: Response,
+): Promise<TransportError | null> {
+  const errorText = await response.text();
+  const err = new TransportError(response.status, errorText);
+  if (err.errorClass === 'terminal' || attempt >= STEP_MAX_RETRIES) {
+    return err;
+  }
+
+  incidents.push({
+    kind: 'transport-retry',
+    detail: `HTTP ${response.status}: ${errorText.slice(0, 200)}`,
+    at: Date.now(),
+  });
+  await sleepFn(retryDelayMs(attempt));
+  return null;
+}
+
+function stepTransportError(err: unknown, isTimeout: boolean): StepTransportError {
+  return new StepTransportError(
+    isTimeout
+      ? `Step request timed out and did not recover after ${STEP_MAX_RETRIES} retries`
+      : `Step request failed as a transport error after ${STEP_MAX_RETRIES} retries: ${String(err)}`,
+  );
+}
+
+function buildMalformedStepTranscript(transcript: StepTranscript, detail: string): StepTranscript {
+  return [
+    ...transcript,
+    {
+      role: 'context',
+      content:
+        `Your previous response contained tool calls with unparseable arguments. ` +
+        `Parse error: ${detail}. ` +
+        `Please respond again with valid tool calls or a final artifact.`,
+    },
+  ];
+}
+
+function mergeMalformedStepRetry(
+  firstResponse: StepResponse,
+  repromptWire: StepResponse,
+  repromptUsage: Usage,
+  repromptResult: StepOutput,
+  incidents: TransportIncident[],
+): StepOutput {
+  const firstUsage = readUsage(firstResponse);
+  const mergedUsage: Usage = {
+    promptTokens: firstUsage.promptTokens + repromptUsage.promptTokens,
+    completionTokens: firstUsage.completionTokens + repromptUsage.completionTokens,
+  };
+  if (firstUsage.costUsd !== undefined || repromptUsage.costUsd !== undefined) {
+    mergedUsage.costUsd = (firstUsage.costUsd ?? 0) + (repromptUsage.costUsd ?? 0);
+  }
+
+  const incidentField = incidents.length > 0 ? { incidents } : {};
+  if (repromptResult.kind === 'tool-calls') {
+    return { kind: 'tool-calls', calls: repromptResult.calls, usage: mergedUsage, ...incidentField };
+  }
+  return { kind: 'artifact', artifact: repromptResult.artifact, usage: mergedUsage, ...incidentField };
 }
 
 /**
@@ -1332,196 +1462,135 @@ export class LlmBrain implements Brain {
     ctx: BrainContext,
   ): Promise<StepOutput> {
     const model = this.config.modelByTier[ctx.tier];
-    const fetchFn = this.config.fetchImpl ?? globalThis.fetch;
-    const sleepFn = this.config.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-    const MAX_RETRIES = 3;
     const transportIncidents: TransportIncident[] = [];
     // Per-tier provider routing config (F-64 / ADR-005): sourced from
     // LlmBrainConfig.providerByTier[ctx.tier]; absent entry → undefined →
     // buildStepRequest omits the provider field entirely (wire-compatible).
     const providerConfig = this.config.providerByTier?.[ctx.tier];
 
-    /**
-     * Perform one fetch of the step endpoint with bounded transport retries.
-     * 429/5xx/timeout → retry up to MAX_RETRIES with exponential backoff + jitter.
-     * Terminal status codes (401/403/404/unknown) → throw immediately (no retries).
-     * Retried calls contribute no usage; each retry is recorded as an incident.
-     */
-    const fetchWithRetry = async (): Promise<StepResponse> => {
-      const requestBody = buildStepRequest(transcript, tools, model, ctx.outputSchema, providerConfig);
-      let attempt = 0;
-      while (true) {
-        let response: Response;
-        try {
-          response = await fetchFn(`${this.config.baseUrl}/chat/completions`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${this.config.apiKey}`,
-              ...this.config.headers,
-            },
-            body: JSON.stringify(requestBody),
-            // Abort a hung request → caught as a retryable timeout below.
-            signal: AbortSignal.timeout(this.config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS),
-          });
-        } catch (networkErr) {
-          const isTimeout =
-            networkErr instanceof Error &&
-            (networkErr.name === 'AbortError' ||
-              networkErr.name === 'TimeoutError' ||
-              networkErr.message.includes('timeout'));
-          if (attempt < MAX_RETRIES) {
-            const delay = Math.pow(2, attempt) * 200 + Math.random() * 100;
-            transportIncidents.push({
-              kind: 'transport-retry',
-              detail: isTimeout ? 'network timeout' : String(networkErr),
-              at: Date.now(),
-            });
-            await sleepFn(delay);
-            attempt++;
-            continue;
-          }
-          // Retries exhausted on a transport incident (canonically a timeout that
-          // aborted MAX_RETRIES times). Surface it as a typed StepTransportError so
-          // the engine does NOT misclassify a flaky/slow endpoint as a logical
-          // step-loop:failed and isomorphic-block the leaf (observed run
-          // live-self-6060bbf1: an author leaf's step timed out → terminal block).
-          throw new StepTransportError(
-            isTimeout
-              ? `Step request timed out and did not recover after ${MAX_RETRIES} retries`
-              : `Step request failed as a transport error after ${MAX_RETRIES} retries: ${String(networkErr)}`,
-          );
-        }
+    const wireResponse = await this.fetchStepResponse({
+      transcript,
+      tools,
+      model,
+      outputSchema: ctx.outputSchema,
+      providerConfig,
+      transportIncidents,
+    });
+    const incidents = transportIncidents.slice();
+    const result = translateStepResponse(wireResponse, incidents);
 
-        if (response.ok) {
-          // A truncated response body (the provider cut the model off at its output
-          // limit) yields invalid JSON here — `response.json()` throws
-          // "Unexpected end of JSON input". Surface that as a clear, classifiable
-          // error rather than a bare parse failure (ADR-036: the working-memory
-          // eviction bound is what PREVENTS the context bloat that causes this; this
-          // is the defensive net that names it when it still happens).
-          const bodyText = await response.text();
-          try {
-            return JSON.parse(bodyText) as StepResponse;
-          } catch {
-            throw new Error(
-              `LLM step response was truncated or invalid JSON (likely output-length ` +
-                `truncation under a large context — ADR-036). Body length: ${bodyText.length}.`,
-            );
-          }
-        }
+    if (result !== null) {
+      return result;
+    }
 
-        const errorText = await response.text();
-        const err = new TransportError(response.status, errorText);
+    return this.retryMalformedStep({
+      transcript,
+      tools,
+      model,
+      outputSchema: ctx.outputSchema,
+      providerConfig,
+      incidents,
+      firstResponse: wireResponse,
+    });
+  }
 
-        if (err.errorClass === 'terminal') {
-          throw err;
-        }
+  /**
+   * Perform one fetch of the step endpoint with bounded transport retries.
+   * 429/5xx/timeout -> retry up to STEP_MAX_RETRIES with exponential backoff + jitter.
+   * Terminal status codes (401/403/404/unknown) -> throw immediately (no retries).
+   * Retried calls contribute no usage; each retry is recorded as an incident.
+   */
+  private async fetchStepResponse(params: StepFetchParams): Promise<StepResponse> {
+    const sleepFn = this.config.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    const requestBody = buildStepRequest(
+      params.transcript,
+      params.tools,
+      params.model,
+      params.outputSchema,
+      params.providerConfig,
+    );
+    let attempt = 0;
 
-        if (attempt < MAX_RETRIES) {
-          const delay = Math.pow(2, attempt) * 200 + Math.random() * 100;
-          transportIncidents.push({
-            kind: 'transport-retry',
-            detail: `HTTP ${response.status}: ${errorText.slice(0, 200)}`,
-            at: Date.now(),
-          });
-          await sleepFn(delay);
+    while (true) {
+      let response: Response;
+      try {
+        response = await this.postStepRequest(requestBody);
+      } catch (networkErr) {
+        const isTimeout = isTimeoutError(networkErr);
+        if (await retryNetworkStepRequest(params.transportIncidents, sleepFn, attempt, networkErr, isTimeout)) {
           attempt++;
           continue;
         }
-
-        throw err;
-      }
-    };
-
-    /**
-     * Attempt one step fetch + translate. On malformed tool-call output, issue
-     * exactly one corrective re-prompt carrying the parse error. A second
-     * consecutive malformation fails the step. Records malformation as an
-     * incident on the envelope.
-     */
-    const fetchAndTranslate = async (): Promise<StepOutput> => {
-      const wireResponse = await fetchWithRetry();
-      const incidents = transportIncidents.slice();
-      const result = translateStepResponse(wireResponse, incidents);
-
-      if (result !== null) {
-        return result;
+        throw stepTransportError(networkErr, isTimeout);
       }
 
-      const malformDetail = 'Tool call arguments could not be parsed as a JSON object';
-      incidents.push({ kind: 'malformation-reprompt', detail: malformDetail, at: Date.now() });
-
-      const correctedTranscript: StepTranscript = [
-        ...transcript,
-        {
-          role: 'context',
-          content:
-            `Your previous response contained tool calls with unparseable arguments. ` +
-            `Parse error: ${malformDetail}. ` +
-            `Please respond again with valid tool calls or a final artifact.`,
-        },
-      ];
-
-      const repromptBody = buildStepRequest(correctedTranscript, tools, model, ctx.outputSchema, providerConfig);
-      const repromptResponse = await fetchFn(`${this.config.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.config.apiKey}`,
-          ...this.config.headers,
-        },
-        body: JSON.stringify(repromptBody),
-        // The malform re-prompt fetch needs the SAME abort timeout as every other
-        // fetch (lines ~826, ~1199); without it a hung re-prompt wedges the run with
-        // no liveness backstop (observed: a run sat at 0% CPU indefinitely).
-        signal: AbortSignal.timeout(this.config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS),
-      });
-
-      if (!repromptResponse.ok) {
-        const errorText = await repromptResponse.text();
-        throw new TransportError(repromptResponse.status, errorText);
+      if (response.ok) {
+        return parseStepResponseBody(await response.text());
       }
 
-      const repromptWire = (await repromptResponse.json()) as StepResponse;
-      const repromptUsage = readUsage(repromptWire);
-      const repromptResult = translateStepResponse(repromptWire, incidents);
-
-      if (repromptResult === null) {
-        // Two consecutive malformed tool-call responses. A FORMAT incident, not a
-        // logical failure — surface it as MalformedStepError so the engine can
-        // recover (force a clean emit) instead of isomorphic-blocking the leaf.
-        // If the provider also signaled truncation (`finish_reason: 'length'`), the
-        // args were cut off mid-stream (a large structured emit overran the output
-        // limit), not garbled by the model — carry that so the engine can shed
-        // context before retrying.
-        const truncated =
-          firstFinishReason(wireResponse) === 'length' ||
-          firstFinishReason(repromptWire) === 'length';
-        throw new MalformedStepError(
-          `Step failed: two consecutive malformed tool-call responses` +
-            (truncated ? ' (output truncated at the token limit)' : '') +
-            `. Tool call arguments could not be parsed as a JSON object`,
-          truncated,
-        );
+      const httpError = await retryHttpStepRequest(params.transportIncidents, sleepFn, attempt, response);
+      if (httpError === null) {
+        attempt++;
+        continue;
       }
 
-      const firstUsage = readUsage(wireResponse);
-      const mergedUsage: Usage = {
-        promptTokens: firstUsage.promptTokens + repromptUsage.promptTokens,
-        completionTokens: firstUsage.completionTokens + repromptUsage.completionTokens,
-      };
-      if (firstUsage.costUsd !== undefined || repromptUsage.costUsd !== undefined) {
-        mergedUsage.costUsd = (firstUsage.costUsd ?? 0) + (repromptUsage.costUsd ?? 0);
-      }
+      throw httpError;
+    }
+  }
 
-      const incidentField = incidents.length > 0 ? { incidents } : {};
-      if (repromptResult.kind === 'tool-calls') {
-        return { kind: 'tool-calls', calls: repromptResult.calls, usage: mergedUsage, ...incidentField };
-      }
-      return { kind: 'artifact', artifact: repromptResult.artifact, usage: mergedUsage, ...incidentField };
-    };
+  /**
+   * On malformed tool-call output, issue exactly one corrective re-prompt carrying
+   * the parse error. A second consecutive malformation fails the step.
+   */
+  private async retryMalformedStep(params: MalformedStepRetryParams): Promise<StepOutput> {
+    const malformDetail = 'Tool call arguments could not be parsed as a JSON object';
+    params.incidents.push({ kind: 'malformation-reprompt', detail: malformDetail, at: Date.now() });
 
-    return fetchAndTranslate();
+    const correctedTranscript = buildMalformedStepTranscript(params.transcript, malformDetail);
+    const repromptBody = buildStepRequest(
+      correctedTranscript,
+      params.tools,
+      params.model,
+      params.outputSchema,
+      params.providerConfig,
+    );
+    const repromptResponse = await this.postStepRequest(repromptBody);
+
+    if (!repromptResponse.ok) {
+      const errorText = await repromptResponse.text();
+      throw new TransportError(repromptResponse.status, errorText);
+    }
+
+    const repromptWire = (await repromptResponse.json()) as StepResponse;
+    const repromptUsage = readUsage(repromptWire);
+    const repromptResult = translateStepResponse(repromptWire, params.incidents);
+
+    if (repromptResult === null) {
+      const truncated =
+        firstFinishReason(params.firstResponse) === 'length' ||
+        firstFinishReason(repromptWire) === 'length';
+      throw new MalformedStepError(
+        `Step failed: two consecutive malformed tool-call responses` +
+          (truncated ? ' (output truncated at the token limit)' : '') +
+          `. Tool call arguments could not be parsed as a JSON object`,
+        truncated,
+      );
+    }
+
+    return mergeMalformedStepRetry(params.firstResponse, repromptWire, repromptUsage, repromptResult, params.incidents);
+  }
+
+  private async postStepRequest(requestBody: StepRequest): Promise<Response> {
+    const fetchFn = this.config.fetchImpl ?? globalThis.fetch;
+    return fetchFn(`${this.config.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.config.apiKey}`,
+        ...this.config.headers,
+      },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(this.config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS),
+    });
   }
 }
