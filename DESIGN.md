@@ -323,6 +323,11 @@ failure.
   own CI, secret-reference scans run first; the judge is spent only on what a
   linter cannot reject. Anything a linter *can* enforce belongs in the
   deterministic gate, not in a prompt.
+- **Maintainability is evidence, not taste.** Passing tests do not prove the next
+  change will be cheap. Cheap code-shape signals (oversized files/functions,
+  repeated wiring, orchestration carrying domain policy) are factual inputs to
+  build guidance and improvement work. They start advisory, then graduate to
+  deterministic gates only after traces prove the right threshold.
 - **Impacted slice at the leaves, full suite at the root.** A leaf's goal-type
   eval runs only the tests its scope impacts (`impact(files)` against the
   architecture artifact); the root integration eval runs everything once. Eval

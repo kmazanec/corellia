@@ -84,6 +84,11 @@ prints the goal tree, blockers, and a cost summary, and writes events under
 - `id` is kebab-case and matches the filename stem (`commissions/<id>.ts`).
 - **Scope tightly.** Scope is an admission lock (overlapping intents queue) and a
   blast-radius bound — never widen to the whole repo "to be safe".
+- **Preserve code shape.** Code-writing commissions should include constraints
+  that keep modules small and domain-named, keep orchestration thin, and move
+  focused tests with the ownership boundary. For broad or already-pressured
+  scopes, review `npm run code-shape -- <scope...>` before running or accepting
+  the commission so the factory has concrete maintainability evidence.
 - The `spec` for `deliver-intent` uses the proven `{ description, scope?,
   constraints? }` convention. Do **not** invent other `spec` fields.
 - Acceptance criteria live as prose in `description`/`constraints` for now;

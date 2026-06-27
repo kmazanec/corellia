@@ -71,4 +71,8 @@ factory builds itself without a harness in the loop.
 ## Code conventions
 
 Cross-cutting code conventions live in `src/library/skills/_shared.md`, read by
-the factory at runtime and injected into every code-writing goal's context.
+the factory at runtime and injected into every code-writing goal's context. Outer
+coding agents should read that file before editing code here and treat it as the
+source of truth for code shape: small domain-named modules, orchestration as a
+table of contents, focused tests at ownership boundaries, and code-shape evidence
+from `npm run code-shape -- <scope...>` when touching broad or pressured areas.

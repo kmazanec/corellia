@@ -83,6 +83,10 @@ Ask only what you need; infer sensible defaults and state them. Cover:
    "must not touch X", test-first, etc. For a self-build (`live:self`-style) target,
    include the **strange-loop hygiene** constraints (primary checkout undisturbed,
    work confined to declared scope, no factory-internal language in the diff).
+   For implementation work, include code-shape constraints by default: preserve
+   small domain-named modules, keep orchestration thin, move focused tests with
+   ownership boundaries, and use `npm run code-shape -- <scope...>` as review
+   evidence for broad or already-pressured scopes.
 4. **Intent dial (`intent`)** — `production` (full judge strictness, the default),
    `spike` (exploratory), or `characterization` (capture current behavior).
 5. **Budget** — translate the human's appetite into `{ attempts, tokens,
