@@ -43,6 +43,7 @@ import {
   type SandboxAssembly,
 } from './assembly.js';
 import { diffWithinScope, collectTree, preserveTree, commitRound, diffBodiesWithinScope, treeChangedWithinScope } from './worktree.js';
+import { createIterationRecord, deleteProvenanceIssue } from './iteration-tools.js';
 import {
   newScratchpad, addNote, renderScratchpad, evictTranscript, evictTranscriptWithSummary,
   type Scratchpad, type EvictionResult,
@@ -672,6 +673,32 @@ export class Engine {
             : `tree blocked: ${report.blockers[0] ?? 'unknown'}`;
         await preserveTree(assembly.worktree, this.store, reason);
       } else {
+        // ── Deliver-intent lifecycle integration (ADR-034) ──────────────────
+        // On successful delivery, the engine itself (not a child goal) performs
+        // two deterministic integration steps at the assembly-emit success
+        // boundary, BEFORE collectTree so their writes join the delivered diff:
+        //   1. create the iteration record (+ index row + log line),
+        //   2. delete the originating issue the delivery resolves (if its spec
+        //      carries a `// from docs/issues/<slug>.md` provenance annotation).
+        // Both are no-ops on a blocked/partial delivery (this is the success
+        // branch) and sit alongside the existing PR-emission mechanics. Gated to
+        // the `deliver-intent` root: only a delivered intent earns an iteration
+        // record + issue retirement (ADR-034); other sandboxed roots (e.g.
+        // improve-factory) collect their tree without these lifecycle writes.
+        // Wrapped so a lifecycle-bookkeeping failure can never undo a delivery
+        // that already succeeded: the delivery stands; the bookkeeping is best-effort.
+        if (goal.type === 'deliver-intent') {
+          try {
+            createIterationRecord(assembly.worktree.root, goal, this.now);
+            deleteProvenanceIssue(assembly.worktree.root, goal);
+          } catch (err) {
+            // The delivery succeeded; a record/issue bookkeeping failure must not
+            // fail it or fabricate a block. Surface for the operator, then proceed.
+            console.warn(
+              `[corellia] deliver-intent lifecycle integration (ADR-034) failed post-success for ${goal.id}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
         await collectTree(assembly.worktree, this.store);
       }
       this._activeAssembly = undefined;
