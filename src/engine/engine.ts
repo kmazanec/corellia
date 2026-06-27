@@ -61,116 +61,19 @@ import {
 } from '../library/coverage.js';
 import { mergeComprehensionArtifacts, childShaFallback } from '../library/comprehend-merge.js';
 import { renormalizeShares, validateSplit } from './split-validation.js';
+import {
+  READ_ONLY_TOOL_NAMES,
+  dupKey,
+  invalidateReadGuardForPath,
+  isExploreThenEmitLeaf,
+  releaseGuardForCallId,
+} from './step-loop-guards.js';
 
 /**
  * Per-tree spend ceiling default (learning phase, ADR-017).
  * Applied at the root when Goal.spendCeilingUsd is absent.
  */
 const DEFAULT_SPEND_CEILING_USD = 15;
-
-// ---------------------------------------------------------------------------
-// Duplicate-call guard (F-64 / ADR-017)
-// ---------------------------------------------------------------------------
-
-/**
- * The set of tool names whose effects are read-only (fs.read / retrieval grants
- * only). A byte-identical re-invocation of any of these within the same attempt
- * is refused: it cannot produce new information. Write-mutating tools (fs.write,
- * test.run_*, repo.*) are never guarded — run_script repeats are required for
- * red→green, write_file repeats are valid edits, and boundary tools are one-shot
- * by their own contracts.
- *
- * Derived from GRANT_TOOL_MAP: every tool whose grants are a subset of
- * {fs.read, retrieval.api} is read-only. Updated when GRANT_TOOL_MAP gains a
- * new read-only tool.
- */
-const READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'read_file',
-  'list_dir',
-  'search',
-  'find_symbol',
-  'find_exemplar',
-  'conventions_for',
-  'stack_versions',
-  'impact',
-]);
-
-/** Grants that let a leaf mutate the product/repo — the test that separates a
- *  read-write-reread BUILD leaf from a pure read-then-emit leaf (ADR-039). */
-const PRODUCT_WRITE_GRANTS: ReadonlySet<string> = new Set(['fs.write', 'docs.issues.write']);
-
-/**
- * An *explore-then-emit* leaf (ADR-039): it has an `outputSchema` (so it runs the
- * two-phase explore→emit, ADR-023) AND holds no product-write grant — so it
- * legitimately reads to gather context, then emits one structured artifact, and
- * never has cause to read-write-reread. This SHAPE — not the comprehend family
- * string — is what earns the force-emit read-ceiling: such a leaf that keeps
- * reading instead of emitting is over-exploring (`author-acceptance-criteria`,
- * `map-repo`, `deep-dive-region`, `research-external`). A BUILD leaf (`fs.write`)
- * is excluded by the write-grant test: it legitimately re-reads after writing.
- */
-function isExploreThenEmitLeaf(typeDef: GoalTypeDef): boolean {
-  return (
-    typeDef.outputSchema !== undefined &&
-    !typeDef.grants.some((g) => PRODUCT_WRITE_GRANTS.has(g))
-  );
-}
-
-/**
- * Produce a stable, order-independent JSON serialization of an args object so
- * that two calls with the same semantic args but different key order (which an
- * LLM may emit) produce the same duplicate-guard key.
- *
- * Algorithm: recursively sort object keys alphabetically before serializing.
- * Primitive values and arrays are handled structurally (array order is
- * preserved — reordered array args are not semantically equivalent).
- */
-function stableJsonStringify(value: unknown): string {
-  if (value === null || typeof value !== 'object') {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return '[' + value.map(stableJsonStringify).join(',') + ']';
-  }
-  const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj).sort();
-  const pairs = keys.map((k) => JSON.stringify(k) + ':' + stableJsonStringify(obj[k]));
-  return '{' + pairs.join(',') + '}';
-}
-
-/**
- * Build the deduplication key for one tool call.
- * Format: `<name>\0<stable-json-args>` — the NUL separator is not a valid JSON
- * character and cannot appear in a tool name, so the two parts are unambiguous.
- */
-function dupKey(name: string, args: Record<string, unknown>): string {
-  return `${name}\0${stableJsonStringify(args)}`;
-}
-
-/**
- * After a successful write_file call, invalidate any duplicate-guard entries
- * for read_file/list_dir/search calls that targeted the same path, so a re-read
- * after a write is allowed (write invalidates the prefix-cache guard for that
- * path — the content has changed).
- *
- * Invalidation targets: read_file, list_dir, search — the three tools that
- * take a `path` or `query` arg that may reference the written file. We match
- * against the written path by removing all guard keys whose first arg matches
- * the written path string.
- */
-/**
- * Release the duplicate-read guard for a call whose result was EVICTED from the
- * transcript (ADR-036). The read is no longer in context, so the model must be
- * allowed to re-read it. Uses the callId→guardKey map recorded when the read ran.
- */
-function releaseGuardForCallId(
-  seenCalls: Set<string>,
-  callKeyByCallId: Map<string, string>,
-  callId: string,
-): void {
-  const key = callKeyByCallId.get(callId);
-  if (key !== undefined) seenCalls.delete(key);
-}
 
 /**
  * Keep a single notes `context` message updated in the transcript (ADR-036). The
@@ -188,29 +91,6 @@ function syncScratchpadMessage(transcript: StepTranscript, pad: Scratchpad): voi
   } else {
     // Insert just after the first message (the immutable harness/goal block).
     transcript.splice(1, 0, { role: 'context', content: rendered });
-  }
-}
-
-function invalidateReadGuardForPath(
-  seenCalls: Set<string>,
-  writtenPath: string,
-): void {
-  // Remove any read_file, list_dir, or search key whose stable args contain
-  // the written path. We do a targeted removal per tool rather than scanning
-  // all keys, so the operation is O(3) set deletions rather than O(n) iteration.
-  for (const readTool of ['read_file', 'list_dir', 'search', 'find_symbol', 'find_exemplar', 'conventions_for', 'stack_versions', 'impact'] as const) {
-    // Try the most common arg keys: path, query, filePath — all are strings.
-    // We use stableJsonStringify for the args object, so we reconstruct the
-    // likely key and delete it. Any key that embedded the path will be gone;
-    // keys with different paths are unaffected.
-    const candidateKeys = [
-      dupKey(readTool, { path: writtenPath }),
-      dupKey(readTool, { filePath: writtenPath }),
-      dupKey(readTool, { query: writtenPath }),
-    ];
-    for (const k of candidateKeys) {
-      seenCalls.delete(k);
-    }
   }
 }
 
