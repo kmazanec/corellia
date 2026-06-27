@@ -16,6 +16,10 @@ import {
   verifyEntryPoints,
   runScriptTool,
   loggingScriptRunner,
+  createCommandRunner,
+  runCommandTool,
+  loggingCommandRunner,
+  networkCommandBlock,
   OUTPUT_TRUNCATION_CAP,
 } from '../../src/library/script-runner.js';
 import { InMemoryEventStore } from '../../src/eventlog/memory-store.js';
@@ -474,5 +478,109 @@ describe('verifyEntryPoints', () => {
       lint: 'npm-script:lint',
     });
     expect(result.ok).toBe(true);
+  });
+});
+
+// ── run_command — general worktree shell (ADR-016 amendment) ─────────────────
+
+describe('networkCommandBlock', () => {
+  it('blocks network-reaching commands, including when chained past a first word', () => {
+    expect(networkCommandBlock('git push origin main')).toBe('git push');
+    expect(networkCommandBlock('git fetch')).toBe('git fetch');
+    expect(networkCommandBlock('npm test && curl http://evil')).toBe('curl');
+    expect(networkCommandBlock('echo hi; wget x')).toBe('wget');
+    expect(networkCommandBlock('npm install lodash')).toMatch(/npm\s+install/);
+    expect(networkCommandBlock('npx tsc')).toBe('npx');
+    expect(networkCommandBlock('git pull --rebase')).toBe('git pull');
+  });
+
+  it('allows local commands including local git', () => {
+    expect(networkCommandBlock('git status')).toBeNull();
+    expect(networkCommandBlock('git checkout src/x.ts')).toBeNull();
+    expect(networkCommandBlock('git restore src/x.ts')).toBeNull();
+    expect(networkCommandBlock('git add -A && git commit -m "x"')).toBeNull();
+    expect(networkCommandBlock('git diff HEAD')).toBeNull();
+    expect(networkCommandBlock('npm run test')).toBeNull();
+    expect(networkCommandBlock('node -e "console.log(1)"')).toBeNull();
+  });
+});
+
+describe('createCommandRunner', () => {
+  it('runs a command in the worktree cwd and captures output', async () => {
+    const root = makeTmp();
+    writeFileSync(join(root, 'marker.txt'), 'hello-worktree');
+    const runner = createCommandRunner(root);
+    const r = await runner.run('cat marker.txt');
+    expect(r.ok).toBe(true);
+    expect(r.exitStatus).toBe(0);
+    expect(r.fullOutput).toContain('hello-worktree');
+  });
+
+  it('cwd is pinned to the worktree (pwd is the worktree root)', async () => {
+    const root = makeTmp();
+    const runner = createCommandRunner(root);
+    const r = await runner.run('pwd');
+    expect(r.ok).toBe(true);
+    // macOS /tmp symlinks to /private/tmp; compare the basename to avoid that.
+    expect(r.fullOutput.trim().endsWith(root.split('/').pop()!)).toBe(true);
+  });
+
+  it('refuses a network-reaching command without spawning (no exit status)', async () => {
+    const root = makeTmp();
+    const runner = createCommandRunner(root);
+    const r = await runner.run('git push origin main');
+    expect(r.ok).toBe(false);
+    expect(r.exitStatus).toBeNull();
+    expect(r.output).toContain('reaches the network');
+    expect(r.durationMs).toBe(0); // never spawned
+  });
+
+  it('does not pass scrubbed secrets to the child env', async () => {
+    const root = makeTmp();
+    // The scrubbed env omits *_TOKEN; the child should see no value.
+    const scrubbed = { ...process.env };
+    delete scrubbed['GITHUB_TOKEN'];
+    const runner = createCommandRunner(root, scrubbed);
+    const r = await runner.run('node -e "process.stdout.write(String(process.env.GITHUB_TOKEN))"');
+    expect(r.fullOutput).toContain('undefined');
+  });
+
+  it('kills a command that exceeds the time limit', async () => {
+    const root = makeTmp();
+    const runner = createCommandRunner(root);
+    const r = await runner.run('node -e "setTimeout(()=>{}, 10000)"', 300);
+    expect(r.timedOut).toBe(true);
+    expect(r.ok).toBe(false);
+  }, 5000);
+
+  it('refuses an empty command', async () => {
+    const root = makeTmp();
+    const r = await createCommandRunner(root).run('   ');
+    expect(r.ok).toBe(false);
+    expect(r.output).toContain('empty command');
+  });
+});
+
+describe('runCommandTool + loggingCommandRunner', () => {
+  const goal = { id: 'g-cmd' } as unknown as Goal;
+
+  it('formats the tool output with command + status', async () => {
+    const root = makeTmp();
+    writeFileSync(join(root, 'f.txt'), 'X');
+    const tool = runCommandTool(createCommandRunner(root));
+    const out = await tool.execute(goal, { command: 'cat f.txt' });
+    expect(out.ok).toBe(true);
+    expect(out.output).toContain('[run_command: cat f.txt]');
+    expect(out.output).toContain('exit 0');
+  });
+
+  it('logs a script-ran event with the full command as the label', async () => {
+    const root = makeTmp();
+    const store = new InMemoryEventStore();
+    const runner = loggingCommandRunner(store, createCommandRunner(root), 'g-cmd', () => 123);
+    await runner.run('git status');
+    const events = (await store.list()).filter((e: FactoryEvent) => e.type === 'script-ran');
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type === 'script-ran' && events[0]!.command).toBe('git status');
   });
 });

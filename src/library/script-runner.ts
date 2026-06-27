@@ -226,6 +226,201 @@ function truncate(s: string): string {
   return s.slice(s.length - OUTPUT_TRUNCATION_CAP);
 }
 
+// ---------------------------------------------------------------------------
+// run_command — a general worktree shell (ADR-016 amendment)
+// ---------------------------------------------------------------------------
+
+/**
+ * Network-reaching command patterns refused by {@link runCommandTool}. The
+ * worktree's only sanctioned egress is the brokered `push_branch`/`open_pr` path
+ * (ADR-025), which runs the process-clean gate. A general shell must not become a
+ * second, ungated egress — so anything that fetches, pushes, installs from, or
+ * otherwise talks to the network is blocked. The scan is over the WHOLE command
+ * string (a word-boundary regex), so shell chaining (`a && curl …`, `$(wget …)`)
+ * cannot smuggle a blocked verb past a first-word check.
+ *
+ * This is a denylist, deliberately: a worktree shell is dual-use and the operator
+ * opted into broad latitude; the floor is "no network", not "only these verbs".
+ * Local git (status/diff/checkout/restore/add/commit/log/stash) is fully allowed —
+ * only the network-reaching git subcommands (push/pull/fetch/clone/remote) are not.
+ */
+const NETWORK_COMMAND_PATTERNS: ReadonlyArray<RegExp> = [
+  /\bgit\s+push\b/,
+  /\bgit\s+pull\b/,
+  /\bgit\s+fetch\b/,
+  /\bgit\s+clone\b/,
+  /\bgit\s+remote\b/,
+  /\bcurl\b/,
+  /\bwget\b/,
+  /\bnc\b/,
+  /\bncat\b/,
+  /\bssh\b/,
+  /\bscp\b/,
+  /\bsftp\b/,
+  /\btelnet\b/,
+  /\brsync\b/,
+  // Package installs and publishes reach the registry network.
+  /\bnpm\s+(i|install|ci|publish|update|add)\b/,
+  /\b(yarn|pnpm)\s+(add|install|up|publish)\b/,
+  /\bnpx\b/, // npx fetches packages on demand
+  /\bpip\s+install\b/,
+  /\bcargo\s+(install|publish|fetch)\b/,
+  /\bgo\s+(get|install)\b/,
+  /\bbrew\s+install\b/,
+  /\bapt(-get)?\s+install\b/,
+];
+
+/** Returns the matched blocked verb if the command reaches the network, else null. */
+export function networkCommandBlock(command: string): string | null {
+  for (const pat of NETWORK_COMMAND_PATTERNS) {
+    const m = command.match(pat);
+    if (m) return m[0];
+  }
+  return null;
+}
+
+/**
+ * A general shell, pinned to the sandbox worktree. The four floors (operator
+ * decision, run 18): cwd = worktree (cannot escape), env scrubbed of the factory's
+ * secrets, network/push blocked (the brokered push path is the only egress), and a
+ * per-command wall-clock kill. Within those, the factory runs whatever a developer
+ * would — `git checkout` to undo a bad edit, its own test/lint/build scripts,
+ * formatters, scratch node one-liners — without a declared-script allowlist.
+ *
+ * `shell: true` so command strings (pipes, `&&`, redirects) work as written; the
+ * worktree isolation + scrub + network block are what contain it, not arg parsing.
+ */
+export function createCommandRunner(
+  worktreeRoot: string,
+  env?: NodeJS.ProcessEnv,
+): { run(command: string, timeLimitMs?: number): Promise<ScriptResult> } {
+  return {
+    async run(command: string, timeLimitMs = DEFAULT_TIME_LIMIT_MS): Promise<ScriptResult> {
+      const cmd = command.trim();
+      if (cmd.length === 0) {
+        const msg = 'run_command: empty command.';
+        return Object.freeze({ ok: false, exitStatus: null, output: msg, fullOutput: msg, durationMs: 0, timedOut: false });
+      }
+      const blocked = networkCommandBlock(cmd);
+      if (blocked !== null) {
+        const msg =
+          `run_command: "${blocked}" reaches the network, which is blocked in the worktree. ` +
+          `Local work only — to publish, use the push_branch / open_pr boundary (it runs the ` +
+          `process-clean gate). Local git (status/diff/checkout/restore/add/commit/log/stash) is allowed.`;
+        return Object.freeze({ ok: false, exitStatus: null, output: msg, fullOutput: msg, durationMs: 0, timedOut: false });
+      }
+
+      const started = Date.now();
+      return new Promise<ScriptResult>((resolve) => {
+        const chunks: Buffer[] = [];
+        let settled = false;
+
+        const child = spawn(cmd, {
+          cwd: worktreeRoot,
+          shell: true, // command strings run as written; isolation+scrub+block contain it
+          stdio: ['ignore', 'pipe', 'pipe'],
+          ...(env !== undefined ? { env } : {}),
+        });
+
+        child.stdout?.on('data', (d: Buffer) => chunks.push(d));
+        child.stderr?.on('data', (d: Buffer) => chunks.push(d));
+
+        const timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          child.kill('SIGKILL');
+          const durationMs = Date.now() - started;
+          const fullOutput = Buffer.concat(chunks).toString('utf8');
+          resolve(Object.freeze({ ok: false, exitStatus: null, output: truncate(fullOutput), fullOutput, durationMs, timedOut: true }));
+        }, timeLimitMs);
+        timer.unref();
+
+        child.on('close', (code) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          const durationMs = Date.now() - started;
+          const fullOutput = Buffer.concat(chunks).toString('utf8');
+          const exitStatus = code ?? null;
+          resolve(Object.freeze({ ok: exitStatus === 0, exitStatus, output: truncate(fullOutput), fullOutput, durationMs, timedOut: false }));
+        });
+
+        child.on('error', (err) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          const durationMs = Date.now() - started;
+          resolve(Object.freeze({ ok: false, exitStatus: null, output: err.message, fullOutput: err.message, durationMs, timedOut: false }));
+        });
+      });
+    },
+  };
+}
+
+/**
+ * A ToolImpl wrapping a command runner. The model passes a `command` string;
+ * runs in the worktree under the four floors (see {@link createCommandRunner}).
+ */
+export function runCommandTool(runner: { run(command: string, timeLimitMs?: number): Promise<ScriptResult> }): {
+  def: { name: string; description: string; parameters: Record<string, unknown> };
+  execute(goal: import('../contract/goal.js').Goal, args: Record<string, unknown>): Promise<{ ok: boolean; output: string }>;
+} {
+  return {
+    def: {
+      name: 'run_command',
+      description:
+        'Run a shell command in the sandbox worktree (your isolated checkout). Use it like a ' +
+        'developer terminal: run your own tests/lint/build, format code, and use LOCAL git to ' +
+        'manage your work — `git status`, `git diff`, `git checkout <path>` / `git restore <path>` ' +
+        'to undo a bad edit, `git add`/`git commit` per chunk. The command runs with the worktree ' +
+        'as its working directory. Network access is blocked (no push/pull/fetch/clone, no curl/wget, ' +
+        'no package installs) — to publish, use push_branch/open_pr. A command is killed after a ' +
+        'wall-clock timeout, so scope test runs to what you changed rather than the whole suite.',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: 'The shell command to run in the worktree, e.g. "git checkout src/engine/engine.ts" or "npm run test -- tests/x.test.ts".' },
+        },
+        required: ['command'],
+      },
+    },
+    async execute(_goal, args) {
+      const command = String(args['command'] ?? '');
+      const result = await runner.run(command);
+      const statusLine = result.timedOut ? 'timed out' : result.exitStatus === null ? 'error' : `exit ${result.exitStatus}`;
+      return { ok: result.ok, output: `[run_command: ${command}] ${statusLine}\n${result.output}` };
+    },
+  };
+}
+
+/**
+ * Wraps a command runner so every run appends a `script-ran` event (the same event
+ * the declared-script runner logs), with the full command as the label.
+ */
+export function loggingCommandRunner(
+  store: EventStore,
+  runner: { run(command: string, timeLimitMs?: number): Promise<ScriptResult> },
+  goalId: string,
+  now: () => number = () => Date.now(),
+): { run(command: string, timeLimitMs?: number): Promise<ScriptResult> } {
+  return {
+    async run(command: string, timeLimitMs?: number): Promise<ScriptResult> {
+      const result = await runner.run(command, timeLimitMs);
+      const event: FactoryEvent = {
+        type: 'script-ran',
+        at: now(),
+        goalId,
+        command,
+        exitStatus: result.exitStatus,
+        durationMs: result.durationMs,
+        outputRef: `${goalId}:${command}:${now()}`,
+      };
+      await store.append(event);
+      return result;
+    },
+  };
+}
+
 /**
  * A ToolImpl whose execute function calls the runner with the `script` arg.
  * Exported for registration in the broker's injectable dispatch table; the

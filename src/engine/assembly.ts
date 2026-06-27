@@ -22,6 +22,9 @@ import {
   createScriptRunner,
   runScriptTool,
   loggingScriptRunner,
+  createCommandRunner,
+  runCommandTool,
+  loggingCommandRunner,
   type ScriptRunner,
   type DeclaredScripts,
 } from '../library/script-runner.js';
@@ -231,6 +234,22 @@ export async function openSandboxAssembly(
     };
   })();
 
+  // run_command (ADR-016 amendment): a general worktree shell bound to the same
+  // worktree root + scrubbed env as the declared-script runner, with the network/
+  // push block and per-command timeout enforced inside the runner. Grant-gated
+  // (repo.command) by the broker; logged per calling goal like run_script.
+  const commandRunner = createCommandRunner(root, scrubEnv());
+  const runCommandImpl: ToolImpl = (() => {
+    const base = runCommandTool(commandRunner);
+    return {
+      def: base.def,
+      async execute(goal: Goal, args: Record<string, unknown>) {
+        const perGoal = runCommandTool(loggingCommandRunner(store, commandRunner, goal.id, now));
+        return perGoal.execute(goal, args);
+      },
+    };
+  })();
+
   const fileTools = createFileTools(root);
 
   // ── Retrieval tools  ───────────────────────────────────────────────
@@ -293,6 +312,7 @@ export async function openSandboxAssembly(
       fileTools.search,
       fileTools.headSha,
       runScriptImpl,
+      runCommandImpl,
       ...knowledgeTools,
       ...prTools,
       issueTool,

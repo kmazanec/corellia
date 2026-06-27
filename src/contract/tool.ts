@@ -118,6 +118,12 @@ export const GRANT_TOOL_MAP = {
   write_file: ['fs.write'],
   delete_file: ['fs.write'],
   run_script: ['test.run_scoped', 'test.run_impacted'],
+  // A general worktree shell (ADR-016 amendment): runs arbitrary commands pinned
+  // to the sandbox worktree (cwd-locked, env-scrubbed, network/push-blocked,
+  // per-command timeout). Held by build leaves so they can use local git
+  // (checkout/restore/add/commit) and the repo's own scripts, not just the three
+  // declared entry points.
+  run_command: ['repo.command'],
   find_symbol: ['retrieval.api', 'fs.read'],
   find_exemplar: ['retrieval.api', 'fs.read'],
   conventions_for: ['retrieval.api', 'fs.read'],
