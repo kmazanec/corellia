@@ -106,21 +106,7 @@ import { recheckArtifactAfterRepair } from './attempt/recheck.js';
 import { emitSuccessfulArtifact } from './attempt/success.js';
 import { acceptSplitDecision } from './decision/split-acceptance.js';
 import { runTerracedScan } from './decision/terraced-scan.js';
-import {
-  appendChildSpawnedEvents,
-  buildSplitChildGoals,
-  runSplitChildren,
-} from './split-children.js';
-import {
-  buildSplitRoundReport,
-  childOutcomes,
-  promoteChildReports,
-} from './split-report.js';
-import {
-  judgeSplitIntegration,
-  mergeComprehendChildArtifacts,
-  mergeGenericChildArtifacts,
-} from './split-integration.js';
+import { runSplitRound, type SplitRoundResult } from './split-round.js';
 import {
   assessMilestoneRound,
   type RoundAssessment,
@@ -1692,105 +1678,24 @@ export class Engine {
     children: ChildPlan[],
     extraFindings: string[] = [],
     treeState: TreeState = createTreeState(),
-  ): Promise<{
-    report: Report;
-    mergedArtifact: Artifact | null;
-    passingCount: number;
-    /** Each child's plan paired with the report it produced, for the iterative
-     * caller (runMilestone) to locate the criteria child's artifact. The
-     * non-iterative caller (runSplit) ignores it. */
-    childOutcomes: { plan: ChildPlan; report: Report }[];
-  }> {
-    const t = this.now;
-
-    // The dive→build knowledge handoff (ADR-040) resolves the repo root once. The
-    // ACTUAL injection happens at child-run time (after a child's dependency dives
-    // have executed and persisted their RegionFacts), NOT here at construction — all
-    // child goals are built upfront before any sibling runs, so a dive's facts do not
-    // yet exist at this point (run live-self-c43b4f69: a builder got 0 dive memories
-    // because they were queried before the dives ran). See the run-time injection below.
-    const spawnSpecRepoRoot = (goal.spec as Record<string, unknown>)['repoRoot'];
-    const spawnRepoRoot =
-      this._activeAssembly?.worktree.repoRoot ??
-      (typeof spawnSpecRepoRoot === 'string' ? spawnSpecRepoRoot : '');
-
-    const childGoals = await buildSplitChildGoals({
-      parent: goal,
+  ): Promise<SplitRoundResult> {
+    return runSplitRound({
+      goal,
       children,
+      extraFindings,
       memory: this.memory,
-    });
-    await appendChildSpawnedEvents({
-      parent: goal,
-      children,
-      childGoals,
-      store: this.store,
-      now: t,
-    });
-    const childReports = await runSplitChildren({
-      parent: goal,
-      children,
-      childGoals,
-      store: this.store,
-      now: t,
-      repoRoot: spawnRepoRoot,
-      factsForRegions: this.knowledge?.factsForRegions,
-      headSha: this.knowledge?.headSha,
-      runChild: (childGoal) => this._run(childGoal, treeState),
-    });
-
-    // ── INTEGRATE ────────────────────────────────────────────────────────────
-    const comprehendMerge = await mergeComprehendChildArtifacts({
-      goal,
-      typeDef: this.registry.get(goal.type),
-      childReports,
-      activeRepoRoot: this._activeAssembly?.worktree.repoRoot,
-      headSha: this.knowledge?.headSha,
-      checkContext: this.checkContextFor(goal.id),
-      store: this.store,
-      now: t,
-      persist: (mergeGoal, artifact) => this.persistLeafKnowledge(mergeGoal, artifact),
-    });
-    const mergedArtifact =
-      comprehendMerge.kind === 'handled'
-        ? comprehendMerge.mergedArtifact
-        : mergeGenericChildArtifacts(childReports);
-    const comprehendFindings =
-      comprehendMerge.kind === 'handled' ? comprehendMerge.findings : [];
-    const comprehendBlockers =
-      comprehendMerge.kind === 'handled' ? comprehendMerge.blockers : [];
-
-    const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
-    const integration = await judgeSplitIntegration({
-      goal,
-      artifact: mergedArtifact,
       registry: this.registry,
       brain: this.brain,
       goldenCapture: this.goldenCapture,
       store: this.store,
-      now: t,
-      ...(brainConfig !== undefined ? { brainConfig } : {}),
+      now: this.now,
+      activeRepoRoot: this._activeAssembly?.worktree.repoRoot,
+      factsForRegions: this.knowledge?.factsForRegions,
+      headSha: this.knowledge?.headSha,
+      checkContext: this.checkContextFor(goal.id),
+      persist: (mergeGoal, artifact) => this.persistLeafKnowledge(mergeGoal, artifact),
+      runChild: (childGoal) => this._run(childGoal, treeState),
     });
-
-    const promotion = await promoteChildReports({
-      childGoals,
-      childReports,
-      store: this.store,
-      now: t,
-    });
-    const report = buildSplitRoundReport({
-      mergedArtifact,
-      childReports,
-      promotion,
-      extraFindings,
-      integrationFindings: integration.findings,
-      integrationBlockers: integration.blockers,
-      comprehendFindings,
-      comprehendBlockers,
-    });
-
-    // `passingCount` is computed by the iterative caller (runMilestone) against
-    // the round's worktree; a non-iterative split ignores it (0).
-    return { report, mergedArtifact, passingCount: 0, childOutcomes: childOutcomes(children, childReports) };
   }
 
   private async runSplit(
