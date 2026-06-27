@@ -70,10 +70,7 @@ import {
 } from './step-loop-result.js';
 import {
   blockedReport,
-  escalatedBrief,
   exhaustedBrief,
-  isomorphicBrief,
-  nonConvergenceBrief,
   unknownTypeBrief,
 } from './reports.js';
 import {
@@ -106,7 +103,9 @@ import {
 } from './decision/context.js';
 import { produceClassicArtifact } from './attempt/classic-produce.js';
 import { checkEmissionAuthority } from './attempt/emission-authority.js';
+import { resolveAttemptFailure } from './attempt/failure.js';
 import { runLeafTournament } from './attempt/leaf-tournament.js';
+import { recheckArtifactAfterRepair } from './attempt/recheck.js';
 import { emitSuccessfulArtifact } from './attempt/success.js';
 import {
   invalidSplitStructureVerdict,
@@ -1298,11 +1297,12 @@ export class Engine {
             };
             // Re-run checks on the repaired artifact immediately (repair is part of
             // the same attempt that produced the flawed artifact — no extra consume)
-            const recheck = await this.recheckAndJudge(
+            const recheck = await this.recheckArtifactAfterRepair(
               goal,
               resolution.artifact,
               budget,
               tier,
+              typeDef,
               treeState,
             );
             budget = recheck.budget;
@@ -1427,11 +1427,12 @@ export class Engine {
               verdict,
             };
             // Repair is part of the same attempt — no extra consume
-            const recheck = await this.recheckAndJudge(
+            const recheck = await this.recheckArtifactAfterRepair(
               goal,
               resolution.artifact,
               budget,
               tier,
+              typeDef,
               treeState,
             );
             budget = recheck.budget;
@@ -1886,64 +1887,31 @@ export class Engine {
     }
   }
 
-  /**
-   * Re-run all deterministic checks (and judge if applicable) on a repaired
-   * artifact. Returns whether it passed and the updated budget.
-   */
-  private async recheckAndJudge(
+  private async recheckArtifactAfterRepair(
     goal: Goal,
     artifact: Artifact,
     budget: Budget,
     tier: Tier,
+    typeDef: GoalTypeDef,
     treeState: TreeState = createTreeState(),
   ): Promise<{ passed: boolean; budget: Budget; verdict: Verdict | null; tier: Tier; ceiling?: true }> {
-    const t = this.now;
-    const typeDef = this.registry.get(goal.type);
-
-    const deterministicGate = await runDeterministicGate({
+    const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
+    return recheckArtifactAfterRepair({
       goal,
       artifact,
-      checks: typeDef.deterministic,
       budget,
-      checkContext: this.checkContextFor(goal.id),
+      tier,
+      typeDef,
+      registry: this.registry,
+      brain: this.brain,
       store: this.store,
-      now: t,
+      now: this.now,
+      checkContext: this.checkContextFor(goal.id),
+      goldenCapture: this.goldenCapture,
+      ...(brainConfig !== undefined ? { brainConfig } : {}),
+      debitUsage: (usage) => debitTreeState(treeState, usage),
+      hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
     });
-    budget = deterministicGate.budget;
-    if (deterministicGate.verdict !== null && !deterministicGate.verdict.pass) {
-      return { passed: false, budget, verdict: deterministicGate.verdict, tier };
-    }
-
-    // Re-run judge
-    if (typeDef.judgeType !== null) {
-      const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
-      const judgeResult = await judgeLeafArtifact({
-        goal,
-        artifact,
-        typeDef,
-        judgeType: typeDef.judgeType,
-        tier,
-        registry: this.registry,
-        brain: this.brain,
-        store: this.store,
-        now: t,
-        goldenCapture: this.goldenCapture,
-        ...(brainConfig !== undefined ? { brainConfig } : {}),
-      });
-      const verdict = judgeResult.verdict;
-
-      debitTreeState(treeState, judgeResult.usage);
-      // ceiling check after recheckAfterRepair judge debit.
-      if (hasReachedSpendCeiling(treeState)) {
-        return { passed: false, budget, verdict: null, tier, ceiling: true };
-      }
-
-      if (!verdict.pass) {
-        return { passed: false, budget, verdict, tier };
-      }
-    }
-
-    return { passed: true, budget, verdict: null, tier };
   }
 
   /**
@@ -1968,117 +1936,23 @@ export class Engine {
     | { kind: 'escalated'; tier: Tier; budget: Budget }
     | { kind: 'blocked'; report: Report }
   > {
-    const t = this.now;
-
-    // Check for escalated findings — human decision required
-    const escalatedFinding = verdict.findings.find(
-      (f) => f.gating && f.escalated,
-    );
-    if (escalatedFinding) {
-      const report = blockedReport(
-        `Escalated finding requires human decision: ${escalatedFinding.title}`,
-        verdict.findings.map((f) => f.title),
-      );
-      const brief = escalatedBrief(goal, escalatedFinding);
-      const resolution = this.effectiveOnBrief ? await this.effectiveOnBrief(brief) : brief.onTimeout;
-      await this.store.append({
-        type: 'blocked',
-        at: t(),
-        goalId: goal.id,
-        brief,
-        resolution,
-      });
-      await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
-      return { kind: 'blocked', report };
-    }
-
-    // Isomorphic failure check
-    if (
-      priorAttempt &&
-      verdict.failureSignature &&
-      priorAttempt.verdict.failureSignature === verdict.failureSignature
-    ) {
-      const report = blockedReport(
-        `Isomorphic failure detected (signature: ${verdict.failureSignature}) — escalating to block`,
-        verdict.findings.map((f) => f.title),
-      );
-      const brief = isomorphicBrief(goal, verdict.failureSignature);
-      const resolution = this.effectiveOnBrief ? await this.effectiveOnBrief(brief) : brief.onTimeout;
-      await this.store.append({
-        type: 'blocked',
-        at: t(),
-        goalId: goal.id,
-        brief,
-        resolution,
-      });
-      await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
-      return { kind: 'blocked', report };
-    }
-
-    // Repair rung: gating findings with prescriptions that are not escalated
-    const prescribedFindings = verdict.findings.filter(
-      (f) => f.gating && f.prescription && !f.escalated,
-    );
-
-    if (prescribedFindings.length > 0) {
-      const prescriptions = prescribedFindings.map((f) => f.prescription!);
-      const repairCtx: BrainContext = { tier, memories: goal.memories };
-      const repairResult = await this.brain.repair(
-        goal,
-        artifact,
-        prescriptions,
-        repairCtx,
-      );
-      const repairedArtifact = repairResult.value;
-      debitTreeState(treeState, repairResult.usage);
-      await this.store.append({
-        type: 'repair-applied',
-        at: t(),
-        goalId: goal.id,
-        prescriptions,
-        usage: repairResult.usage,
-      });
-      // ceiling check after handleFailure repair debit.
-      if (hasReachedSpendCeiling(treeState)) {
-        const ceilingRpt = await this.ceilingReport(goal, treeState);
-        return { kind: 'blocked', report: ceilingRpt };
-      }
-      return { kind: 'repaired', artifact: repairedArtifact, budget };
-    }
-
-    // No prescriptions → escalate tier
-    const nextTierIndex = tierIndex + 1;
-    if (nextTierIndex < tierLadder.length) {
-      const nextTier = tierLadder[nextTierIndex];
-      if (nextTier === undefined) {
-        // Ladder exhausted
-        return this.blockOnNonConvergence(goal);
-      }
-      await this.store.append({
-        type: 'tier-escalated',
-        at: t(),
-        goalId: goal.id,
-        from: tier,
-        to: nextTier,
-      });
-      return { kind: 'escalated', tier: nextTier, budget };
-    }
-
-    // Highest tier reached and the failure carried no actionable prescription:
-    // the goal cannot converge. This is a non-convergence terminator (the brain
-    // has nothing left to try), NOT a budget bound — budget never blocks work
-    // (ADR-033).
-    return this.blockOnNonConvergence(goal);
-  }
-
-  private async blockOnNonConvergence(
-    goal: Goal,
-  ): Promise<{ kind: 'blocked'; report: Report }> {
-    const report = await this.runBlock(
+    return resolveAttemptFailure({
       goal,
-      nonConvergenceBrief(goal),
-    );
-    return { kind: 'blocked', report };
+      artifact,
+      verdict,
+      budget,
+      tier,
+      tierIndex,
+      tierLadder,
+      priorAttempt,
+      brain: this.brain,
+      store: this.store,
+      now: this.now,
+      onBrief: this.effectiveOnBrief,
+      debitUsage: (usage) => debitTreeState(treeState, usage),
+      hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
+      onCeilingReached: async () => this.ceilingReport(goal, treeState),
+    });
   }
 
   // ── COVERAGE GATE (ADR-021) ────────────────────────────────────────────────
