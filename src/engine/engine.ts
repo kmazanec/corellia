@@ -106,6 +106,12 @@ import {
   shouldRunTerracedScan,
 } from './decision/context.js';
 import {
+  invalidSplitStructureVerdict,
+  isomorphicSplitFailure,
+  judgeSplitDecision,
+  splitPlanArtifact,
+} from './decision/split-eval.js';
+import {
   appendChildSpawnedEvents,
   buildSplitChildGoals,
   runSplitChildren,
@@ -824,24 +830,12 @@ export class Engine {
           // Structural violation of the split → fail verdict, re-decide with
           // priorAttempt carrying the rejection
           budget = await debitAttempt({ budget, goal, store: this.store, now: t });
-          const failVerdict: Verdict = {
-            pass: false,
-            findings: [
-              {
-                title: 'Invalid split structure',
-                dimension: 'spec',
-                severity: 'high',
-                gating: true,
-                prescription: structErr,
-              },
-            ],
-            failureSignature: `invalid-split:${structErr}`,
-          };
+          const failVerdict = invalidSplitStructureVerdict(structErr);
 
           // Isomorphic failure check: the same structural violation twice in a
           // row is non-convergence, not budget exhaustion — that is the real
           // terminator here (ADR-033). The attempts counter never terminates.
-          if (priorVerdict && priorVerdict.failureSignature === failVerdict.failureSignature) {
+          if (isomorphicSplitFailure(priorVerdict, failVerdict)) {
             const report = blockedReport(
               `Isomorphic split structural failure (signature: ${failVerdict.failureSignature})`,
             );
@@ -851,14 +845,10 @@ export class Engine {
           priorVerdict = failVerdict;
 
           // Re-decide with failure context
-          const splitPlanArtifact: Artifact = {
-            kind: 'text',
-            text: JSON.stringify(decision.children),
-          };
           const reDecideCtx: BrainContext = {
             tier: currentTier,
             memories: goal.memories,
-            priorAttempt: { artifact: splitPlanArtifact, verdict: failVerdict },
+            priorAttempt: { artifact: splitPlanArtifact(decision.children), verdict: failVerdict },
           };
           const reDecideResult = await this.brain.decide(goal, reDecideCtx);
           decision = reDecideResult.value;
@@ -890,37 +880,20 @@ export class Engine {
 
         // Structure is valid. If there is a judge-split type, judge the split.
         if (this.registry.has('judge-split')) {
-          const splitPlanArtifact: Artifact = {
-            kind: 'text',
-            text: JSON.stringify(decision.children),
-          };
-          const rubric = enrichRubric(this.registry,
-            'Evaluate the split: is it sound and complete? Are dependencies correct and acyclic? Are budgetShares sensible?',
-            'judge-split',
-            goal.intent,
-          );
-          const judgeCtx: BrainContext = {
-            tier: currentTier,
-            memories: goal.memories,
-          };
-          const splitJudgeResult = await this.brain.judge(
+          const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
+          const splitJudgeResult = await judgeSplitDecision({
             goal,
-            splitPlanArtifact,
-            rubric,
-            judgeCtx,
-          );
-          const splitVerdict = splitJudgeResult.value;
-          debitTreeState(treeState, splitJudgeResult.usage);
-          await this.store.append({
-            type: 'judge-verdict',
-            at: t(),
-            goalId: goal.id,
-            judgeType: 'judge-split',
-            verdict: splitVerdict,
+            children: decision.children,
             tier: currentTier,
-            usage: splitJudgeResult.usage,
+            registry: this.registry,
+            brain: this.brain,
+            store: this.store,
+            now: t,
+            goldenCapture: this.goldenCapture,
+            ...(brainConfig !== undefined ? { brainConfig } : {}),
           });
-          await this.maybeAppendGoldenCandidate(goal.id, 'judge-split', splitPlanArtifact, rubric, splitVerdict, currentTier);
+          const splitVerdict = splitJudgeResult.verdict;
+          debitTreeState(treeState, splitJudgeResult.usage);
           if (hasReachedSpendCeiling(treeState)) {
             return this.ceilingReport(goal, treeState);
           }
@@ -933,10 +906,7 @@ export class Engine {
             // distinguish the rounds — the re-decide is not converging. This is a
             // non-convergence terminator, NOT a budget bound (ADR-033): without
             // it a signature-less repeated failure would loop until wall-clock.
-            const isomorphic =
-              priorVerdict !== undefined &&
-              splitVerdict.failureSignature === priorVerdict.failureSignature;
-            if (isomorphic) {
+            if (isomorphicSplitFailure(priorVerdict, splitVerdict)) {
               const sig = splitVerdict.failureSignature ?? 'unsignatured';
               const report = blockedReport(
                 `Isomorphic split failure (signature: ${sig})`,
@@ -960,15 +930,11 @@ export class Engine {
             priorVerdict = splitVerdict;
 
             // Re-decide carrying the rejected split
-            const splitPlanWithFailure: Artifact = {
-              kind: 'text',
-              text: JSON.stringify(decision.children),
-            };
             const reDecideCtx2: BrainContext = {
               tier: currentTier,
               memories: goal.memories,
               priorAttempt: {
-                artifact: splitPlanWithFailure,
+                artifact: splitPlanArtifact(decision.children),
                 verdict: splitVerdict,
               },
             };
@@ -1107,11 +1073,6 @@ export class Engine {
     };
 
     const candidates: Candidate[] = [];
-    const rubric = enrichRubric(this.registry,
-      'Evaluate the split: is it sound and complete? Are dependencies correct and acyclic? Are budgetShares sensible?',
-      'judge-split',
-      goal.intent,
-    );
 
     for (let i = 0; i < k; i++) {
       const lens = lenses[i % lenses.length] ?? lenses[0]!;
@@ -1130,28 +1091,24 @@ export class Engine {
         return { decision: candidate, loserFindings: [], winnerUsage: decideResult.usage };
       }
 
-      const splitArtifact: Artifact = {
-        kind: 'text',
-        text: JSON.stringify(candidate.children),
-      };
-      const judgeCtx: BrainContext = { tier: currentTier, memories: goal.memories };
-      const judgeResult = await this.brain.judge(goal, splitArtifact, rubric, judgeCtx);
-      const verdict = judgeResult.value;
+      const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
+      const judgeResult = await judgeSplitDecision({
+        goal,
+        children: candidate.children,
+        tier: currentTier,
+        registry: this.registry,
+        brain: this.brain,
+        store: this.store,
+        now: t,
+        goldenCapture: this.goldenCapture,
+        ...(brainConfig !== undefined ? { brainConfig } : {}),
+      });
+      const verdict = judgeResult.verdict;
       debitTreeState(treeState, judgeResult.usage);
       // ceiling check after each terraced-scan judge debit.
       if (hasReachedSpendCeiling(treeState)) {
         return { ceiling: true };
       }
-      await this.store.append({
-        type: 'judge-verdict',
-        at: t(),
-        goalId: goal.id,
-        judgeType: 'judge-split',
-        verdict,
-        tier: currentTier,
-        usage: judgeResult.usage,
-      });
-      await this.maybeAppendGoldenCandidate(goal.id, 'judge-split', splitArtifact, rubric, verdict, currentTier);
 
       candidates.push({ decision: candidate, verdict, lens, decideUsage: decideResult.usage, judgeUsage: judgeResult.usage });
     }
@@ -1189,13 +1146,12 @@ export class Engine {
     const bestLoser = candidates.reduce((best, c) =>
       c.verdict.findings.length < best.verdict.findings.length ? c : best,
     );
-    const fallbackArtifact: Artifact = {
-      kind: 'text',
-      text: JSON.stringify(bestLoser.decision.children),
-    };
     const fallbackCtx: BrainContext = {
       ...baseCtx,
-      priorAttempt: { artifact: fallbackArtifact, verdict: bestLoser.verdict },
+      priorAttempt: {
+        artifact: splitPlanArtifact(bestLoser.decision.children),
+        verdict: bestLoser.verdict,
+      },
     };
     const fallbackResult = await this.brain.decide(goal, fallbackCtx);
     debitTreeState(treeState, fallbackResult.usage);
