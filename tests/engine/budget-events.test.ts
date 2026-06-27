@@ -1,9 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { ZERO_USAGE } from '../../src/contract/goal.js';
-import { debitTokenCount, debitTokenUsage } from '../../src/engine/budget-events.js';
+import { debitAttempt, debitTokenCount, debitTokenUsage } from '../../src/engine/budget-events.js';
 import { MemoryEventStore, makeGoal } from './stubs.js';
 
 describe('budget events', () => {
+  it('debits attempts and emits exhaustion when attempts cross zero', async () => {
+    const store = new MemoryEventStore();
+    const goal = makeGoal({ budget: { attempts: 1, tokens: 10, toolCalls: 1, wallClockMs: 1 } });
+
+    const budget = await debitAttempt({
+      budget: goal.budget,
+      goal,
+      store,
+      now: () => 0,
+    });
+
+    expect(budget.attempts).toBe(0);
+    expect((await store.list()).map((event) => event.type)).toEqual(['budget-exhausted']);
+  });
+
   it('debits token usage and emits exhaustion when the counter crosses zero', async () => {
     const store = new MemoryEventStore();
     const goal = makeGoal({ budget: { attempts: 1, tokens: 10, toolCalls: 1, wallClockMs: 1 } });

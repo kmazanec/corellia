@@ -1,6 +1,24 @@
 import type { EventStore } from '../contract/events.js';
 import type { Budget, Goal, Usage } from '../contract/goal.js';
-import { consumeN } from './budget.js';
+import { consume, consumeN } from './budget.js';
+
+export async function debitAttempt(params: {
+  budget: Budget;
+  goal: Goal;
+  store: EventStore;
+  now: () => number;
+}): Promise<Budget> {
+  const consumed = consume(params.budget, 'attempts');
+  if (consumed.exhausted) {
+    await params.store.append({
+      type: 'budget-exhausted',
+      at: params.now(),
+      goalId: params.goal.id,
+      dimension: 'attempts',
+    });
+  }
+  return consumed.budget;
+}
 
 export async function debitTokenUsage(params: {
   budget: Budget;

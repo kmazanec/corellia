@@ -25,8 +25,7 @@ import type { MemoryView } from '../contract/memory.js';
 import type { RiskClass, SensitivityFact } from '../contract/risk.js';
 import type { PatternStore } from '../contract/pattern.js';
 import type { ToolBroker, ToolDef } from '../contract/tool.js';
-import { consume } from './budget.js';
-import { debitTokenCount, debitTokenUsage } from './budget-events.js';
+import { debitAttempt, debitTokenCount, debitTokenUsage } from './budget-events.js';
 import { lintLibrary } from '../library/constitution.js';
 import { loadFamilySkill } from '../library/skills.js';
 import { classifyRisk } from '../library/risk.js';
@@ -822,16 +821,7 @@ export class Engine {
         if (structErr) {
           // Structural violation of the split → fail verdict, re-decide with
           // priorAttempt carrying the rejection
-          const consumed = consume(budget, 'attempts');
-          budget = consumed.budget;
-          if (consumed.exhausted) {
-            await this.store.append({
-              type: 'budget-exhausted',
-              at: t(),
-              goalId: goal.id,
-              dimension: 'attempts',
-            });
-          }
+          budget = await debitAttempt({ budget, goal, store: this.store, now: t });
           const failVerdict: Verdict = {
             pass: false,
             findings: [
@@ -934,11 +924,7 @@ export class Engine {
           }
 
           if (!splitVerdict.pass) {
-            const consumed = consume(budget, 'attempts');
-            budget = consumed.budget;
-            if (consumed.exhausted) {
-              await this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'attempts' });
-            }
+            budget = await debitAttempt({ budget, goal, store: this.store, now: t });
 
             // Non-convergence check: the split judge failed again. If it repeats
             // the same failure signature — or fails twice with no signature to
@@ -1271,16 +1257,7 @@ export class Engine {
       // Attempts is an observability counter, not a terminator (ADR-033). Emit
       // the budget-exhausted signal once it crosses zero, then keep going — the
       // dollar ceiling and wall-clock (checked above) are the only hard bounds.
-      const consumed = consume(budget, 'attempts');
-      budget = consumed.budget;
-      if (consumed.exhausted) {
-        await this.store.append({
-          type: 'budget-exhausted',
-          at: t(),
-          goalId: goal.id,
-          dimension: 'attempts',
-        });
-      }
+      budget = await debitAttempt({ budget, goal, store: this.store, now: t });
 
       const ctx: BrainContext = priorAttempt
         ? { tier, memories: goal.memories, priorAttempt }
