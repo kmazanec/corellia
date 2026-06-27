@@ -56,7 +56,6 @@ import { repoShapeHint as buildRepoShapeHint } from './repo-shape-hint.js';
 import { applyRootEmissionGate } from './root-emission-gate.js';
 import { finalizeSandboxedRun } from './sandbox-finalization.js';
 import { runSplitDispatch } from './split-dispatch.js';
-import { appendGoldenCandidate } from './judge-support.js';
 import { enterGoal } from './goal-entry.js';
 import { produceAttemptArtifact } from './attempt/artifact-production.js';
 import { evaluateAttemptArtifact } from './attempt/artifact-evaluation.js';
@@ -680,38 +679,6 @@ export class Engine {
       }
       return evaluation.report;
     }
-  }
-
-  /**
-   * Append a `golden-candidate` event when goldenCapture is enabled (ADR-024).
-   * The artifact and rubric are referenced by sha1 digest so the log does not
-   * duplicate large payloads. The model is read from the brain config if the
-   * brain exposes a `config.modelByTier` shape (LlmBrain); otherwise omitted.
-   *
-   * Called at every judge-verdict emission site, ONLY when this.goldenCapture
-   * is true (discriminates live runs from scripted tests).
-   */
-  private async maybeAppendGoldenCandidate(
-    goalId: string,
-    judgeType: string,
-    artifact: Artifact,
-    rubric: string,
-    verdict: Verdict,
-    tier: Tier,
-  ): Promise<void> {
-    const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
-    await appendGoldenCandidate({
-      enabled: this.goldenCapture,
-      store: this.store,
-      now: this.now,
-      goalId,
-      judgeType,
-      artifact,
-      rubric,
-      verdict,
-      tier,
-      ...(brainConfig !== undefined ? { brainConfig } : {}),
-    });
   }
 
   private async recheckArtifactAfterRepair(
