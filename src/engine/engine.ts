@@ -111,6 +111,7 @@ import {
   judgeSplitDecision,
   splitPlanArtifact,
 } from './decision/split-eval.js';
+import { runTerracedScan } from './decision/terraced-scan.js';
 import {
   appendChildSpawnedEvents,
   buildSplitChildGoals,
@@ -716,7 +717,22 @@ export class Engine {
           // The winning candidate (first pass, tie-broken by fewest findings)
           // becomes the decision; losers are collected as low-severity findings
           // ("alternatives considered") and surfaced in the split report.
-          const scanResult = await this.runTerracedScan(goal, scan.k, scan.lenses, baseCtx, currentTier, shape, treeState);
+          const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
+          const scanResult = await runTerracedScan({
+            goal,
+            k: scan.k,
+            lenses: scan.lenses,
+            baseCtx,
+            tier: currentTier,
+            brain: this.brain,
+            registry: this.registry,
+            store: this.store,
+            now: t,
+            goldenCapture: this.goldenCapture,
+            ...(brainConfig !== undefined ? { brainConfig } : {}),
+            debitUsage: (usage) => debitTreeState(treeState, usage),
+            hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
+          });
           if ('ceiling' in scanResult) {
             return this.ceilingReport(goal, treeState);
           }
@@ -1032,134 +1048,6 @@ export class Engine {
       case 'block':
         return this.runBlock(goal, decision.brief);
     }
-  }
-
-  // ── TERRACED SCAN ─────────────────────────────────────────────────────────
-  /**
-   * Generate k lens-diverse candidate splits for a novel shape, rank them with
-   * judge-split, and return the winning decision alongside low-severity findings
-   * that describe each losing candidate ("alternative considered").
-   *
-   * Candidates are lens-diverse, not k identical rolls of the same prompt — each
-   * call uses a different lens (an architect's cut, a reuse-maximising cut, a
-   * contrarian's cut) so that the tournament catches failure modes redundancy
-   * cannot. The winner is the first candidate whose judge-split verdict passes,
-   * tie-broken by fewest findings. Losing candidates are returned as low-severity,
-   * non-gating findings (dimension 'spec') so they surface in the split report as
-   * "alternatives considered" — explored, not retrofitted. No extra `decided`
-   * events are emitted for losers; only the winner's single `decided` (at the
-   * normal DISPATCH path) is the authority record.
-   *
-   * When no candidate passes, the scan falls through to a plain single-derive
-   * call whose BrainContext carries the best candidate's verdict as priorAttempt,
-   * so the brain can use what the tournament learned.
-   */
-  private async runTerracedScan(
-    goal: Goal,
-    k: number,
-    lenses: string[],
-    baseCtx: BrainContext,
-    currentTier: Tier,
-    _shape: string,
-    treeState: TreeState,
-  ): Promise<{ decision: Decision; loserFindings: string[]; winnerUsage?: Usage } | { ceiling: true }> {
-    const t = this.now;
-    type Candidate = {
-      decision: Extract<Decision, { kind: 'split' }>;
-      verdict: Verdict;
-      lens: string;
-      decideUsage: Usage;
-      judgeUsage: Usage;
-    };
-
-    const candidates: Candidate[] = [];
-
-    for (let i = 0; i < k; i++) {
-      const lens = lenses[i % lenses.length] ?? lenses[0]!;
-      const lensCtx: BrainContext = { ...baseCtx, lens };
-      const decideResult = await this.brain.decide(goal, lensCtx);
-      const candidate = decideResult.value;
-      debitTreeState(treeState, decideResult.usage);
-      // ceiling check after each terraced-scan decide debit.
-      if (hasReachedSpendCeiling(treeState)) {
-        return { ceiling: true };
-      }
-
-      if (candidate.kind !== 'split') {
-        // A candidate that is not a split is itself a meaningful decision —
-        // return it immediately (satisfy or block beats an uncertain tournament).
-        return { decision: candidate, loserFindings: [], winnerUsage: decideResult.usage };
-      }
-
-      const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
-      const judgeResult = await judgeSplitDecision({
-        goal,
-        children: candidate.children,
-        tier: currentTier,
-        registry: this.registry,
-        brain: this.brain,
-        store: this.store,
-        now: t,
-        goldenCapture: this.goldenCapture,
-        ...(brainConfig !== undefined ? { brainConfig } : {}),
-      });
-      const verdict = judgeResult.verdict;
-      debitTreeState(treeState, judgeResult.usage);
-      // ceiling check after each terraced-scan judge debit.
-      if (hasReachedSpendCeiling(treeState)) {
-        return { ceiling: true };
-      }
-
-      candidates.push({ decision: candidate, verdict, lens, decideUsage: decideResult.usage, judgeUsage: judgeResult.usage });
-    }
-
-    // Rank: first passing verdict wins; tie-break by fewest findings.
-    const passing = candidates.filter((c) => c.verdict.pass);
-
-    let winner: Candidate | undefined;
-    if (passing.length > 0) {
-      winner = passing.reduce((best, c) =>
-        c.verdict.findings.length < best.verdict.findings.length ? c : best,
-      );
-    }
-
-    // Collect losing candidates as advisory findings — explored paths the
-    // tournament did not select. They surface in the split report without
-    // blocking it (gating: false, severity: low).
-    const losers = winner
-      ? candidates.filter((c) => c !== winner)
-      : candidates;
-
-    const loserFindings: string[] = losers.map((loser) => {
-      const summary = loser.verdict.findings.length > 0
-        ? loser.verdict.findings[0]!.title
-        : (loser.verdict.pass ? 'passed' : 'failed judge');
-      return `alternative considered (lens=${loser.lens}): ${summary}`;
-    });
-
-    if (winner !== undefined) {
-      return { decision: winner.decision, loserFindings, winnerUsage: winner.decideUsage };
-    }
-
-    // No candidate passed — fall through to a normal single-derive call
-    // carrying the best candidate's verdict so the brain learns from the scan.
-    const bestLoser = candidates.reduce((best, c) =>
-      c.verdict.findings.length < best.verdict.findings.length ? c : best,
-    );
-    const fallbackCtx: BrainContext = {
-      ...baseCtx,
-      priorAttempt: {
-        artifact: splitPlanArtifact(bestLoser.decision.children),
-        verdict: bestLoser.verdict,
-      },
-    };
-    const fallbackResult = await this.brain.decide(goal, fallbackCtx);
-    debitTreeState(treeState, fallbackResult.usage);
-    // ceiling check after terraced-scan fallback debit.
-    if (hasReachedSpendCeiling(treeState)) {
-      return { ceiling: true };
-    }
-    return { decision: fallbackResult.value, loserFindings, winnerUsage: fallbackResult.usage };
   }
 
   /**
