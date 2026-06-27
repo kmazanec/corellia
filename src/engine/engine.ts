@@ -88,6 +88,7 @@ import {
 import { checkpointVerifyArtifacts } from './coverage-checkpoint.js';
 import { appendGoldenCandidate, enrichRubric } from './judge-support.js';
 import { runAuthorityGate } from './authority-gate.js';
+import { runDeterministicGate } from './deterministic-gate.js';
 import {
   appendChildSpawnedEvents,
   buildSplitChildGoals,
@@ -1468,70 +1469,36 @@ export class Engine {
       }
 
       // ── DETERMINISTIC CHECKS ───────────────────────────────────────────
-      let deterministicVerdict: Verdict | null = null;
-      if (typeDef.deterministic.length > 0) {
-        const findings: Finding[] = [];
-        let allOk = true;
-        let toolCallsUsed = 0;
-
-        const checkCtx = this.checkContextFor(goal.id);
-        for (const check of typeDef.deterministic) {
-          toolCallsUsed++;
-          const result = await check.run(goal, artifact, checkCtx);
-          if (!result.ok) {
-            allOk = false;
-            // Deterministic checks produce objective failures — detail is usually
-            // an explanation, not a repair prescription, so the repair rung (for
-            // judge findings with prescriptions) is skipped and the tier escalates.
-            // But a check MAY supply a `prescription` when its failure is
-            // mechanically repairable (e.g. a dive anchor past EOF names the exact
-            // fix). When it does, carry it onto the finding so handleFailure routes
-            // through repair-within-attempt (ADR-006) instead of escalating the
-            // tier into the same failure (run live-self-a6963719).
-            findings.push({
-              title: `${check.name}: ${result.detail}`,
-              dimension: 'spec',
-              severity: 'high',
-              gating: true,
-              ...(result.prescription !== undefined ? { prescription: result.prescription } : {}),
-            });
-          }
-        }
-
+      const deterministicGate = await runDeterministicGate({
+        goal,
+        artifact,
+        checks: typeDef.deterministic,
+        budget,
+        checkContext: this.checkContextFor(goal.id),
+        store: this.store,
+        now: t,
+      });
+      budget = deterministicGate.budget;
+      if (deterministicGate.verdict !== null) {
         // Track tool calls spent. toolCalls exhaustion is WARN-ONLY by default
         // (ADR-030 / enforceToolCallBudget) — emit the signal but do not block
         // unless an operator armed enforcement. This site previously blocked
         // unconditionally, inconsistent with the step loop; a deep comprehension
         // node (with toolCalls now inherited, not floored) should not be killed
         // on the count.
-        const tcConsumed = consumeN(budget, 'toolCalls', toolCallsUsed);
-        budget = tcConsumed.budget;
-        if (tcConsumed.exhausted) {
+        if (deterministicGate.toolCallsExhausted) {
           await this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'toolCalls' });
           if (this.enforceToolCallBudget) {
             return this.runBlock(goal, exhaustedBrief(goal, 'toolCalls'));
           }
         }
 
-        deterministicVerdict = {
-          pass: allOk,
-          findings,
-          ...(allOk ? {} : { failureSignature: `deterministic:${findings.map((f) => f.title).join(',')}` }),
-        };
-
-        await this.store.append({
-          type: 'deterministic-checked',
-          at: t(),
-          goalId: goal.id,
-          verdict: deterministicVerdict,
-        });
-
-        if (!deterministicVerdict.pass) {
+        if (!deterministicGate.verdict.pass) {
           // Deterministic fail → try repair rung, then escalate, never judge
           const resolution = await this.handleFailure(
             goal,
             artifact,
-            deterministicVerdict,
+            deterministicGate.verdict,
             budget,
             tier,
             tierIndex,
@@ -1545,7 +1512,7 @@ export class Engine {
             budget = resolution.budget;
             priorAttempt = {
               artifact: resolution.artifact,
-              verdict: deterministicVerdict,
+              verdict: deterministicGate.verdict,
             };
             // Re-run checks on the repaired artifact immediately (repair is part of
             // the same attempt that produced the flawed artifact — no extra consume)
@@ -1592,8 +1559,8 @@ export class Engine {
             priorAttempt = {
               artifact,
               verdict: stepLoopTailFinding !== null
-                ? { ...deterministicVerdict, findings: [stepLoopTailFinding, ...deterministicVerdict.findings] }
-                : deterministicVerdict,
+                ? { ...deterministicGate.verdict, findings: [stepLoopTailFinding, ...deterministicGate.verdict.findings] }
+                : deterministicGate.verdict,
             };
             // Carry the successful step-loop transcript so the next attempt
             // sees what was read/learned even though the deterministic gate failed.
@@ -2287,46 +2254,18 @@ export class Engine {
     const t = this.now;
     const typeDef = this.registry.get(goal.type);
 
-    // Re-run deterministic
-    if (typeDef.deterministic.length > 0) {
-      const findings: Finding[] = [];
-      let allOk = true;
-      let toolCallsUsed = 0;
-
-      const recheckCtx = this.checkContextFor(goal.id);
-      for (const check of typeDef.deterministic) {
-        toolCallsUsed++;
-        const result = await check.run(goal, artifact, recheckCtx);
-        if (!result.ok) {
-          allOk = false;
-          findings.push({
-            title: `${check.name}: ${result.detail}`,
-            dimension: 'spec',
-            severity: 'high',
-            gating: true,
-          });
-        }
-      }
-
-      const tcConsumed = consumeN(budget, 'toolCalls', toolCallsUsed);
-      budget = tcConsumed.budget;
-
-      const detVerdict: Verdict = {
-        pass: allOk,
-        findings,
-        ...(allOk ? {} : { failureSignature: `deterministic:${findings.map((f) => f.title).join(',')}` }),
-      };
-
-      await this.store.append({
-        type: 'deterministic-checked',
-        at: t(),
-        goalId: goal.id,
-        verdict: detVerdict,
-      });
-
-      if (!detVerdict.pass) {
-        return { passed: false, budget, verdict: detVerdict, tier };
-      }
+    const deterministicGate = await runDeterministicGate({
+      goal,
+      artifact,
+      checks: typeDef.deterministic,
+      budget,
+      checkContext: this.checkContextFor(goal.id),
+      store: this.store,
+      now: t,
+    });
+    budget = deterministicGate.budget;
+    if (deterministicGate.verdict !== null && !deterministicGate.verdict.pass) {
+      return { passed: false, budget, verdict: deterministicGate.verdict, tier };
     }
 
     // Re-run judge
