@@ -25,7 +25,8 @@ import type { MemoryView } from '../contract/memory.js';
 import type { RiskClass, SensitivityFact } from '../contract/risk.js';
 import type { PatternStore } from '../contract/pattern.js';
 import type { ToolBroker, ToolDef } from '../contract/tool.js';
-import { consume, consumeN } from './budget.js';
+import { consume } from './budget.js';
+import { debitTokenCount, debitTokenUsage } from './budget-events.js';
 import { lintLibrary } from '../library/constitution.js';
 import { loadFamilySkill } from '../library/skills.js';
 import { classifyRisk } from '../library/risk.js';
@@ -1347,14 +1348,13 @@ export class Engine {
           // Track accumulated step token usage on the tokens counter for
           // observability (ADR-033). Tokens never block work; the dollar ceiling
           // is the real bound on spend, enforced by the step loop's ceiling check.
-          const stepTokens = loopResult.tokensUsed;
-          if (stepTokens > 0) {
-            const tkConsumed = consumeN(budget, 'tokens', stepTokens);
-            budget = tkConsumed.budget;
-            if (tkConsumed.exhausted) {
-              await this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'tokens' });
-            }
-          }
+          budget = await debitTokenCount({
+            budget,
+            tokens: loopResult.tokensUsed,
+            goal,
+            store: this.store,
+            now: t,
+          });
         } else {
           // exhausted or thrown — fail into the control loop
           if (loopResult.kind === 'exhausted') {
@@ -1430,14 +1430,13 @@ export class Engine {
         // Track reported tokens on the tokens counter for observability
         // (ADR-033). Tokens never block work; the dollar ceiling (checked above)
         // is the real bound on spend.
-        const produceTokens = produceResult.usage.promptTokens + produceResult.usage.completionTokens;
-        if (produceTokens > 0) {
-          const tkConsumed = consumeN(budget, 'tokens', produceTokens);
-          budget = tkConsumed.budget;
-          if (tkConsumed.exhausted) {
-            await this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'tokens' });
-          }
-        }
+        budget = await debitTokenUsage({
+          budget,
+          usage: produceResult.usage,
+          goal,
+          store: this.store,
+          now: t,
+        });
 
         // ── LEAF TOURNAMENT (F-65 A9) ───────────────────────────────────────
         // When the type declares scan.k > 1 and has a judgeType, run a
@@ -1629,14 +1628,13 @@ export class Engine {
         // Track reported tokens on the tokens counter for observability
         // (ADR-033). Tokens never block work; the dollar ceiling (checked above)
         // is the real bound on spend.
-        const judgeTokens = judgeResult.usage.promptTokens + judgeResult.usage.completionTokens;
-        if (judgeTokens > 0) {
-          const tkConsumed = consumeN(budget, 'tokens', judgeTokens);
-          budget = tkConsumed.budget;
-          if (tkConsumed.exhausted) {
-            await this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'tokens' });
-          }
-        }
+        budget = await debitTokenUsage({
+          budget,
+          usage: judgeResult.usage,
+          goal,
+          store: this.store,
+          now: t,
+        });
 
         if (!verdict.pass) {
           const resolution = await this.handleFailure(
@@ -1794,15 +1792,14 @@ export class Engine {
         // (ADR-033). Tokens never cut the tournament short — the full k
         // candidates always run; the dollar ceiling (checked above) and
         // wall-clock are the only bounds. Emit the signal once on crossing zero.
-        const produceTokens = produceResult.usage.promptTokens + produceResult.usage.completionTokens;
-        if (produceTokens > 0) {
-          const tkConsumed = consumeN(budget, 'tokens', produceTokens);
-          const wasExhausted = budget.tokens <= 0;
-          budget = tkConsumed.budget;
-          if (tkConsumed.exhausted && !wasExhausted) {
-            await this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'tokens' });
-          }
-        }
+        budget = await debitTokenUsage({
+          budget,
+          usage: produceResult.usage,
+          goal,
+          store: this.store,
+          now: t,
+          emitOnlyOnCrossing: true,
+        });
       }
 
       // Judge this candidate.
