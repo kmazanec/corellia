@@ -92,9 +92,9 @@ import {
 import { produceClassicArtifact } from './attempt/classic-produce.js';
 import { checkEmissionAuthority } from './attempt/emission-authority.js';
 import { resolveAttemptFailure } from './attempt/failure.js';
+import { transitionArtifactFailure } from './attempt/failure-transition.js';
 import { runLeafTournament } from './attempt/leaf-tournament.js';
 import { recheckArtifactAfterRepair } from './attempt/recheck.js';
-import { finishRepairedAttempt } from './attempt/repair-flow.js';
 import { emitSuccessfulArtifact } from './attempt/success.js';
 import { acceptSplitDecision } from './decision/split-acceptance.js';
 import { runTerracedScan } from './decision/terraced-scan.js';
@@ -1149,76 +1149,60 @@ export class Engine {
         }
 
         if (!deterministicGate.verdict.pass) {
-          // Deterministic fail → try repair rung, then escalate, never judge
-          const resolution = await this.handleFailure(
+          const failure = await transitionArtifactFailure({
             goal,
             artifact,
-            deterministicGate.verdict,
+            verdict: deterministicGate.verdict,
             budget,
             tier,
             tierIndex,
             tierLadder,
             priorAttempt,
-            treeState,
-          );
-
-          if (resolution.kind === 'repaired') {
-            const repaired = await finishRepairedAttempt({
-              goal,
-              repair: resolution,
-              tier,
-              recheck: (repairedArtifact, repairedBudget, repairedTier) =>
-                this.recheckArtifactAfterRepair(
-                  goal,
-                  repairedArtifact,
-                  repairedBudget,
-                  repairedTier,
-                  typeDef,
-                  treeState,
-                ),
-              emitSuccess: (successArtifact) =>
-                emitSuccessfulArtifact({
-                  goal,
-                  artifact: successArtifact,
-                  store: this.store,
-                  now: t,
-                  persist: (persistGoal, persistArtifact) =>
-                    this.persistLeafKnowledge(persistGoal, persistArtifact),
-                }),
-            });
-            if (repaired.kind === 'ceiling') {
-              return this.ceilingReport(goal, treeState);
-            }
-            if (repaired.kind === 'emitted') {
-              return repaired.report;
-            }
-            budget = repaired.budget;
-            priorAttempt = repaired.priorAttempt;
-            if (repaired.tier !== tier) {
-              tier = repaired.tier;
-              tierIndex = tierLadder.indexOf(tier);
-            }
-            continue;
-          } else if (resolution.kind === 'escalated') {
-            tier = resolution.tier;
-            tierIndex = tierLadder.indexOf(tier);
-            budget = resolution.budget;
-            // Thread the transcript tail finding into the verdict so the next
-            // attempt's BrainContext carries step-loop evidence.
-            priorAttempt = {
-              artifact,
-              verdict: stepLoopTailFinding !== null
-                ? { ...deterministicGate.verdict, findings: [stepLoopTailFinding, ...deterministicGate.verdict.findings] }
-                : deterministicGate.verdict,
-            };
-            // Carry the successful step-loop transcript so the next attempt
-            // sees what was read/learned even though the deterministic gate failed.
-            priorLoopTranscript = stepLoopTranscriptTail;
-            continue;
-          } else {
-            // blocked
-            return resolution.report;
+            stepLoopTailFinding,
+            stepLoopTranscriptTail,
+            resolveFailure: () =>
+              this.handleFailure(
+                goal,
+                artifact,
+                deterministicGate.verdict!,
+                budget,
+                tier,
+                tierIndex,
+                tierLadder,
+                priorAttempt,
+                treeState,
+              ),
+            recheck: (repairedArtifact, repairedBudget, repairedTier) =>
+              this.recheckArtifactAfterRepair(
+                goal,
+                repairedArtifact,
+                repairedBudget,
+                repairedTier,
+                typeDef,
+                treeState,
+              ),
+            emitSuccess: (successArtifact) =>
+              emitSuccessfulArtifact({
+                goal,
+                artifact: successArtifact,
+                store: this.store,
+                now: t,
+                persist: (persistGoal, persistArtifact) =>
+                  this.persistLeafKnowledge(persistGoal, persistArtifact),
+              }),
+          });
+          if (failure.kind === 'ceiling') {
+            return this.ceilingReport(goal, treeState);
           }
+          if (failure.kind === 'emitted' || failure.kind === 'blocked') {
+            return failure.report;
+          }
+          budget = failure.budget;
+          tier = failure.tier;
+          tierIndex = failure.tierIndex;
+          priorAttempt = failure.priorAttempt;
+          priorLoopTranscript = failure.priorLoopTranscript;
+          continue;
         }
       }
 
@@ -1276,7 +1260,7 @@ export class Engine {
         });
 
         if (!verdict.pass) {
-          const resolution = await this.handleFailure(
+          const failure = await transitionArtifactFailure({
             goal,
             artifact,
             verdict,
@@ -1285,65 +1269,51 @@ export class Engine {
             tierIndex,
             tierLadder,
             priorAttempt,
-            treeState,
-          );
-
-          if (resolution.kind === 'repaired') {
-            const repaired = await finishRepairedAttempt({
-              goal,
-              repair: resolution,
-              tier,
-              recheck: (repairedArtifact, repairedBudget, repairedTier) =>
-                this.recheckArtifactAfterRepair(
-                  goal,
-                  repairedArtifact,
-                  repairedBudget,
-                  repairedTier,
-                  typeDef,
-                  treeState,
-                ),
-              emitSuccess: (successArtifact) =>
-                emitSuccessfulArtifact({
-                  goal,
-                  artifact: successArtifact,
-                  store: this.store,
-                  now: t,
-                  persist: (persistGoal, persistArtifact) =>
-                    this.persistLeafKnowledge(persistGoal, persistArtifact),
-                }),
-            });
-            if (repaired.kind === 'ceiling') {
-              return this.ceilingReport(goal, treeState);
-            }
-            if (repaired.kind === 'emitted') {
-              return repaired.report;
-            }
-            budget = repaired.budget;
-            priorAttempt = repaired.priorAttempt;
-            if (repaired.tier !== tier) {
-              tier = repaired.tier;
-              tierIndex = tierLadder.indexOf(tier);
-            }
-            continue;
-          } else if (resolution.kind === 'escalated') {
-            tier = resolution.tier;
-            tierIndex = tierLadder.indexOf(tier);
-            budget = resolution.budget;
-            // Thread the transcript tail finding into the verdict so the next
-            // attempt's BrainContext carries step-loop evidence.
-            priorAttempt = {
-              artifact,
-              verdict: stepLoopTailFinding !== null
-                ? { ...verdict, findings: [stepLoopTailFinding, ...verdict.findings] }
-                : verdict,
-            };
-            // Carry the successful step-loop transcript so the next attempt
-            // sees what was read/learned even though the judge failed.
-            priorLoopTranscript = stepLoopTranscriptTail;
-            continue;
-          } else {
-            return resolution.report;
+            stepLoopTailFinding,
+            stepLoopTranscriptTail,
+            resolveFailure: () =>
+              this.handleFailure(
+                goal,
+                artifact,
+                verdict,
+                budget,
+                tier,
+                tierIndex,
+                tierLadder,
+                priorAttempt,
+                treeState,
+              ),
+            recheck: (repairedArtifact, repairedBudget, repairedTier) =>
+              this.recheckArtifactAfterRepair(
+                goal,
+                repairedArtifact,
+                repairedBudget,
+                repairedTier,
+                typeDef,
+                treeState,
+              ),
+            emitSuccess: (successArtifact) =>
+              emitSuccessfulArtifact({
+                goal,
+                artifact: successArtifact,
+                store: this.store,
+                now: t,
+                persist: (persistGoal, persistArtifact) =>
+                  this.persistLeafKnowledge(persistGoal, persistArtifact),
+              }),
+          });
+          if (failure.kind === 'ceiling') {
+            return this.ceilingReport(goal, treeState);
           }
+          if (failure.kind === 'emitted' || failure.kind === 'blocked') {
+            return failure.report;
+          }
+          budget = failure.budget;
+          tier = failure.tier;
+          tierIndex = failure.tierIndex;
+          priorAttempt = failure.priorAttempt;
+          priorLoopTranscript = failure.priorLoopTranscript;
+          continue;
         }
       }
 
