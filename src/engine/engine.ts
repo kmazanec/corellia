@@ -27,7 +27,6 @@ import type { ToolBroker } from '../contract/tool.js';
 import { debitAttempt } from './budget-events.js';
 import { lintLibrary } from '../library/constitution.js';
 import { loadFamilySkill } from '../library/skills.js';
-import { classifyRisk } from '../library/risk.js';
 import type { CheckContext } from '../contract/goal-type.js';
 import {
   openSandboxAssembly,
@@ -44,7 +43,6 @@ import {
 import {
   blockedReport,
   exhaustedBrief,
-  unknownTypeBrief,
 } from './reports.js';
 import {
   DEFAULT_SPEND_CEILING_USD,
@@ -59,7 +57,7 @@ import { applyRootEmissionGate } from './root-emission-gate.js';
 import { finalizeSandboxedRun } from './sandbox-finalization.js';
 import { runSplitDispatch } from './split-dispatch.js';
 import { appendGoldenCandidate } from './judge-support.js';
-import { runAuthorityGate } from './authority-gate.js';
+import { enterGoal } from './goal-entry.js';
 import { produceAttemptArtifact } from './attempt/artifact-production.js';
 import { evaluateAttemptArtifact } from './attempt/artifact-evaluation.js';
 import { resolveAttemptFailure } from './attempt/failure.js';
@@ -446,72 +444,29 @@ export class Engine {
 
   private async _run(goal: Goal, treeState: TreeState): Promise<Report> {
     const t = this.now;
-    const deadline = t() + goal.budget.wallClockMs;
-
-    // ── RECEIVE ────────────────────────────────────────────────────────────
-    await this.store.append({ type: 'goal-received', at: t(), goalId: goal.id, goal });
-
-    // early ceiling gate — if the tree is already over ceiling (prior
-    // siblings consumed it), halt before making any brain call. Guard: only emit
-    // 'ceiling-reached' once per tree; if it was already emitted by a sibling
-    // the treeState is already over ceiling and this child returns the same report
-    // shape without a second event.
-    if (hasReachedSpendCeiling(treeState)) {
-      return this.ceilingReport(goal, treeState);
-    }
-
-    // Unknown type → block immediately (no throw)
-    if (!this.registry.has(goal.type)) {
-      const brief = unknownTypeBrief(goal);
-      const resolution = this.effectiveOnBrief
-        ? await this.effectiveOnBrief(brief)
-        : brief.onTimeout;
-      await this.store.append({
-        type: 'blocked',
-        at: t(),
-        goalId: goal.id,
-        brief,
-        resolution,
-      });
-      const report = blockedReport(`Unknown goal type: ${goal.type}`);
-      await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
-      return report;
-    }
-
-    const typeDef = this.registry.get(goal.type);
-    const tierLadder = typeDef.tier.ladder;
-    let currentTierIndex = 0;
-    let currentTier: Tier = typeDef.tier.default;
-
-    // ── INSTANCE RISK AT ENTRY ─────────────────────────────────────────────
-    // Classify scope against sensitivity facts before spending any subtree.
-    // Medium is recorded but not gated (prototype policy — instance evidence
-    // may accumulate to justify automatic medium gating in a future version).
-    const entryRisk = classifyRisk(goal.scope, this.sensitivity);
-    await this.store.append({ type: 'risk-classified', at: t(), goalId: goal.id, risk: entryRisk });
-
-    // AUTHORITY GATE: fires when the type carries a type-level authority grant
-    // requirement (gated: true) OR when instance risk is high. An act whose
-    // consequences outrun any eval must route through a human before the tree
-    // opens — fail-safe: no handler means denied.
-    const authorityReport = await runAuthorityGate({
-      shouldGate: typeDef.gated === true || entryRisk === 'high',
+    const entry = await enterGoal({
       goal,
-      risk: entryRisk,
-      typeGated: typeDef.gated === true,
+      registry: this.registry,
       store: this.store,
       now: t,
+      sensitivity: this.sensitivity,
       onGate: this.onGate,
       onBrief: this.effectiveOnBrief,
-      deniedMessage: (brief) => `Authority gate denied: ${brief.question}`,
+      hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
     });
-    if (authorityReport !== null) return authorityReport;
+    if (entry.kind === 'ceiling') {
+      return this.ceilingReport(goal, treeState);
+    }
+    if (entry.kind === 'emitted') {
+      return entry.report;
+    }
+    const { typeDef, tier, tierIndex, tierLadder, entryRisk, deadline } = entry;
 
     const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
     const decisionPhase = await resolveDecisionPhase({
       goal,
       typeDef,
-      tier: currentTier,
+      tier,
       registry: this.registry,
       brain: this.brain,
       store: this.store,
@@ -537,7 +492,7 @@ export class Engine {
     // ── DISPATCH on decision kind ──────────────────────────────────────────
     switch (decision.kind) {
       case 'satisfy':
-        return this.runAttemptLoop(goal, currentTier, currentTierIndex, tierLadder, deadline, entryRisk, treeState);
+        return this.runAttemptLoop(goal, tier, tierIndex, tierLadder, deadline, entryRisk, treeState);
 
       case 'split': {
         return runSplitDispatch({
