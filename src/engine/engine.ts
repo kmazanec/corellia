@@ -55,7 +55,7 @@ import {
   type MissingRequirement,
 } from '../library/coverage.js';
 import { mergeComprehensionArtifacts, childShaFallback } from '../library/comprehend-merge.js';
-import { renormalizeShares, validateSplit } from './split-validation.js';
+import { validateSplit } from './split-validation.js';
 import {
   isExploreThenEmitLeaf,
 } from './step-loop-guards.js';
@@ -83,6 +83,11 @@ import {
   type TreeState,
 } from './tree-spend.js';
 import { repoShapeHint as buildRepoShapeHint } from './repo-shape-hint.js';
+import {
+  filterMissingCoveredByRefresh,
+  gateMissingLabels,
+  injectCoverageChildren,
+} from './coverage-gate.js';
 
 export { WORST_CASE_PRICE_PER_TOKEN };
 
@@ -2600,8 +2605,8 @@ export class Engine {
    * skipped entirely — children are returned unchanged and no gate-checked event
    * is emitted. Callers that want gate enforcement must configure a sandbox.
    *
-   * GATE-CHECKED MISSING ENCODING: each entry in the `missing` array of the
-   * gate-checked event is encoded by {@link encodeMissing}.
+   * GATE-CHECKED MISSING ENCODING: coverage-gate helpers encode each entry in
+   * the `missing` array of the gate-checked event.
    *
    * CHECKPOINT: verify-on-read fires at the split gate only. The integrate
    * checkpoint is deferred (not yet wired); the EngineOptions.knowledge docstring
@@ -2724,9 +2729,7 @@ export class Engine {
     // an invalid-then-refreshed category never produces two children for the
     // same category (one from checkpointVerifyArtifacts and one from
     // mintComprehension). Each category gets exactly one child.
-    const filteredMissing = result.missing.filter(
-      (m) => !refreshedCategories.has(m.category),
-    );
+    const filteredMissing = filterMissingCoveredByRefresh(result.missing, refreshedCategories);
     const filteredResult = { ok: filteredMissing.length === 0, missing: filteredMissing };
 
     // Emit gate-checked (always, per spec)
@@ -2735,10 +2738,7 @@ export class Engine {
       at: t(),
       goalId: goal.id,
       ok: filteredResult.ok && refreshChildren.length === 0,
-      missing: [
-        ...filteredResult.missing.map(encodeMissing),
-        ...refreshChildren.map((rc) => `refresh:${rc.type}:${rc.localId}`),
-      ],
+      missing: gateMissingLabels(filteredResult.missing, refreshChildren),
     });
 
     if (filteredResult.ok && refreshChildren.length === 0) {
@@ -2746,82 +2746,13 @@ export class Engine {
       return children;
     }
 
-    // Gate failed — mint comprehension children for the filtered misses
-    const comprehensionChildren: ChildPlan[] =
-      filteredResult.ok ? [] : kw.mintComprehension(filteredResult.missing);
-
-    // strip dependsOn on minted children to prevent cycles by construction
-    const safeComprehensionChildren = comprehensionChildren.map((c) => ({
-      ...c,
-      dependsOn: [],
-    }));
-    const safeRefreshChildren = refreshChildren.map((c) => ({
-      ...c,
-      dependsOn: [],
-    }));
-
-    // Merge all injected children (comprehension + refresh from drift)
-    const allInjected: ChildPlan[] = [...safeComprehensionChildren, ...safeRefreshChildren];
-
-    if (allInjected.length === 0) return children;
-
-    // A child depends on the injected comprehension children whose region is
-    // RELEVANT to its scope — not on ALL of them. Wiring every builder to every
-    // dive is the cascade amplifier: a dive of `docs/issues/` failing fatally
-    // blocked a builder scoped to `src/engine/` that never needed it (run
-    // live-self-0beb576f). A region dive (it carries the dived region as its
-    // scope) is a dependency only of children whose scope overlaps that region;
-    // a scope-less or whole-repo injected child (refresh of architecture/stack —
-    // no single region) remains a dependency of all, as before. This keeps the
-    // "comprehend the region before building it" guarantee while stopping an
-    // unrelated dive's failure from sinking the whole tree.
-    const scopesOverlap = (a: string[], b: string[]): boolean => {
-      if (a.length === 0 || b.length === 0) return true; // a scope-less side touches everything
-      const norm = (p: string): string => p.replace(/\/+$/, '');
-      return a.some((x) => {
-        const xn = norm(x);
-        return b.some((y) => {
-          const yn = norm(y);
-          return xn === yn || xn.startsWith(`${yn}/`) || yn.startsWith(`${xn}/`);
-        });
-      });
-    };
-    const depsForChild = (child: ChildPlan): string[] => {
-      const relevant = allInjected
-        .filter((inj) => inj.scope.length === 0 || scopesOverlap(child.scope, inj.scope))
-        .map((inj) => inj.localId);
-      return [...child.dependsOn, ...relevant];
-    };
-
-    const rawAugmented: ChildPlan[] = [
-      ...allInjected,
-      ...children.map((child) => ({
-        ...child,
-        dependsOn: depsForChild(child),
-      })),
-    ];
-
-    // Renormalize budgetShares across the augmented set. The brain's children
-    // already sum their shares to ~1; each injected comprehension/refresh child
-    // carries its own share (e.g. 0.1), so the concatenation overflows the
-    // "sum ≤ 1" structural rule ("budgetShares sum to 1.8000"). Scale every
-    // share by 1/total when the total exceeds 1 — this preserves each child's
-    // RELATIVE allocation (so subdivide() still apportions proportionally) while
-    // bringing the sum back to 1. The comprehension children thus take a real
-    // slice of the parent budget rather than the gate rejecting the whole split.
-    const augmentedChildren = renormalizeShares(rawAugmented);
-
-    // re-validate the augmented split against the parent budget. After
-    // renormalization the share sum is ≤ 1; a remaining violation (e.g. child
-    // count past the attempt budget) is a genuine structural error — throw so
-    // the caller routes it through the structural-error block path rather than
-    // silently proceeding with an invalid fan-out.
-    const augmentedErr = validateSplit(augmentedChildren, (tp) => (this.registry.has(tp) ? this.registry.get(tp) : undefined));
-    if (augmentedErr) {
-      throw new Error(`coverage-gate-invalid-split:${augmentedErr}`);
-    }
-
-    return augmentedChildren;
+    return injectCoverageChildren({
+      children,
+      missing: filteredResult.missing,
+      refreshChildren,
+      mintComprehension: kw.mintComprehension,
+      resolveType: (tp) => (this.registry.has(tp) ? this.registry.get(tp) : undefined),
+    });
   }
 
   /**
@@ -3813,17 +3744,4 @@ export class Engine {
  */
 function iterativeAcceptanceJudge(registry: Registry, goalType: string): string {
   return registry.get(goalType).iterative!.acceptanceJudge;
-}
-
-/**
- * Encode a missing requirement into the gate-checked event's missing[] string
- * format: the single source of truth for this encoding so callers (gate
- * emission and tests) never diverge.
- *
- * Encoding:
- *   - Category miss:  "<category>"              (e.g. "architecture")
- *   - Region miss:    "<category>:<region>"     (e.g. "architecture:src/payments")
- */
-function encodeMissing(m: MissingRequirement): string {
-  return m.region !== undefined ? `${m.category}:${m.region}` : m.category;
 }
