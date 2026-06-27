@@ -36,8 +36,7 @@ import {
   type SandboxConfig,
   type SandboxAssembly,
 } from './assembly.js';
-import { collectTree, preserveTree, commitRound } from './worktree.js';
-import { createIterationRecord, deleteProvenanceIssue } from './iteration-tools.js';
+import { commitRound } from './worktree.js';
 import type { KnowledgeArtifact, RegionFacts } from '../contract/knowledge.js';
 import {
   type KnowledgeForCoverage,
@@ -73,6 +72,7 @@ import {
 } from './tree-spend.js';
 import { repoShapeHint as buildRepoShapeHint } from './repo-shape-hint.js';
 import { applyRootEmissionGate } from './root-emission-gate.js';
+import { finalizeSandboxedRun } from './sandbox-finalization.js';
 import {
   runKnowledgeCoverageSplitGate,
 } from './coverage/split-gate.js';
@@ -469,43 +469,13 @@ export class Engine {
       });
       return report;
     } finally {
-      const failedOrBlocked =
-        report === undefined || report.blockers.length > 0;
-      if (failedOrBlocked) {
-        const reason =
-          report === undefined
-            ? 'tree threw before producing a report'
-            : `tree blocked: ${report.blockers[0] ?? 'unknown'}`;
-        await preserveTree(assembly.worktree, this.store, reason);
-      } else {
-        // ── Deliver-intent lifecycle integration (ADR-034) ──────────────────
-        // On successful delivery, the engine itself (not a child goal) performs
-        // two deterministic integration steps at the assembly-emit success
-        // boundary, BEFORE collectTree so their writes join the delivered diff:
-        //   1. create the iteration record (+ index row + log line),
-        //   2. delete the originating issue the delivery resolves (if its spec
-        //      carries a `// from docs/issues/<slug>.md` provenance annotation).
-        // Both are no-ops on a blocked/partial delivery (this is the success
-        // branch) and sit alongside the existing PR-emission mechanics. Gated to
-        // the `deliver-intent` root: only a delivered intent earns an iteration
-        // record + issue retirement (ADR-034); other sandboxed roots (e.g.
-        // improve-factory) collect their tree without these lifecycle writes.
-        // Wrapped so a lifecycle-bookkeeping failure can never undo a delivery
-        // that already succeeded: the delivery stands; the bookkeeping is best-effort.
-        if (goal.type === 'deliver-intent') {
-          try {
-            createIterationRecord(assembly.worktree.root, goal, this.now);
-            deleteProvenanceIssue(assembly.worktree.root, goal);
-          } catch (err) {
-            // The delivery succeeded; a record/issue bookkeeping failure must not
-            // fail it or fabricate a block. Surface for the operator, then proceed.
-            console.warn(
-              `[corellia] deliver-intent lifecycle integration (ADR-034) failed post-success for ${goal.id}: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
-        }
-        await collectTree(assembly.worktree, this.store);
-      }
+      await finalizeSandboxedRun({
+        goal,
+        report,
+        worktree: assembly.worktree,
+        store: this.store,
+        now: this.now,
+      });
       this._activeAssembly = undefined;
     }
   }
