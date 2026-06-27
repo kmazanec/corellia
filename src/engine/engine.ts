@@ -4575,7 +4575,10 @@ function validateSplit(
   if (resolveType) {
     for (const child of children) {
       const def = resolveType(child.type);
-      if (def && def.requiresScope && child.scope.length === 0) {
+      if (!def) {
+        return `Child "${child.localId}" has unknown goal type "${child.type}"`;
+      }
+      if (def.requiresScope && child.scope.length === 0) {
         return `Child "${child.localId}" (type "${child.type}") requires a non-empty scope — it must declare the region it touches (ADR-039)`;
       }
     }

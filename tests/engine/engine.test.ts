@@ -836,6 +836,35 @@ describe('unknown type', () => {
     const events = await store.list({ type: 'blocked' });
     expect(events).toHaveLength(1);
   });
+
+  it('rejects a split with an unknown child type before spawning children', async () => {
+    const store = new MemoryEventStore();
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'splitter' }),
+      leafTypeDef({ name: 'leaf' }),
+    ]);
+
+    const brain = new ScriptedBrain()
+      .queueDecide({
+        kind: 'split',
+        children: [
+          { localId: 'bad', type: 'invented-type', title: 'bad child', spec: {}, dependsOn: [], scope: [], budgetShare: 1 },
+        ],
+      })
+      .queueDecide({
+        kind: 'split',
+        children: [
+          { localId: 'bad', type: 'invented-type', title: 'bad child', spec: {}, dependsOn: [], scope: [], budgetShare: 1 },
+        ],
+      });
+
+    const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
+    const report = await engine.run(makeGoal({ type: 'splitter' }));
+
+    expect(report.blockers.length).toBeGreaterThan(0);
+    expect(await store.list({ type: 'child-spawned' })).toHaveLength(0);
+    expect(report.blockers[0]).toMatch(/unknown goal type/i);
+  });
 });
 
 // ── 10. Split with files artifact merging ────────────────────────────────
