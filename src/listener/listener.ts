@@ -441,13 +441,11 @@ export class Listener {
    *
    * If the scope is now contested, the resume queues like any new commission.
    */
-  answer(intentId: string, humanAnswer: string): Promise<Report> {
+  async answer(intentId: string, humanAnswer: string): Promise<Report> {
     const entry = this.parked.get(intentId);
     if (!entry) {
       return Promise.reject(new Error(`No parked intent with id "${intentId}"`));
     }
-
-    this.parked.delete(intentId);
 
     const answerPointer: MemoryPointer = {
       id: `${intentId}:answer`,
@@ -457,12 +455,14 @@ export class Listener {
     };
 
     // Record the answer in the event log so re-entry is a traceable checkpoint.
-    void this.store.append({
+    await this.store.append({
       type: 'resumed',
       at: this.now(),
       goalId: intentId,
       answer: humanAnswer,
     });
+
+    this.parked.delete(intentId);
 
     if (!this.hasConflict(entry.input.scope)) {
       return this.runIntent(entry.input, [answerPointer]);
@@ -481,13 +481,13 @@ export class Listener {
    * appended with resolution 'bounce', the intent is evicted from the parked
    * map, and its id is included in the returned list.
    */
-  tick(now?: number): { bounced: string[] } {
+  async tick(now?: number): Promise<{ bounced: string[] }> {
     const t = now ?? this.now();
     const bounced: string[] = [];
 
     for (const [id, entry] of this.parked) {
       if (t >= entry.deadline) {
-        void this.store.append({
+        await this.store.append({
           type: 'blocked',
           at: t,
           goalId: id,

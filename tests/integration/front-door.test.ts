@@ -413,7 +413,7 @@ describe('AC 4 — daemon owns the clock (tick)', () => {
 
     // Advance clock past deadline and tick.
     now = 1000 + 500 + 1;
-    const { bounced } = listener.tick(now);
+    const { bounced } = await listener.tick(now);
 
     expect(bounced).toContain('ttl-intent');
     expect(listener.status().parked.some((p) => p.id === 'ttl-intent')).toBe(false);

@@ -165,10 +165,16 @@ let tickTimer: ReturnType<typeof setInterval> | undefined;
 
 function startTick(): void {
   tickTimer = setInterval(() => {
-    const { bounced } = listener.tick();
-    if (bounced.length > 0) {
-      console.log(`[daemon] tick bounced: ${bounced.join(', ')}`);
-    }
+    void listener.tick().then(
+      ({ bounced }) => {
+        if (bounced.length > 0) {
+          console.log(`[daemon] tick bounced: ${bounced.join(', ')}`);
+        }
+      },
+      (err: unknown) => {
+        console.log(`[daemon] tick failed: ${err instanceof Error ? err.message : String(err)}`);
+      },
+    );
   }, tickMs);
   // Don't let the timer keep the process alive — the server + SIGTERM control
   // the lifecycle.

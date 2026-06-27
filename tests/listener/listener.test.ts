@@ -59,6 +59,20 @@ class MemStore implements EventStore {
   }
 }
 
+class FlakyStore implements EventStore {
+  readonly inner = new MemStore();
+  failAppends = false;
+
+  async append(e: FactoryEvent): Promise<void> {
+    if (this.failAppends) throw new Error('append failed');
+    await this.inner.append(e);
+  }
+
+  list(filter?: { goalId?: string; type?: FactoryEvent['type'] }): Promise<FactoryEvent[]> {
+    return this.inner.list(filter);
+  }
+}
+
 // ── ScriptedEngine ─────────────────────────────────────────────────────────
 
 /**
@@ -394,6 +408,28 @@ describe('answer() resumes parked intent', () => {
     const listener = new Listener({ engine, store });
     await expect(listener.answer('nonexistent', 'hi')).rejects.toThrow(/no parked intent/i);
   });
+
+  it('keeps the intent parked when the resumed event append fails', async () => {
+    const store = new FlakyStore();
+    let tick = 260;
+    const now = () => ++tick;
+
+    const engine = new ScriptedEngine(store, [
+      { goalId: 'q-fail', report: blockedReport('Need answer'), events: [parkBlockedEvent('q-fail', now(), 'Question?')] },
+    ], now);
+    const listener = new Listener({
+      engine: engine as unknown as InstanceType<typeof import('../../src/engine/engine.js').Engine>,
+      store,
+      now,
+    });
+
+    await listener.commission(makeInput('q-fail', ['src/q-fail']));
+    expect(listener.status().parked.map((p) => p.id)).toContain('q-fail');
+
+    store.failAppends = true;
+    await expect(listener.answer('q-fail', 'answer')).rejects.toThrow(/append failed/);
+    expect(listener.status().parked.map((p) => p.id)).toContain('q-fail');
+  });
 });
 
 // ── 5. tick() bounces past-TTL parked intents ─────────────────────────────
@@ -423,12 +459,12 @@ describe('tick() TTL sweep', () => {
     const deadline = listener.status().parked.find((p) => p.id === 'ttl1')!.deadline;
 
     // Tick before deadline — no bounce.
-    const before = listener.tick(deadline - 1);
+    const before = await listener.tick(deadline - 1);
     expect(before.bounced).toHaveLength(0);
     expect(listener.status().parked.map((p) => p.id)).toContain('ttl1');
 
     // Tick at deadline — bounced.
-    const after = listener.tick(deadline);
+    const after = await listener.tick(deadline);
     expect(after.bounced).toContain('ttl1');
     expect(listener.status().parked.map((p) => p.id)).not.toContain('ttl1');
 
@@ -461,9 +497,32 @@ describe('tick() TTL sweep', () => {
     expect(listener.status().parked).toHaveLength(1);
 
     // Tick well before deadline.
-    const result = listener.tick(now() + 100);
+    const result = await listener.tick(now() + 100);
     expect(result.bounced).toHaveLength(0);
     expect(listener.status().parked).toHaveLength(1);
+  });
+
+  it('keeps a past-deadline intent parked when the bounce event append fails', async () => {
+    const store = new FlakyStore();
+    let tick = 450;
+    const now = () => ++tick;
+
+    const engine = new ScriptedEngine(store, [
+      { goalId: 'ttl-fail', report: blockedReport('Need decision'), events: [parkBlockedEvent('ttl-fail', now(), 'Question?', 1)] },
+    ], now);
+    const listener = new Listener({
+      engine: engine as unknown as InstanceType<typeof import('../../src/engine/engine.js').Engine>,
+      store,
+      now,
+      defaultTtlMs: 1,
+    });
+
+    await listener.commission(makeInput('ttl-fail', ['src/ttl-fail']));
+    const deadline = listener.status().parked.find((p) => p.id === 'ttl-fail')!.deadline;
+
+    store.failAppends = true;
+    await expect(listener.tick(deadline)).rejects.toThrow(/append failed/);
+    expect(listener.status().parked.map((p) => p.id)).toContain('ttl-fail');
   });
 });
 
