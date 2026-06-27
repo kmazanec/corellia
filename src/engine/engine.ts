@@ -66,6 +66,16 @@ import { buildStepLoopInitialTranscript } from './step-loop-context.js';
 import { runForcedEmit, runStructuredArtifactEmit } from './step-loop-emit.js';
 import { routeStepToolCalls } from './step-loop-router.js';
 import { NOTE_TOOL_DEF, deriveToolDefs, isToolGranted } from './step-loop-tools.js';
+import {
+  blockedReport,
+  buildReport,
+  escalatedBrief,
+  exhaustedBrief,
+  gateDeniedBrief,
+  isomorphicBrief,
+  nonConvergenceBrief,
+  unknownTypeBrief,
+} from './reports.js';
 
 /**
  * Per-tree spend ceiling default (learning phase, ADR-017).
@@ -4001,116 +4011,6 @@ export class Engine {
  */
 function iterativeAcceptanceJudge(registry: Registry, goalType: string): string {
   return registry.get(goalType).iterative!.acceptanceJudge;
-}
-
-function blockedReport(reason: string, findings: string[] = []): Report {
-  return {
-    artifact: null,
-    proof: [],
-    lessons: [],
-    memoriesUsed: [],
-    blockers: [reason],
-    findings,
-    learned: '',
-  };
-}
-
-function buildReport(goal: Goal, artifact: Artifact): Report {
-  return {
-    artifact,
-    proof: [],
-    lessons: [],
-    memoriesUsed: goal.memories.map((m) => m.id),
-    blockers: [],
-    findings: [],
-    learned: '',
-  };
-}
-
-function gateDeniedBrief(
-  goal: Goal,
-  risk: RiskClass,
-  typeLevelGate: boolean,
-): import('../contract/decision.js').DecisionBrief {
-  const reason = typeLevelGate
-    ? `type "${goal.type}" carries a type-level authority gate`
-    : `instance risk is "${risk}" (scope touches a sensitive surface)`;
-  return {
-    question: `Goal "${goal.title}" requires authority grant: ${reason}. Grant or deny?`,
-    options: ['deny', 'park', 'bounce'],
-    links: [goal.id],
-    deadlineMs: 30_000,
-    onTimeout: 'deny',
-    teaching: {
-      finding: reason,
-      confidence: 'high',
-      costs: 'grant: goal proceeds; deny: goal is blocked; park: goal waits for human decision (TTL applies)',
-      recommendation: 'deny',
-    },
-  };
-}
-
-function unknownTypeBrief(
-  goal: Goal,
-): import('../contract/decision.js').DecisionBrief {
-  return {
-    question: `Unknown goal type: "${goal.type}". How should this goal be handled?`,
-    options: ['deny', 'park', 'bounce'],
-    links: [goal.id],
-    deadlineMs: 30_000,
-    onTimeout: 'deny',
-  };
-}
-
-function exhaustedBrief(
-  goal: Goal,
-  dim: keyof Budget,
-): import('../contract/decision.js').DecisionBrief {
-  return {
-    question: `Goal "${goal.title}" exhausted its ${dim} budget. How should it be handled?`,
-    options: ['deny', 'park', 'bounce'],
-    links: [goal.id],
-    deadlineMs: 30_000,
-    onTimeout: 'deny',
-  };
-}
-
-function escalatedBrief(
-  goal: Goal,
-  finding: Finding,
-): import('../contract/decision.js').DecisionBrief {
-  return {
-    question: `Goal "${goal.title}" has an escalated finding requiring human decision: "${finding.title}"`,
-    options: ['deny', 'park', 'bounce'],
-    links: [goal.id],
-    deadlineMs: 30_000,
-    onTimeout: 'deny',
-  };
-}
-
-function isomorphicBrief(
-  goal: Goal,
-  signature: string,
-): import('../contract/decision.js').DecisionBrief {
-  return {
-    question: `Goal "${goal.title}" is repeating the same failure (signature: "${signature}"). Needs human resolution.`,
-    options: ['deny', 'park', 'bounce'],
-    links: [goal.id],
-    deadlineMs: 30_000,
-    onTimeout: 'deny',
-  };
-}
-
-function nonConvergenceBrief(
-  goal: Goal,
-): import('../contract/decision.js').DecisionBrief {
-  return {
-    question: `Goal "${goal.title}" failed at the highest tier with no actionable repair — it cannot converge. How should it be handled?`,
-    options: ['deny', 'park', 'bounce'],
-    links: [goal.id],
-    deadlineMs: 30_000,
-    onTimeout: 'deny',
-  };
 }
 
 /**
