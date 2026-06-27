@@ -34,7 +34,6 @@ import {
   type SandboxConfig,
   type SandboxAssembly,
 } from './assembly.js';
-import { commitRound } from './worktree.js';
 import type { KnowledgeArtifact, RegionFacts } from '../contract/knowledge.js';
 import {
   type KnowledgeForCoverage,
@@ -67,13 +66,7 @@ import {
 } from './attempt/state.js';
 import { recheckArtifactAfterRepair } from './attempt/recheck.js';
 import { resolveDecisionPhase } from './decision/phase.js';
-import { runSplitRound, type SplitRoundResult } from './split-round.js';
-import {
-  assessMilestoneRound,
-  type RoundAssessment,
-} from './milestone/round-assessment.js';
-import { runMilestoneLoop } from './milestone/loop.js';
-import { reDecideMilestoneRound } from './milestone/redecide-round.js';
+import { createSplitRunner } from './split-runner.js';
 
 export { WORST_CASE_PRICE_PER_TOKEN };
 
@@ -494,6 +487,7 @@ export class Engine {
         return this.runAttemptLoop(goal, tier, tierIndex, tierLadder, deadline, entryRisk, treeState);
 
       case 'split': {
+        const splitRunner = this.splitRunner();
         return runSplitDispatch({
           goal,
           typeDef,
@@ -506,8 +500,9 @@ export class Engine {
           registry: this.registry,
           store: this.store,
           now: t,
-          runMilestone: (children) => this.runMilestone(goal, children, treeState),
-          runSplit: (children, findings) => this.runSplit(goal, children, findings, treeState),
+          runMilestone: (children) => splitRunner.runMilestone(goal, children, treeState),
+          runSplit: (children, findings) =>
+            splitRunner.runSplit(goal, children, findings, treeState),
         });
       }
 
@@ -531,6 +526,26 @@ export class Engine {
     const persist = this.knowledge?.persist;
     if (persist === undefined) return;
     await persist(goal, artifact);
+  }
+
+  private splitRunner() {
+    return createSplitRunner({
+      memory: this.memory,
+      registry: this.registry,
+      brain: this.brain,
+      goldenCapture: this.goldenCapture,
+      store: this.store,
+      now: this.now,
+      activeWorktree: () => this._activeAssembly?.worktree,
+      factsForRegions: this.knowledge?.factsForRegions,
+      headSha: this.knowledge?.headSha,
+      checkContextFor: (goalId) => this.checkContextFor(goalId),
+      persistLeafKnowledge: (goal, artifact) => this.persistLeafKnowledge(goal, artifact),
+      runChild: (childGoal, treeState) => this._run(childGoal, treeState),
+      decideSkillBlock: (goalType) => this.decideSkillBlock(goalType),
+      ceilingReachedOnce: (goal, treeState) => this.ceilingReachedOnce(goal, treeState),
+      ceilingReport: (goal, treeState) => this.ceilingReport(goal, treeState),
+    });
   }
 
   // ── ATTEMPT LOOP (the control loop) ──────────────────────────────────────
@@ -803,167 +818,6 @@ export class Engine {
    */
   private repoShapeHint(goal: Goal): string | undefined {
     return buildRepoShapeHint(goal, this._activeAssembly?.worktree.root);
-  }
-
-  // ── SPLIT PATH ────────────────────────────────────────────────────────────
-  /**
-   * One split pass, made re-enterable (ADR-031 decision 3). Does everything
-   * `runSplit` did between subdivide and the final emit — build child goals,
-   * run them, the comprehend structured merge, the `judge-integration` integrate
-   * gate, the lesson/memory promotion — but does NOT emit the `emitted` event and
-   * does NOT promote-as-final. Returns the round's report, its merged artifact,
-   * and the deterministic `passingCount` (0 for a non-iterative caller, which
-   * ignores it). `runMilestone` calls this once per round; `runSplit` calls it
-   * once and appends the emit tail. Behavior-preserving: every existing split
-   * path stays byte-identical (the safety net for the milestone loop).
-   */
-  private async runRound(
-    goal: Goal,
-    children: ChildPlan[],
-    extraFindings: string[] = [],
-    treeState: TreeState = createTreeState(),
-  ): Promise<SplitRoundResult> {
-    return runSplitRound({
-      goal,
-      children,
-      extraFindings,
-      memory: this.memory,
-      registry: this.registry,
-      brain: this.brain,
-      goldenCapture: this.goldenCapture,
-      store: this.store,
-      now: this.now,
-      activeRepoRoot: this._activeAssembly?.worktree.repoRoot,
-      factsForRegions: this.knowledge?.factsForRegions,
-      headSha: this.knowledge?.headSha,
-      checkContext: this.checkContextFor(goal.id),
-      persist: (mergeGoal, artifact) => this.persistLeafKnowledge(mergeGoal, artifact),
-      runChild: (childGoal) => this._run(childGoal, treeState),
-    });
-  }
-
-  private async runSplit(
-    goal: Goal,
-    children: ChildPlan[],
-    extraFindings: string[] = [],
-    treeState: TreeState = createTreeState(),
-  ): Promise<Report> {
-    const { report } = await this.runRound(goal, children, extraFindings, treeState);
-    await this.store.append({ type: 'emitted', at: this.now(), goalId: goal.id, report });
-    return report;
-  }
-
-  // ── MILESTONE LOOP (ADR-031) ───────────────────────────────────────────────
-  /**
-   * The milestone loop: an iterative `deliver-intent`-style root re-decides
-   * against a frozen acceptance-criteria done-condition each round until DONE or
-   * a guard halts it (ADR-031 §4.2). Reached from the split dispatch arm when the
-   * type carries `iterative`.
-   *
-   * Reused verbatim: `runRound` (one split pass), `brain.decide`/`brain.judge`,
-   * budget/spend accounting, `persistLeafKnowledge`, `ceilingReport`, the
-   * comprehend merge, the lesson/memory promotion edge, and
-   * `commitRound`/`diffBodiesWithinScope`.
-   *
-   * The loop (step 6): round 0 mints + freezes the criteria; round N>0 re-decides
-   * against what is still unmet, threading round N-1's diff bodies + the unmet
-   * findings + judge findings into the decide. The four-guard halt
-   * (first-to-fire-wins; §4.3) ends the loop and names which guard fired.
-   */
-  private async runMilestone(
-    goal: Goal,
-    children: ChildPlan[],
-    treeState: TreeState,
-    _depth = 0,
-  ): Promise<Report> {
-    const typeDef = this.registry.get(goal.type);
-    const iterative = typeDef.iterative!; // dispatch guard guarantees presence
-    const effectiveMaxRounds = goal.maxRounds ?? iterative.maxRounds;
-    return runMilestoneLoop({
-      goal,
-      initialChildren: children,
-      effectiveMaxRounds,
-      treeState,
-      store: this.store,
-      now: this.now,
-      runRound: (roundChildren) => this.runRound(goal, roundChildren, [], treeState),
-      reDecideRound: (priorAssessment, priorRoundRef) =>
-        this.reDecideRound(goal, treeState, priorAssessment, priorRoundRef),
-      persistCriteria: (artifact) => this.persistLeafKnowledge(goal, artifact),
-      commitRound: (roundIndex) => this.commitRoundIfWorktree(roundIndex, goal.title),
-      assessRound: (criteriaArtifact, mergedArtifact) =>
-        this.assessRound(goal, criteriaArtifact, mergedArtifact, treeState),
-      ceilingReachedOnce: () => this.ceilingReachedOnce(goal, treeState),
-      ceilingReport: () => this.ceilingReport(goal, treeState),
-    });
-  }
-
-  /**
-   * Re-decide a round N>0: ask the brain for a fresh split, informed by the prior
-   * round's assessment (unmet criteria + judge findings) and a digest of the
-   * bodies the prior round changed (ADR-032 §6 — quoted DATA, weighed not obeyed).
-   * Returns the validated children, or `{ halt: true }` when no runnable split
-   * could be produced (the loop then halts with the partial it has).
-   */
-  private async reDecideRound(
-    goal: Goal,
-    treeState: TreeState,
-    priorAssessment: RoundAssessment,
-    priorRoundRef: string | null,
-  ): Promise<{ children: ChildPlan[] } | { halt: true }> {
-    return reDecideMilestoneRound({
-      goal,
-      priorAssessment,
-      priorRoundRef,
-      worktreeRoot: this._activeAssembly?.worktree.root,
-      registry: this.registry,
-      brain: this.brain,
-      store: this.store,
-      now: this.now,
-      decideSkill: this.decideSkillBlock(goal.type),
-      tier: this.registry.get(goal.type).tier.default,
-      debitUsage: (usage) => debitTreeState(treeState, usage),
-    });
-  }
-
-  /**
-   * Commit the round onto the tree branch (advancing HEAD) when a worktree is
-   * active. No-op without a sandbox (tests / sandbox-less runs) — there is no
-   * worktree to commit, and verify-on-read is moot.
-   */
-  private commitRoundIfWorktree(roundIndex: number, title: string): string | null {
-    const worktree = this._activeAssembly?.worktree;
-    if (worktree === undefined) return null;
-    return commitRound(worktree, roundIndex, title);
-  }
-
-  /**
-   * Assess one round against the frozen criteria: parse the checklist, run each
-   * criterion's deterministic check against the round's cumulative artifact +
-   * sandbox (→ passingCount / criteriaTotal), then run `judge-acceptance` over
-   * the cumulative artifact + criteria + check results. Returns the components
-   * the four-guard halt and the `round-assessed` event need.
-   */
-  private async assessRound(
-    goal: Goal,
-    criteriaArtifact: Artifact | null,
-    mergedArtifact: Artifact | null,
-    treeState: TreeState,
-  ): Promise<RoundAssessment> {
-    const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
-    return assessMilestoneRound({
-      goal,
-      criteriaArtifact,
-      mergedArtifact,
-      registry: this.registry,
-      brain: this.brain,
-      store: this.store,
-      now: this.now,
-      checkContext: this.checkContextFor(goal.id),
-      goldenCapture: this.goldenCapture,
-      ...(brainConfig !== undefined ? { brainConfig } : {}),
-      debitUsage: (usage) => debitTreeState(treeState, usage),
-    });
   }
 
   // ── BLOCK PATH ────────────────────────────────────────────────────────────
