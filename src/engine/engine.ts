@@ -14,7 +14,6 @@
  */
 
 import { createHash } from 'node:crypto';
-import { readdirSync, statSync } from 'node:fs';
 import type { Goal, Tier, MemoryPointer, Budget, Usage } from '../contract/goal.js';
 import type { Decision, ChildPlan } from '../contract/decision.js';
 import type { Artifact, Report } from '../contract/report.js';
@@ -83,6 +82,7 @@ import {
   hasReachedSpendCeiling,
   type TreeState,
 } from './tree-spend.js';
+import { repoShapeHint as buildRepoShapeHint } from './repo-shape-hint.js';
 
 export { WORST_CASE_PRICE_PER_TOKEN };
 
@@ -2636,122 +2636,8 @@ export class Engine {
    * which case the decide falls back to the goal-context-only behavior. Scoped
    * goals (non-empty scope) are excluded: scoping already bounds them.
    */
-  // Directories that are never source subsystems; excluded from size counts so a
-  // region's real breadth drives the split decision, not its tooling.
-  private static readonly SHAPE_IGNORE = new Set([
-    '.git', 'node_modules', '.venv', 'venv', '__pycache__', 'dist', 'build',
-    'out', '.corellia', '.claude', 'coverage', '.next', 'target', '.cache',
-  ]);
-
   private repoShapeHint(goal: Goal): string | undefined {
-    if (this._activeAssembly === undefined) return undefined;
-    // The size signal applies to the two comprehension types that map a region and
-    // must split when it is too large to cover faithfully in one node (ADR-029).
-    if (goal.type !== 'map-repo' && goal.type !== 'deep-dive-region') return undefined;
-    const root = this._activeAssembly.worktree.root;
-
-    // SCOPED region (e.g. a deep-dive of `docs/`): a scope was NOT a guarantee of
-    // boundedness — a scoped region can itself be huge (a deep-dive of `docs/`
-    // after the OKF reorg blew its wall-clock; live-self-4b84f2d2). Measure the
-    // region's actual size and, if it is large, emit the same split-or-die hint.
-    if (goal.scope.length > 0) {
-      const { dirs, files, bytes } = this.countRegion(root, goal.scope);
-      // A region is "too large for one node" by EITHER measure: many files, OR
-      // few-but-huge files. File count alone under-measures the second case —
-      // tests/engine is 33 files (< 40) but ~642KB / ~17K lines, which ballooned a
-      // single dive into repeated eviction and a step-loop:failed block
-      // (live-self-14794116). The byte bound (~450KB ≈ 11-12K lines) sits above
-      // src/engine (332KB, which deep-dives in one node fine) and below
-      // tests/engine. Both are coarse "won't fit one slice" lines, not contracts.
-      const LARGE_FILES = 40;
-      const LARGE_BYTES = 450_000;
-      if (files < LARGE_FILES && bytes < LARGE_BYTES) return undefined;
-      const sizeKb = Math.round(bytes / 1024);
-      return (
-        `region size (scope: ${goal.scope.join(', ')}): ~${files} files (~${sizeKb}KB) ` +
-        `across ~${dirs} directories. (Rule of thumb: a region of many dozens of ` +
-        `files, OR a few hundred KB of source, is too large to deep-dive faithfully ` +
-        `in one node — SPLIT it into sub-region children, one per sub-directory or ` +
-        `cohesive area, rather than attempting the whole region in a single dive.)`
-      );
-    }
-
-    // WHOLE-REPO map (unscoped map-repo): subsystem breadth one level deep.
-    try {
-      const entries = readdirSync(root, { withFileTypes: true });
-      let topDirs = 0;
-      let topFiles = 0;
-      for (const e of entries) {
-        if (Engine.SHAPE_IGNORE.has(e.name)) continue;
-        if (e.isDirectory()) topDirs++;
-        else if (e.isFile()) topFiles++;
-      }
-      // A coarse total-file estimate one level deep into each top dir — enough to
-      // distinguish "a handful of packages" from "a sprawling monorepo" without a
-      // full recursive walk on the decide path.
-      let nestedFiles = 0;
-      for (const e of entries) {
-        if (!e.isDirectory() || Engine.SHAPE_IGNORE.has(e.name)) continue;
-        try {
-          nestedFiles += readdirSync(`${root}/${e.name}`).length;
-        } catch {
-          // unreadable subdir — skip, the count is a hint not a contract
-        }
-      }
-      return (
-        `top-level source dirs: ${topDirs}; top-level files: ${topFiles}; ` +
-        `approx entries one level deep: ${nestedFiles}. ` +
-        `(Rule of thumb: ~8+ top-level source subsystems, or many hundreds of ` +
-        `files, is too large to map faithfully in one node — split into one ` +
-        `sub-region map-repo per top-level subsystem.)`
-      );
-    } catch {
-      return undefined;
-    }
-  }
-
-  /**
-   * Coarsely count the files and directories under a set of scope prefixes,
-   * bounded so the decide-path cost stays small. Returns approximate totals — a
-   * size SIGNAL for the split decision, never a contract. Ignored tooling dirs
-   * (node_modules, .git, …) are excluded. The walk stops early once it is clearly
-   * "large" so a genuinely huge region never makes the hint itself expensive.
-   */
-  private countRegion(root: string, scope: string[]): { dirs: number; files: number; bytes: number } {
-    let dirs = 0;
-    let files = 0;
-    let bytes = 0;
-    const CAP = 500; // stop counting past this — already unambiguously "large"
-    const walk = (abs: string): void => {
-      if (files >= CAP) return;
-      let entries: import('node:fs').Dirent[];
-      try {
-        entries = readdirSync(abs, { withFileTypes: true });
-      } catch {
-        return; // unreadable / non-existent prefix — contributes nothing
-      }
-      for (const e of entries) {
-        if (Engine.SHAPE_IGNORE.has(e.name)) continue;
-        if (e.isDirectory()) {
-          dirs++;
-          walk(`${abs}/${e.name}`);
-        } else if (e.isFile()) {
-          files++;
-          // Sum bytes as a cheap size proxy (statSync, no content read). File
-          // COUNT alone under-measures a region of few-but-huge files — tests/engine
-          // is 33 files but ~17K lines, slipping under a file-count bar while being
-          // far too large to comprehend in one node (run live-self-14794116:
-          // dive-tests-engine satisfied, ballooned, evicted, step-loop:failed).
-          try { bytes += statSync(`${abs}/${e.name}`).size; } catch { /* skip */ }
-        }
-        if (files >= CAP) return;
-      }
-    };
-    for (const prefix of scope) {
-      const clean = prefix.replace(/\/+$/, '');
-      walk(`${root}/${clean}`);
-    }
-    return { dirs, files, bytes };
+    return buildRepoShapeHint(goal, this._activeAssembly?.worktree.root);
   }
 
   private async runCoverageGate(
