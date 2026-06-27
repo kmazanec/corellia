@@ -30,9 +30,6 @@ import {
   type SandboxConfig,
 } from './assembly.js';
 import {
-  blockedReport,
-} from './reports.js';
-import {
   WORST_CASE_PRICE_PER_TOKEN,
   debitTreeState,
   hasReachedSpendCeiling,
@@ -46,6 +43,11 @@ import { resolveDecisionPhase } from './decision/phase.js';
 import { createSplitRunner } from './split-runner.js';
 import { runRootGoal } from './root-runner.js';
 import type { EngineOptions } from './options.js';
+import {
+  ceilingReachedOnce,
+  ceilingReport,
+  runBlock,
+} from './blocking.js';
 
 export { WORST_CASE_PRICE_PER_TOKEN };
 export type { EngineOptions, EngineKnowledge } from './options.js';
@@ -194,7 +196,13 @@ export class Engine {
       hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
     });
     if (entry.kind === 'ceiling') {
-      return this.ceilingReport(goal, treeState);
+      return ceilingReport({
+        goal,
+        treeState,
+        store: this.store,
+        now: t,
+        onBrief: this.effectiveOnBrief,
+      });
     }
     if (entry.kind === 'emitted') {
       return entry.report;
@@ -219,7 +227,13 @@ export class Engine {
       hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
     });
     if (decisionPhase.kind === 'ceiling') {
-      return this.ceilingReport(goal, treeState);
+      return ceilingReport({
+        goal,
+        treeState,
+        store: this.store,
+        now: t,
+        onBrief: this.effectiveOnBrief,
+      });
     }
     if (decisionPhase.kind === 'emitted') {
       return decisionPhase.report;
@@ -262,7 +276,13 @@ export class Engine {
       }
 
       case 'block':
-        return this.runBlock(goal, decision.brief);
+        return runBlock({
+          goal,
+          brief: decision.brief,
+          store: this.store,
+          now: t,
+          onBrief: this.effectiveOnBrief,
+        });
     }
   }
 
@@ -298,8 +318,22 @@ export class Engine {
       enforceToolCallBudget: this.enforceToolCallBudget,
       goldenCapture: this.goldenCapture,
       persistLeafKnowledge: (goal, artifact) => this.persistLeafKnowledge(goal, artifact),
-      runBlock: (goal, brief) => this.runBlock(goal, brief),
-      ceilingReport: (goal, treeState) => this.ceilingReport(goal, treeState),
+      runBlock: (goal, brief) =>
+        runBlock({
+          goal,
+          brief,
+          store: this.store,
+          now: this.now,
+          onBrief: this.effectiveOnBrief,
+        }),
+      ceilingReport: (goal, treeState) =>
+        ceilingReport({
+          goal,
+          treeState,
+          store: this.store,
+          now: this.now,
+          onBrief: this.effectiveOnBrief,
+        }),
     });
   }
 
@@ -318,8 +352,21 @@ export class Engine {
       persistLeafKnowledge: (goal, artifact) => this.persistLeafKnowledge(goal, artifact),
       runChild: (childGoal, treeState) => this._run(childGoal, treeState),
       decideSkillBlock: (goalType) => this.decideSkillBlock(goalType),
-      ceilingReachedOnce: (goal, treeState) => this.ceilingReachedOnce(goal, treeState),
-      ceilingReport: (goal, treeState) => this.ceilingReport(goal, treeState),
+      ceilingReachedOnce: (goal, treeState) =>
+        ceilingReachedOnce({
+          goal,
+          treeState,
+          store: this.store,
+          now: this.now,
+        }),
+      ceilingReport: (goal, treeState) =>
+        ceilingReport({
+          goal,
+          treeState,
+          store: this.store,
+          now: this.now,
+          onBrief: this.effectiveOnBrief,
+        }),
     });
   }
 
@@ -353,62 +400,5 @@ export class Engine {
    */
   private repoShapeHint(goal: Goal): string | undefined {
     return buildRepoShapeHint(goal, this._activeAssembly?.worktree.root);
-  }
-
-  // ── BLOCK PATH ────────────────────────────────────────────────────────────
-  private async runBlock(
-    goal: Goal,
-    brief: import('../contract/decision.js').DecisionBrief,
-  ): Promise<Report> {
-    const t = this.now;
-    const resolution = this.effectiveOnBrief
-      ? await this.effectiveOnBrief(brief)
-      : brief.onTimeout;
-    await this.store.append({
-      type: 'blocked',
-      at: t(),
-      goalId: goal.id,
-      brief,
-      resolution,
-    });
-    const report = blockedReport(brief.question);
-    await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
-    return report;
-  }
-
-  // ── TREE-SPEND EVENTS ─────────────────────────────────────────────────────
-
-  /**
-   * Emit the 'ceiling-reached' event exactly once per tree (ADR-017 guard:
-   * concurrent branches all see the ceiling tripped but only the first fires it).
-   * Factored out of {@link ceilingReport} so the milestone loop can record a
-   * ceiling halt without also emitting a block brief (it emits a partial instead).
-   */
-  private async ceilingReachedOnce(goal: Goal, treeState: TreeState): Promise<void> {
-    if (!treeState.ceilingEmitted) {
-      treeState.ceilingEmitted = true;
-      await this.store.append({
-        type: 'ceiling-reached',
-        at: this.now(),
-        goalId: goal.id,
-        spentUsd: treeState.spentUsd,
-        ceilingUsd: treeState.ceilingUsd,
-      });
-    }
-  }
-
-  private async ceilingReport(goal: Goal, treeState: TreeState): Promise<Report> {
-    const t = this.now;
-    // Emit 'ceiling-reached' exactly once per tree. Concurrent branches all see
-    // the ceiling tripped but only the first one fires the event (ADR-017 guard).
-    await this.ceilingReachedOnce(goal, treeState);
-    const brief: import('../contract/decision.js').DecisionBrief = {
-      question: `Tree spend ceiling of $${treeState.ceilingUsd.toFixed(2)} reached (spent $${treeState.spentUsd.toFixed(4)}). Tree halted.`,
-      options: ['deny', 'park', 'bounce'],
-      links: [goal.id],
-      deadlineMs: 30_000,
-      onTimeout: 'deny',
-    };
-    return this.runBlock(goal, brief);
   }
 }
