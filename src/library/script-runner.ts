@@ -6,14 +6,16 @@
  * a wall-clock bound, and returns a frozen ScriptResult.
  */
 
-import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { access } from 'node:fs/promises';
 import type { ScriptResult } from '../contract/tool.js';
 import type { EventStore, FactoryEvent } from '../contract/events.js';
+import {
+  instantScriptFailure,
+  runCapturedProcess,
+} from './process-runner.js';
 
-/** Truncation cap for the model-facing output field: 4096 bytes. */
-export const OUTPUT_TRUNCATION_CAP = 4096;
+export { OUTPUT_TRUNCATION_CAP } from './process-runner.js';
 
 /**
  * A map of script name → entry-point path (relative to the repo root), as
@@ -84,14 +86,7 @@ export function createScriptRunner(
     ): Promise<ScriptResult> {
       const entryPoint = declaredScripts[name];
       if (entryPoint === undefined) {
-        return Object.freeze({
-          ok: false,
-          exitStatus: null,
-          output: `Script "${name}" is not in the declared set.`,
-          fullOutput: `Script "${name}" is not in the declared set.`,
-          durationMs: 0,
-          timedOut: false,
-        });
+        return instantScriptFailure(`Script "${name}" is not in the declared set.`);
       }
 
       // A target (path/pattern to scope the run) is validated, never shelled.
@@ -100,9 +95,7 @@ export function createScriptRunner(
         const validated = validateScriptTarget(target);
         if (validated === null) {
           const msg = `Invalid script target "${target}": must be a relative in-repo path/pattern (no shell metacharacters, no "..").`;
-          return Object.freeze({
-            ok: false, exitStatus: null, output: msg, fullOutput: msg, durationMs: 0, timedOut: false,
-          });
+          return instantScriptFailure(msg);
         }
         safeTarget = validated;
       }
@@ -141,89 +134,16 @@ export function createScriptRunner(
           : npmScript !== null
             ? [...baseArgs, '--', safeTarget]
             : [...baseArgs, safeTarget];
-      const started = Date.now();
-
-      return new Promise<ScriptResult>((resolve) => {
-        const chunks: Buffer[] = [];
-        let settled = false;
-
-        const child = spawn(command, args, {
-          cwd: repoRoot,
-          shell: false,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          ...(env !== undefined ? { env } : {}),
-        });
-
-        child.stdout.on('data', (d: Buffer) => chunks.push(d));
-        child.stderr.on('data', (d: Buffer) => chunks.push(d));
-
-        const timer = setTimeout(() => {
-          if (!settled) {
-            settled = true;
-            child.kill('SIGKILL');
-            const durationMs = Date.now() - started;
-            const fullOutput = Buffer.concat(chunks).toString('utf8');
-            const output = truncate(fullOutput);
-            resolve(
-              Object.freeze({
-                ok: false,
-                exitStatus: null,
-                output,
-                fullOutput,
-                durationMs,
-                timedOut: true,
-              }),
-            );
-          }
-        }, timeLimitMs);
-        timer.unref();
-
-        child.on('close', (code) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          const durationMs = Date.now() - started;
-          const fullOutput = Buffer.concat(chunks).toString('utf8');
-          const output = truncate(fullOutput);
-          const exitStatus = code ?? null;
-          resolve(
-            Object.freeze({
-              ok: exitStatus === 0,
-              exitStatus,
-              output,
-              fullOutput,
-              durationMs,
-              timedOut: false,
-            }),
-          );
-        });
-
-        child.on('error', (err) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          const durationMs = Date.now() - started;
-          const msg = err.message;
-          resolve(
-            Object.freeze({
-              ok: false,
-              exitStatus: null,
-              output: msg,
-              fullOutput: msg,
-              durationMs,
-              timedOut: false,
-            }),
-          );
-        });
+      return runCapturedProcess({
+        command,
+        args,
+        cwd: repoRoot,
+        shell: false,
+        timeLimitMs,
+        ...(env !== undefined ? { env } : {}),
       });
     },
   };
-}
-
-/** Truncate to the trailing OUTPUT_TRUNCATION_CAP bytes of the output string. */
-function truncate(s: string): string {
-  if (s.length <= OUTPUT_TRUNCATION_CAP) return s;
-  return s.slice(s.length - OUTPUT_TRUNCATION_CAP);
 }
 
 // ---------------------------------------------------------------------------
@@ -298,8 +218,7 @@ export function createCommandRunner(
     async run(command: string, timeLimitMs = DEFAULT_TIME_LIMIT_MS): Promise<ScriptResult> {
       const cmd = command.trim();
       if (cmd.length === 0) {
-        const msg = 'run_command: empty command.';
-        return Object.freeze({ ok: false, exitStatus: null, output: msg, fullOutput: msg, durationMs: 0, timedOut: false });
+        return instantScriptFailure('run_command: empty command.');
       }
       const blocked = networkCommandBlock(cmd);
       if (blocked !== null) {
@@ -307,51 +226,15 @@ export function createCommandRunner(
           `run_command: "${blocked}" reaches the network, which is blocked in the worktree. ` +
           `Local work only — to publish, use the push_branch / open_pr boundary (it runs the ` +
           `process-clean gate). Local git (status/diff/checkout/restore/add/commit/log/stash) is allowed.`;
-        return Object.freeze({ ok: false, exitStatus: null, output: msg, fullOutput: msg, durationMs: 0, timedOut: false });
+        return instantScriptFailure(msg);
       }
 
-      const started = Date.now();
-      return new Promise<ScriptResult>((resolve) => {
-        const chunks: Buffer[] = [];
-        let settled = false;
-
-        const child = spawn(cmd, {
-          cwd: worktreeRoot,
-          shell: true, // command strings run as written; isolation+scrub+block contain it
-          stdio: ['ignore', 'pipe', 'pipe'],
-          ...(env !== undefined ? { env } : {}),
-        });
-
-        child.stdout?.on('data', (d: Buffer) => chunks.push(d));
-        child.stderr?.on('data', (d: Buffer) => chunks.push(d));
-
-        const timer = setTimeout(() => {
-          if (settled) return;
-          settled = true;
-          child.kill('SIGKILL');
-          const durationMs = Date.now() - started;
-          const fullOutput = Buffer.concat(chunks).toString('utf8');
-          resolve(Object.freeze({ ok: false, exitStatus: null, output: truncate(fullOutput), fullOutput, durationMs, timedOut: true }));
-        }, timeLimitMs);
-        timer.unref();
-
-        child.on('close', (code) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          const durationMs = Date.now() - started;
-          const fullOutput = Buffer.concat(chunks).toString('utf8');
-          const exitStatus = code ?? null;
-          resolve(Object.freeze({ ok: exitStatus === 0, exitStatus, output: truncate(fullOutput), fullOutput, durationMs, timedOut: false }));
-        });
-
-        child.on('error', (err) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          const durationMs = Date.now() - started;
-          resolve(Object.freeze({ ok: false, exitStatus: null, output: err.message, fullOutput: err.message, durationMs, timedOut: false }));
-        });
+      return runCapturedProcess({
+        command: cmd,
+        cwd: worktreeRoot,
+        shell: true,
+        timeLimitMs,
+        ...(env !== undefined ? { env } : {}),
       });
     },
   };
