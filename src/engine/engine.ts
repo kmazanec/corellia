@@ -27,10 +27,8 @@ import { lintLibrary } from '../library/constitution.js';
 import { loadFamilySkill } from '../library/skills.js';
 import type { CheckContext } from '../contract/goal-type.js';
 import {
-  openSandboxAssembly,
-  openLearnAssembly,
-  type SandboxConfig,
   type SandboxAssembly,
+  type SandboxConfig,
 } from './assembly.js';
 import type { KnowledgeArtifact, RegionFacts } from '../contract/knowledge.js';
 import {
@@ -41,21 +39,18 @@ import {
   blockedReport,
 } from './reports.js';
 import {
-  DEFAULT_SPEND_CEILING_USD,
   WORST_CASE_PRICE_PER_TOKEN,
-  createTreeState,
   debitTreeState,
   hasReachedSpendCeiling,
   type TreeState,
 } from './tree-spend.js';
 import { repoShapeHint as buildRepoShapeHint } from './repo-shape-hint.js';
-import { applyRootEmissionGate } from './root-emission-gate.js';
-import { finalizeSandboxedRun } from './sandbox-finalization.js';
 import { runSplitDispatch } from './split-dispatch.js';
 import { enterGoal } from './goal-entry.js';
 import { createAttemptRunner } from './attempt/loop.js';
 import { resolveDecisionPhase } from './decision/phase.js';
 import { createSplitRunner } from './split-runner.js';
+import { runRootGoal } from './root-runner.js';
 
 export { WORST_CASE_PRICE_PER_TOKEN };
 
@@ -343,84 +338,17 @@ export class Engine {
   }
 
   async run(goal: Goal): Promise<Report> {
-    const ceilingUsd = goal.spendCeilingUsd ?? DEFAULT_SPEND_CEILING_USD;
-    const treeState = createTreeState(ceilingUsd);
-
-    // No sandbox configured → byte-identical to a plain run: no worktree, no
-    // assembly, no new events.
-    if (this.sandbox === undefined) {
-      return this._run(goal, treeState);
-    }
-
-    // Learn-kind ROOT path (F-65 A12): a root learn goal whose grants carry no
-    // script-execution capability (no test.run_scoped / test.run_impacted) opens
-    // NO worktree. The broker carries read-only tools only (write_file absent);
-    // the finally skips collect/preserve entirely since there is no worktree to
-    // tear down. The `report === undefined` guard ensures a partially-opened
-    // assembly is not left dangling on an error mid-run.
-    //
-    // Script-granting learn goals still use the full sandbox path: running a
-    // declared test script requires an isolated worktree so repo state is not
-    // disturbed by concurrent runs or mid-run failures.
-    const SCRIPT_GRANTS = new Set(['test.run_scoped', 'test.run_impacted']);
-    const isLearnRootWithoutScripts =
-      goal.parentId === null &&
-      this.registry.has(goal.type) &&
-      this.registry.get(goal.type).kind === 'learn' &&
-      !this.registry.get(goal.type).grants.some((g) => SCRIPT_GRANTS.has(g));
-    if (isLearnRootWithoutScripts) {
-      const learnAssembly = openLearnAssembly(
-        this.sandbox,
-        goal.id,
-        this.registry,
-        this.store,
-      );
-      this._activeAssembly = learnAssembly;
-      let report: Report | undefined;
-      try {
-        report = await this._run(goal, treeState);
-        return report;
-      } finally {
-        // No worktree → skip collect/preserve. The report === undefined guard
-        // ensures the caller sees the thrown error rather than a stale assembly.
-        this._activeAssembly = undefined;
-      }
-    }
-
-    // Sandboxed tree (ADR-016): only the ROOT opens the worktree and constructs
-    // the one broker the whole tree shares. The assembly is torn down — collect
-    // on success, preserve on failure/block — in the finally, always exactly one.
-    const assembly = await openSandboxAssembly(
-      this.sandbox,
-      goal.id,
-      this.registry,
-      this.store,
-      this.now,
-    );
-    this._activeAssembly = assembly;
-    let report: Report | undefined;
-    try {
-      report = await this._run(goal, treeState);
-
-      report = await applyRootEmissionGate({
-        goal,
-        report,
-        worktree: assembly.worktree,
-        registry: this.registry,
-        store: this.store,
-        now: this.now,
-      });
-      return report;
-    } finally {
-      await finalizeSandboxedRun({
-        goal,
-        report,
-        worktree: assembly.worktree,
-        store: this.store,
-        now: this.now,
-      });
-      this._activeAssembly = undefined;
-    }
+    return runRootGoal({
+      goal,
+      sandbox: this.sandbox,
+      registry: this.registry,
+      store: this.store,
+      now: this.now,
+      setActiveAssembly: (assembly) => {
+        this._activeAssembly = assembly;
+      },
+      runTree: (treeState) => this._run(goal, treeState),
+    });
   }
 
   private async _run(goal: Goal, treeState: TreeState): Promise<Report> {
