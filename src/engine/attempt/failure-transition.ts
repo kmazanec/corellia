@@ -5,21 +5,13 @@ import type { Finding, Verdict } from '../../contract/verdict.js';
 import type { AttemptFailureResolution } from './failure.js';
 import { finishRepairedAttempt } from './repair-flow.js';
 import type { RecheckArtifactResult } from './recheck.js';
-
-export type AttemptPrior = { artifact: Artifact | null; verdict: Verdict };
+import type { AttemptPrior, AttemptRetryState } from './state.js';
 
 export type ArtifactFailureTransition =
   | { kind: 'emitted'; report: Report }
   | { kind: 'ceiling' }
   | { kind: 'blocked'; report: Report }
-  | {
-      kind: 'retry';
-      budget: Budget;
-      tier: Tier;
-      tierIndex: number;
-      priorAttempt: AttemptPrior;
-      priorLoopTranscript: StepTranscript | undefined;
-    };
+  | ({ kind: 'retry' } & AttemptRetryState);
 
 export async function transitionArtifactFailure(params: {
   goal: Goal;

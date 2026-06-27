@@ -9,7 +9,7 @@ import {
   type StepLoopResult,
 } from '../step-loop-result.js';
 import type { AttemptFailureResolution } from './failure.js';
-import type { AttemptPrior } from './failure-transition.js';
+import type { AttemptPrior, AttemptRetryState } from './state.js';
 
 export type FailedStepLoopResult = Extract<StepLoopResult, { kind: 'exhausted' | 'failed' }>;
 
@@ -24,14 +24,7 @@ export interface StepLoopFailureContext {
 
 export type StepLoopFailureTransition =
   | { kind: 'blocked'; report: Report }
-  | {
-      kind: 'retry';
-      budget: Budget;
-      tier: Tier;
-      tierIndex: number;
-      priorAttempt: AttemptPrior;
-      priorLoopTranscript: StepTranscript;
-    };
+  | ({ kind: 'retry' } & AttemptRetryState);
 
 export async function transitionStepLoopFailure(params: {
   goal: Goal;

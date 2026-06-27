@@ -92,6 +92,14 @@ import { checkEmissionAuthority } from './attempt/emission-authority.js';
 import { resolveAttemptFailure } from './attempt/failure.js';
 import { transitionArtifactFailure } from './attempt/failure-transition.js';
 import { transitionStepLoopFailure } from './attempt/step-loop-failure.js';
+import {
+  attemptBrainContext,
+  continueAfterArtifactFailure,
+  continueAfterStepLoopFailure,
+  createAttemptLoopState,
+  withAttemptBudget,
+  withAttemptRetry,
+} from './attempt/state.js';
 import { runLeafTournament } from './attempt/leaf-tournament.js';
 import { recheckArtifactAfterRepair } from './attempt/recheck.js';
 import { emitSuccessfulArtifact } from './attempt/success.js';
@@ -954,14 +962,11 @@ export class Engine {
   ): Promise<Report> {
     const t = this.now;
     const typeDef = this.registry.get(goal.type);
-    let budget = goal.budget;
-    let tier: Tier = initialTier;
-    let tierIndex: number = initialTierIndex;
-    let priorAttempt: { artifact: Artifact | null; verdict: Verdict } | undefined;
-    // Carried exploration: transcript of the most-recent step-loop that ended in
-    // failure (exhausted or thrown). Passed to the next attempt so the harness
-    // injects a compact digest of the prior loop's tool RESULTS.
-    let priorLoopTranscript: StepTranscript | undefined;
+    let attemptState = createAttemptLoopState({
+      budget: goal.budget,
+      tier: initialTier,
+      tierIndex: initialTierIndex,
+    });
 
     while (true) {
       // Check wall-clock budget before each attempt
@@ -978,11 +983,12 @@ export class Engine {
       // Attempts is an observability counter, not a terminator (ADR-033). Emit
       // the budget-exhausted signal once it crosses zero, then keep going — the
       // dollar ceiling and wall-clock (checked above) are the only hard bounds.
-      budget = await debitAttempt({ budget, goal, store: this.store, now: t });
+      attemptState = withAttemptBudget(
+        attemptState,
+        await debitAttempt({ budget: attemptState.budget, goal, store: this.store, now: t }),
+      );
 
-      const ctx: BrainContext = priorAttempt
-        ? { tier, memories: goal.memories, priorAttempt }
-        : { tier, memories: goal.memories };
+      const ctx = attemptBrainContext(goal, attemptState);
 
       // ── STEP LOOP (tool-granted path) ──────────────────────────────────────
       // Run the step loop when the goal type has at least one grant that maps to
@@ -1001,7 +1007,15 @@ export class Engine {
       let tournamentRan = false;
 
       if (isToolGranted(typeDef.grants) && this.effectiveBroker !== undefined) {
-        const loopResult = await this.runStepLoop(goal, typeDef.grants, budget, ctx, priorAttempt, treeState, priorLoopTranscript);
+        const loopResult = await this.runStepLoop(
+          goal,
+          typeDef.grants,
+          attemptState.budget,
+          ctx,
+          attemptState.priorAttempt,
+          treeState,
+          attemptState.priorLoopTranscript,
+        );
 
         if (loopResult.kind === 'ceiling') {
           // step loop tripped the ceiling — surface ceiling-reached once
@@ -1009,27 +1023,30 @@ export class Engine {
           return this.ceilingReport(goal, treeState);
         } else if (loopResult.kind === 'artifact') {
           artifact = loopResult.artifact;
-          budget = loopResult.budget;
+          attemptState = withAttemptBudget(attemptState, loopResult.budget);
           stepLoopTranscriptTail = loopResult.transcript;
           stepLoopTailFinding = stepLoopTranscriptFinding(stepLoopTranscriptTail);
           // Track accumulated step token usage on the tokens counter for
           // observability (ADR-033). Tokens never block work; the dollar ceiling
           // is the real bound on spend, enforced by the step loop's ceiling check.
-          budget = await debitTokenCount({
-            budget,
-            tokens: loopResult.tokensUsed,
-            goal,
-            store: this.store,
-            now: t,
-          });
+          attemptState = withAttemptBudget(
+            attemptState,
+            await debitTokenCount({
+              budget: attemptState.budget,
+              tokens: loopResult.tokensUsed,
+              goal,
+              store: this.store,
+              now: t,
+            }),
+          );
         } else {
           const failure = await transitionStepLoopFailure({
             goal,
             loopResult,
-            tier,
-            tierIndex,
+            tier: attemptState.tier,
+            tierIndex: attemptState.tierIndex,
             tierLadder,
-            priorAttempt,
+            priorAttempt: attemptState.priorAttempt,
             store: this.store,
             now: t,
             resolveFailure: (failureContext) =>
@@ -1045,14 +1062,11 @@ export class Engine {
                 treeState,
               ),
           });
-          if (failure.kind === 'blocked') {
-            return failure.report;
+          const continuation = continueAfterStepLoopFailure(failure);
+          if (continuation.kind === 'return') {
+            return continuation.report;
           }
-          tier = failure.tier;
-          tierIndex = failure.tierIndex;
-          budget = failure.budget;
-          priorAttempt = failure.priorAttempt;
-          priorLoopTranscript = failure.priorLoopTranscript;
+          attemptState = withAttemptRetry(attemptState, continuation.retry);
           continue;
         }
       } else {
@@ -1060,7 +1074,7 @@ export class Engine {
         const produceResult = await produceClassicArtifact({
           goal,
           ctx,
-          budget,
+          budget: attemptState.budget,
           brain: this.brain,
           store: this.store,
           now: t,
@@ -1071,7 +1085,7 @@ export class Engine {
           return this.ceilingReport(goal, treeState);
         }
         artifact = produceResult.artifact;
-        budget = produceResult.budget;
+        attemptState = withAttemptBudget(attemptState, produceResult.budget);
 
         // ── LEAF TOURNAMENT (F-65 A9) ───────────────────────────────────────
         // When the type declares scan.k > 1 and has a judgeType, run a
@@ -1091,8 +1105,8 @@ export class Engine {
             scan: typeDef.scan,
             judgeType: typeDef.judgeType,
             typeDef,
-            tier,
-            budget,
+            tier: attemptState.tier,
+            budget: attemptState.budget,
             ctx,
             registry: this.registry,
             brain: this.brain,
@@ -1107,7 +1121,7 @@ export class Engine {
             return this.ceilingReport(goal, treeState);
           }
           artifact = tournResult.artifact;
-          budget = tournResult.budget;
+          attemptState = withAttemptBudget(attemptState, tournResult.budget);
           tournamentRan = true;
         }
       }
@@ -1117,12 +1131,12 @@ export class Engine {
         goal,
         artifact,
         checks: typeDef.deterministic,
-        budget,
+        budget: attemptState.budget,
         checkContext: this.checkContextFor(goal.id),
         store: this.store,
         now: t,
       });
-      budget = deterministicGate.budget;
+      attemptState = withAttemptBudget(attemptState, deterministicGate.budget);
       if (deterministicGate.verdict !== null) {
         // Track tool calls spent. toolCalls exhaustion is WARN-ONLY by default
         // (ADR-030 / enforceToolCallBudget) — emit the signal but do not block
@@ -1142,11 +1156,11 @@ export class Engine {
             goal,
             artifact,
             verdict: deterministicGate.verdict,
-            budget,
-            tier,
-            tierIndex,
+            budget: attemptState.budget,
+            tier: attemptState.tier,
+            tierIndex: attemptState.tierIndex,
             tierLadder,
-            priorAttempt,
+            priorAttempt: attemptState.priorAttempt,
             stepLoopTailFinding,
             stepLoopTranscriptTail,
             resolveFailure: () =>
@@ -1154,11 +1168,11 @@ export class Engine {
                 goal,
                 artifact,
                 deterministicGate.verdict!,
-                budget,
-                tier,
-                tierIndex,
+                attemptState.budget,
+                attemptState.tier,
+                attemptState.tierIndex,
                 tierLadder,
-                priorAttempt,
+                attemptState.priorAttempt,
                 treeState,
               ),
             recheck: (repairedArtifact, repairedBudget, repairedTier) =>
@@ -1180,17 +1194,14 @@ export class Engine {
                   this.persistLeafKnowledge(persistGoal, persistArtifact),
               }),
           });
-          if (failure.kind === 'ceiling') {
+          const continuation = continueAfterArtifactFailure(failure);
+          if (continuation.kind === 'ceiling') {
             return this.ceilingReport(goal, treeState);
           }
-          if (failure.kind === 'emitted' || failure.kind === 'blocked') {
-            return failure.report;
+          if (continuation.kind === 'return') {
+            return continuation.report;
           }
-          budget = failure.budget;
-          tier = failure.tier;
-          tierIndex = failure.tierIndex;
-          priorAttempt = failure.priorAttempt;
-          priorLoopTranscript = failure.priorLoopTranscript;
+          attemptState = withAttemptRetry(attemptState, continuation.retry);
           continue;
         }
       }
@@ -1222,7 +1233,7 @@ export class Engine {
           artifact,
           typeDef,
           judgeType: typeDef.judgeType,
-          tier,
+          tier: attemptState.tier,
           registry: this.registry,
           brain: this.brain,
           store: this.store,
@@ -1240,24 +1251,27 @@ export class Engine {
         // Track reported tokens on the tokens counter for observability
         // (ADR-033). Tokens never block work; the dollar ceiling (checked above)
         // is the real bound on spend.
-        budget = await debitTokenUsage({
-          budget,
-          usage: judgeResult.usage,
-          goal,
-          store: this.store,
-          now: t,
-        });
+        attemptState = withAttemptBudget(
+          attemptState,
+          await debitTokenUsage({
+            budget: attemptState.budget,
+            usage: judgeResult.usage,
+            goal,
+            store: this.store,
+            now: t,
+          }),
+        );
 
         if (!verdict.pass) {
           const failure = await transitionArtifactFailure({
             goal,
             artifact,
             verdict,
-            budget,
-            tier,
-            tierIndex,
+            budget: attemptState.budget,
+            tier: attemptState.tier,
+            tierIndex: attemptState.tierIndex,
             tierLadder,
-            priorAttempt,
+            priorAttempt: attemptState.priorAttempt,
             stepLoopTailFinding,
             stepLoopTranscriptTail,
             resolveFailure: () =>
@@ -1265,11 +1279,11 @@ export class Engine {
                 goal,
                 artifact,
                 verdict,
-                budget,
-                tier,
-                tierIndex,
+                attemptState.budget,
+                attemptState.tier,
+                attemptState.tierIndex,
                 tierLadder,
-                priorAttempt,
+                attemptState.priorAttempt,
                 treeState,
               ),
             recheck: (repairedArtifact, repairedBudget, repairedTier) =>
@@ -1291,17 +1305,14 @@ export class Engine {
                   this.persistLeafKnowledge(persistGoal, persistArtifact),
               }),
           });
-          if (failure.kind === 'ceiling') {
+          const continuation = continueAfterArtifactFailure(failure);
+          if (continuation.kind === 'ceiling') {
             return this.ceilingReport(goal, treeState);
           }
-          if (failure.kind === 'emitted' || failure.kind === 'blocked') {
-            return failure.report;
+          if (continuation.kind === 'return') {
+            return continuation.report;
           }
-          budget = failure.budget;
-          tier = failure.tier;
-          tierIndex = failure.tierIndex;
-          priorAttempt = failure.priorAttempt;
-          priorLoopTranscript = failure.priorLoopTranscript;
+          attemptState = withAttemptRetry(attemptState, continuation.retry);
           continue;
         }
       }
