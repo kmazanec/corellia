@@ -32,88 +32,133 @@ export function truncateOutput(output: string): string {
 }
 
 export function runCapturedProcess(options: CapturedProcessOptions): Promise<ScriptResult> {
-  const started = Date.now();
-  const args = [...(options.args ?? [])];
-
   return new Promise<ScriptResult>((resolve) => {
-    const chunks: Buffer[] = [];
-    let capturedBytes = 0;
-    let outputTruncated = false;
-    let settled = false;
-    let timer: NodeJS.Timeout | undefined;
+    new CapturedProcessRun(options, resolve).start();
+  });
+}
 
-    const child = spawn(options.command, args, {
-      cwd: options.cwd,
-      shell: options.shell,
+class CapturedProcessRun {
+  readonly #started = Date.now();
+  readonly #output = new BoundedOutputCapture(FULL_OUTPUT_CAPTURE_CAP);
+  readonly #options: CapturedProcessOptions;
+  readonly #resolve: (result: ScriptResult) => void;
+  #settled = false;
+  #timer: NodeJS.Timeout | undefined;
+
+  constructor(
+    options: CapturedProcessOptions,
+    resolve: (result: ScriptResult) => void,
+  ) {
+    this.#options = options;
+    this.#resolve = resolve;
+  }
+
+  start(): void {
+    const child = spawn(this.#options.command, [...(this.#options.args ?? [])], {
+      cwd: this.#options.cwd,
+      shell: this.#options.shell,
       stdio: ['ignore', 'pipe', 'pipe'],
-      ...(options.env !== undefined ? { env: options.env } : {}),
+      ...(this.#options.env !== undefined ? { env: this.#options.env } : {}),
     });
 
-    const finish = (result: Pick<ScriptResult, 'ok' | 'exitStatus' | 'timedOut'>): void => {
-      const durationMs = Date.now() - started;
-      const fullOutput = Buffer.concat(chunks).toString('utf8');
-      resolve(
-        Object.freeze({
-          ...result,
-          output: truncateOutput(fullOutput),
-          fullOutput,
-          durationMs,
-          ...(outputTruncated ? { outputTruncated: true } : {}),
-        }),
-      );
-    };
+    child.stdout.on('data', (chunk: Buffer) => this.#capture(chunk, child));
+    child.stderr.on('data', (chunk: Buffer) => this.#capture(chunk, child));
+    this.#timer = this.#startTimer(child);
+    child.on('close', (code) => this.#finishClose(code));
+    child.on('error', (err) => this.#finishError(err));
+  }
 
-    const capture = (chunk: Buffer): void => {
-      if (settled) return;
-      const remaining = FULL_OUTPUT_CAPTURE_CAP - capturedBytes;
-      if (remaining > 0) {
-        const captured = chunk.byteLength > remaining ? chunk.subarray(0, remaining) : chunk;
-        chunks.push(captured);
-        capturedBytes += captured.byteLength;
-      }
-      if (chunk.byteLength > remaining) {
-        outputTruncated = true;
-        settled = true;
-        if (timer !== undefined) clearTimeout(timer);
-        child.kill('SIGKILL');
-        finish({ ok: false, exitStatus: null, timedOut: false });
-      }
-    };
-
-    child.stdout.on('data', capture);
-    child.stderr.on('data', capture);
-
-    timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
+  #startTimer(child: ReturnType<typeof spawn>): NodeJS.Timeout {
+    const timer = setTimeout(() => {
+      if (!this.#settle()) return;
       child.kill('SIGKILL');
-      finish({ ok: false, exitStatus: null, timedOut: true });
-    }, options.timeLimitMs);
+      this.#finish({ ok: false, exitStatus: null, timedOut: true });
+    }, this.#options.timeLimitMs);
     timer.unref();
+    return timer;
+  }
 
-    child.on('close', (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      const exitStatus = code ?? null;
-      finish({ ok: exitStatus === 0, exitStatus, timedOut: false });
-    });
+  #capture(chunk: Buffer, child: ReturnType<typeof spawn>): void {
+    if (this.#settled) return;
+    if (this.#output.append(chunk) !== 'truncated') return;
+    if (!this.#settle()) return;
+    child.kill('SIGKILL');
+    this.#finish({ ok: false, exitStatus: null, timedOut: false });
+  }
 
-    child.on('error', (err) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      const durationMs = Date.now() - started;
-      resolve(
-        Object.freeze({
-          ok: false,
-          exitStatus: null,
-          output: err.message,
-          fullOutput: err.message,
-          durationMs,
-          timedOut: false,
-        }),
-      );
-    });
+  #finishClose(code: number | null): void {
+    if (!this.#settle()) return;
+    const exitStatus = code ?? null;
+    this.#finish({ ok: exitStatus === 0, exitStatus, timedOut: false });
+  }
+
+  #finishError(err: Error): void {
+    if (!this.#settle()) return;
+    this.#resolve(freezeProcessError(this.#started, err));
+  }
+
+  #settle(): boolean {
+    if (this.#settled) return false;
+    this.#settled = true;
+    if (this.#timer !== undefined) clearTimeout(this.#timer);
+    return true;
+  }
+
+  #finish(status: Pick<ScriptResult, 'ok' | 'exitStatus' | 'timedOut'>): void {
+    this.#resolve(freezeProcessResult(this.#started, this.#output, status));
+  }
+}
+
+class BoundedOutputCapture {
+  readonly #chunks: Buffer[] = [];
+  #capturedBytes = 0;
+  #truncated = false;
+
+  constructor(readonly limitBytes: number) {}
+
+  append(chunk: Buffer): 'captured' | 'truncated' {
+    const remaining = this.limitBytes - this.#capturedBytes;
+    if (remaining > 0) {
+      const captured = chunk.byteLength > remaining ? chunk.subarray(0, remaining) : chunk;
+      this.#chunks.push(captured);
+      this.#capturedBytes += captured.byteLength;
+    }
+    if (chunk.byteLength <= remaining) return 'captured';
+    this.#truncated = true;
+    return 'truncated';
+  }
+
+  toString(): string {
+    return Buffer.concat(this.#chunks).toString('utf8');
+  }
+
+  get truncated(): boolean {
+    return this.#truncated;
+  }
+}
+
+function freezeProcessResult(
+  started: number,
+  capturedOutput: BoundedOutputCapture,
+  status: Pick<ScriptResult, 'ok' | 'exitStatus' | 'timedOut'>,
+): ScriptResult {
+  const fullOutput = capturedOutput.toString();
+  return Object.freeze({
+    ...status,
+    output: truncateOutput(fullOutput),
+    fullOutput,
+    durationMs: Date.now() - started,
+    ...(capturedOutput.truncated ? { outputTruncated: true } : {}),
+  });
+}
+
+function freezeProcessError(started: number, err: Error): ScriptResult {
+  return Object.freeze({
+    ok: false,
+    exitStatus: null,
+    output: err.message,
+    fullOutput: err.message,
+    durationMs: Date.now() - started,
+    timedOut: false,
   });
 }
