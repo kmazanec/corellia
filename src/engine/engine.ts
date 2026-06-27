@@ -19,7 +19,6 @@ import type { Artifact, Report } from '../contract/report.js';
 import type { Verdict, Finding } from '../contract/verdict.js';
 import type { EventStore } from '../contract/events.js';
 import type { Brain, BrainContext, StepTranscript } from '../contract/brain.js';
-import { MalformedStepError, StepTransportError } from '../contract/brain.js';
 import type { Registry, GoalTypeDef } from '../contract/goal-type.js';
 import type { MemoryView } from '../contract/memory.js';
 import type { RiskClass, SensitivityFact } from '../contract/risk.js';
@@ -59,8 +58,14 @@ import {
 } from './step-loop-guards.js';
 import { buildStepLoopInitialTranscript } from './step-loop-context.js';
 import { runForcedEmit, runStructuredArtifactEmit } from './step-loop-emit.js';
+import { handleStepLoopStepError } from './step-loop-errors.js';
 import { routeStepToolCalls } from './step-loop-router.js';
-import { boundStepLoopTranscript, evictTranscriptAfterTruncation } from './step-loop-transcript.js';
+import {
+  checkStepLoopToolBudget,
+  stepLoopHardToolCallCap,
+  updateRemainingToolCallContext,
+} from './step-loop-budget.js';
+import { boundStepLoopTranscript } from './step-loop-transcript.js';
 import { NOTE_TOOL_DEF, deriveToolDefs, isToolGranted } from './step-loop-tools.js';
 import {
   stepLoopFailureArtifact,
@@ -1551,15 +1556,7 @@ export class Engine {
     // evicted without losing the substance. Appended to the model's tool surface.
     tools.push(NOTE_TOOL_DEF);
     let remainingToolCalls = budget.toolCalls;
-    // Warn-only runaway backstop: even when the toolCalls budget is not enforced
-    // (the default), a model that never emits must still terminate. The tokens
-    // budget and dollar ceiling are the real backstops in live runs, but they
-    // rely on provider-reported usage — a brain that reports none (or a tight
-    // pathological loop) would otherwise spin forever. So warn-only mode still
-    // hard-stops at a generous multiple of the soft budget. This is a safety
-    // limit, not an economy lever; raise the multiple, don't lower it.
-    const WARN_ONLY_BACKSTOP_MULTIPLE = 50;
-    const hardToolCallCap = Math.max(budget.toolCalls, 1) * WARN_ONLY_BACKSTOP_MULTIPLE;
+    const hardToolCallCap = stepLoopHardToolCallCap(budget.toolCalls);
     let toolCallsMade = 0;
     let stepIndex = 0;
     // Count read-class calls for the over-explore signal only — NOT to force an
@@ -1614,40 +1611,26 @@ export class Engine {
     let toolBudgetWarned = false;
 
     while (true) {
-      // Gate: the toolCalls budget. When enforced, exhaustion blocks the run.
-      // When WARN-ONLY (the default — see EngineOptions.enforceToolCallBudget),
-      // emit the budget-exhausted signal exactly once and keep going: the tokens
-      // budget (debited per step by the caller) and the dollar ceiling (checked
-      // after every step below) remain the hard backstops, so a non-emitting
-      // model still terminates — it is the toolCalls *block* that is relaxed,
-      // not the safety net.
-      if (remainingToolCalls <= 0) {
-        if (this.enforceToolCallBudget) {
-          return { kind: 'exhausted', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
-        }
-        if (!toolBudgetWarned) {
-          await this.store.append({ type: 'budget-exhausted', at: t(), goalId: goal.id, dimension: 'toolCalls' });
-          toolBudgetWarned = true;
-        }
-        // Warn-only runaway backstop: a model that never converges still stops.
-        if (toolCallsMade >= hardToolCallCap) {
-          return { kind: 'exhausted', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
-        }
+      const budgetGate = await checkStepLoopToolBudget({
+        goal,
+        budget,
+        transcript,
+        store: this.store,
+        now: t,
+        enforceToolCallBudget: this.enforceToolCallBudget,
+        state: {
+          remainingToolCalls,
+          toolCallsMade,
+          warned: toolBudgetWarned,
+          hardToolCallCap,
+        },
+      });
+      if (budgetGate.kind === 'exhausted') {
+        return budgetGate;
       }
+      toolBudgetWarned = budgetGate.state.warned;
 
-      // Update the context message (replace last context). Once over the soft
-      // budget in warn-only mode, the model is told it is over budget rather than
-      // shown a negative count — a nudge to converge without a hard stop.
-      const remainingMsg =
-        remainingToolCalls > 0
-          ? `${remainingToolCalls} tool calls remaining`
-          : `tool-call budget exceeded (over by ${-remainingToolCalls}); converge and emit the artifact now`;
-      const lastMsg = transcript[transcript.length - 1];
-      if (lastMsg && lastMsg.role === 'context') {
-        (transcript[transcript.length - 1] as { role: 'context'; content: string }).content = remainingMsg;
-      } else {
-        transcript.push({ role: 'context', content: remainingMsg });
-      }
+      updateRemainingToolCallContext(transcript, remainingToolCalls);
 
       // Comprehend over-explore backstop: the read ceiling was crossed. Instead of
       // nudging the model and HOPING it volunteers the artifact (it may keep
@@ -1720,59 +1703,25 @@ export class Engine {
       try {
         stepOutput = await this.brain.step(goal, transcript, tools, ctx);
       } catch (err) {
-        // A malformed/truncated tool-call (MalformedStepError) is a FORMAT incident,
-        // not a logical failure — recover ONCE by forcing a clean emit rather than
-        // letting two `step-loop:failed` signatures isomorphic-block the leaf with
-        // nothing produced (the author-leaf-first-step failure: a structured emit
-        // whose args were unparseable/cut off killed the leaf before any real step).
-        if (err instanceof MalformedStepError && !malformRecoveryUsed) {
-          malformRecoveryUsed = true;
-          await this.store.append({
-            type: 'malformation-reprompt',
-            at: t(),
-            goalId: goal.id,
-            detail: err.truncated
-              ? 'malformed+truncated tool-call — forcing a clean emit'
-              : 'malformed tool-call — forcing a clean emit',
-          });
-          // If the output was truncated by size, shed context first so the forced
-          // emit has room; then drive the emit on the next iteration.
-          if (err.truncated) {
-            await evictTranscriptAfterTruncation({
-              goal,
-              transcript,
-              scratchpad,
-              store: this.store,
-              now: t,
-              seenCalls,
-              callKeyByCallId,
-            });
-          }
-          transcript.push({
-            role: 'context',
-            content:
-              `Your previous tool-call output was malformed${err.truncated ? ' or cut off' : ''} ` +
-              `and could not be parsed. Do NOT repeat it. Make a SMALLER move now: ` +
-              `emit the final artifact directly (matching the required schema if one ` +
-              `applies), not a large or partial tool call.`,
-          });
-          forceEmitNext = true;
+        const stepError = await handleStepLoopStepError({
+          err,
+          goal,
+          budget,
+          remainingToolCalls,
+          transcript,
+          scratchpad,
+          store: this.store,
+          now: t,
+          seenCalls,
+          callKeyByCallId,
+          malformRecoveryUsed,
+        });
+        if (stepError.kind === 'recover') {
+          malformRecoveryUsed = stepError.malformRecoveryUsed;
+          forceEmitNext = stepError.forceEmitNext;
           continue;
         }
-        // A transport incident that survived the adapter's retries (canonically a
-        // timed-out step on a slow/flaky endpoint) is NOT a logical failure — give it
-        // a distinct `step-loop:transport` signature so two of them don't
-        // isomorphic-block the leaf as `step-loop:failed`, and leave it for the
-        // attempt ladder to retry on a healthier endpoint (run live-self-6060bbf1: an
-        // author leaf's step timed out and was terminal-blocked as non-convergence).
-        const error = err instanceof Error ? err.message : String(err);
-        const failKind: 'failed' | 'malformed' | 'transport' =
-          err instanceof MalformedStepError
-            ? 'malformed'
-            : err instanceof StepTransportError
-              ? 'transport'
-              : 'failed';
-        return { kind: 'failed', error, failKind, budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
+        return stepError.result;
       }
 
       // Emit step event and debit usage
