@@ -89,6 +89,7 @@ import {
 } from './coverage-gate.js';
 import { checkpointVerifyArtifacts } from './coverage-checkpoint.js';
 import { appendGoldenCandidate, enrichRubric } from './judge-support.js';
+import { diveFactsAsMemories } from './knowledge-memory.js';
 
 export { WORST_CASE_PRICE_PER_TOKEN };
 
@@ -1236,44 +1237,6 @@ export class Engine {
     const persist = this.knowledge?.persist;
     if (persist === undefined) return;
     await persist(goal, artifact);
-  }
-
-  /**
-   * The dive→build knowledge handoff (ADR-040). Pull the RegionFacts a dependency
-   * deep-dive produced for regions overlapping `scope` and adapt each anchored fact
-   * into a `MemoryPointer` (pointers, not bodies: the claim + its `path:line`
-   * anchors, never file contents). Freshness gates provenance: a fact whose dive
-   * SHA matches HEAD reads as `trusted`; a drifted one reads as `provisional` (a
-   * suggestion to weigh — verify-on-read, ADR-019). Returns [] when the wiring or
-   * repo root is absent (behavior as before this ADR).
-   */
-  private async diveFactsAsMemories(
-    repoRoot: string,
-    scope: string[],
-    headSha: string,
-  ): Promise<MemoryPointer[]> {
-    const factsForRegions = this.knowledge?.factsForRegions;
-    if (factsForRegions === undefined || repoRoot.length === 0) return [];
-    let regionFacts: RegionFacts[];
-    try {
-      regionFacts = await factsForRegions(repoRoot, scope);
-    } catch {
-      return [];
-    }
-    const pointers: MemoryPointer[] = [];
-    for (const rf of regionFacts) {
-      const fresh = headSha.length > 0 && rf.generatedAtSha === headSha;
-      rf.facts.forEach((f, i) => {
-        const anchors = f.anchors.map((a) => `${a.path}:${a.line}`).join(', ');
-        pointers.push({
-          id: `dive:${rf.region}#${i}`,
-          layer: 'project',
-          content: anchors.length > 0 ? `${f.claim} — ${anchors}` : f.claim,
-          provenance: fresh ? 'trusted' : 'provisional',
-        });
-      });
-    }
-    return pointers;
   }
 
   // ── ATTEMPT LOOP (the control loop) ──────────────────────────────────────
@@ -2879,7 +2842,12 @@ export class Engine {
           if (this.knowledge?.headSha !== undefined && spawnRepoRoot.length > 0) {
             try { spawnHeadSha = await this.knowledge.headSha(spawnRepoRoot); } catch { spawnHeadSha = ''; }
           }
-          const diveMemories = await this.diveFactsAsMemories(spawnRepoRoot, childGoal.scope, spawnHeadSha);
+          const diveMemories = await diveFactsAsMemories({
+            factsForRegions: this.knowledge?.factsForRegions,
+            repoRoot: spawnRepoRoot,
+            scope: childGoal.scope,
+            headSha: spawnHeadSha,
+          });
           const childGoalWithFacts: Goal =
             diveMemories.length > 0
               ? { ...childGoal, memories: [...childGoal.memories, ...diveMemories] }
