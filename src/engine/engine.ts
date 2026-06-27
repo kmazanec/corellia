@@ -14,7 +14,7 @@
  */
 
 import type { Goal, Tier, Budget, Usage } from '../contract/goal.js';
-import type { Decision, ChildPlan } from '../contract/decision.js';
+import type { ChildPlan } from '../contract/decision.js';
 import type { Artifact, Report } from '../contract/report.js';
 import type { Verdict, Finding } from '../contract/verdict.js';
 import type { EventStore } from '../contract/events.js';
@@ -28,7 +28,6 @@ import { debitAttempt, debitTokenCount, debitTokenUsage } from './budget-events.
 import { lintLibrary } from '../library/constitution.js';
 import { loadFamilySkill } from '../library/skills.js';
 import { classifyRisk } from '../library/risk.js';
-import { specShape } from '../flywheel/shape.js';
 import type { CheckContext } from '../contract/goal-type.js';
 import {
   openSandboxAssembly,
@@ -70,14 +69,6 @@ import { appendGoldenCandidate } from './judge-support.js';
 import { runAuthorityGate } from './authority-gate.js';
 import { runDeterministicGate } from './deterministic-gate.js';
 import { judgeLeafArtifact } from './leaf-judge.js';
-import {
-  runMustDecomposeGuard,
-} from './decision/must-decompose-guard.js';
-import {
-  buildDecisionContext,
-  memoStatus as deriveMemoStatus,
-  shouldRunTerracedScan,
-} from './decision/context.js';
 import { produceClassicArtifact } from './attempt/classic-produce.js';
 import { checkEmissionAuthority } from './attempt/emission-authority.js';
 import { resolveAttemptFailure } from './attempt/failure.js';
@@ -94,8 +85,7 @@ import {
 import { runLeafTournament } from './attempt/leaf-tournament.js';
 import { recheckArtifactAfterRepair } from './attempt/recheck.js';
 import { emitSuccessfulArtifact } from './attempt/success.js';
-import { acceptSplitDecision } from './decision/split-acceptance.js';
-import { runTerracedScan } from './decision/terraced-scan.js';
+import { resolveDecisionPhase } from './decision/phase.js';
 import { runSplitRound, type SplitRoundResult } from './split-round.js';
 import {
   assessMilestoneRound,
@@ -533,199 +523,31 @@ export class Engine {
     });
     if (authorityReport !== null) return authorityReport;
 
-    // ── DECIDE ─────────────────────────────────────────────────────────────
-    // leafOnly types go straight to the attempt loop; non-leaf types decide.
-    // Non-leaf types consult the pattern store first: a trusted memo is walked
-    // verbatim; a provisional memo is passed as a hint to the brain; for a
-    // novel shape with scan.k > 1, a terraced scan generates k lens-diverse
-    // candidates and judge-split ranks them before committing.
-    let decision: Decision;
-    // Findings from losing terraced-scan candidates; threaded into the split report.
-    let terracedLoserFindings: string[] = [];
-    // Usage from the decide call that set the final decision (for the decided event).
-    let decideUsage: Usage | undefined;
-
-    if (typeDef.leafOnly) {
-      decision = { kind: 'satisfy' };
-    } else {
-      const shape = specShape(goal);
-
-      // ── PATTERN STORE CONSULTATION ─────────────────────────────────────
-      const memo = this.patterns ? await this.patterns.match(shape) : null;
-      const memoStatus = deriveMemoStatus(memo);
-
-      await this.store.append({
-        type: 'pattern-consulted',
-        at: t(),
-        goalId: goal.id,
-        shape,
-        status: memoStatus,
-      });
-
-      if (memoStatus === 'trusted' && memo !== null) {
-        // TRUSTED MEMO — walk verbatim, skip fresh derivation. The brain is
-        // never consulted for the decision itself: the structure was already
-        // underwritten by a human signoff. The split eval and all downstream
-        // evals still run — trust skips derivation, never judgment.
-        decision = memo.decision;
-      } else {
-        // Build the base BrainContext, carrying the provisional memo as a hint
-        // when one exists (the brain weighs it, never obeys it). Inject the family
-        // skill so the brain decides satisfy-vs-split WITH the craft guidance it
-        // already gets at produce/judge time — without it the decide call is blind
-        // (e.g. comprehension over-splits: a map-repo splitting needlessly).
-        const decideSkill = this.decideSkillBlock(goal.type);
-        const repoShape = this.repoShapeHint(goal);
-        const baseCtx = buildDecisionContext({
-          goal,
-          typeDef,
-          tier: currentTier,
-          memo,
-          skill: decideSkill,
-          repoShape,
-        });
-
-        const scan = typeDef.scan;
-        if (scan !== undefined && shouldRunTerracedScan({
-          scan,
-          memoStatus,
-          hasJudgeSplit: this.registry.has('judge-split'),
-        })) {
-          // ── TERRACED SCAN — novel shape, k > 1 ────────────────────────
-          // Generate k lens-diverse candidates and rank them with judge-split.
-          // The winning candidate (first pass, tie-broken by fewest findings)
-          // becomes the decision; losers are collected as low-severity findings
-          // ("alternatives considered") and surfaced in the split report.
-          const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
-          const scanResult = await runTerracedScan({
-            goal,
-            k: scan.k,
-            lenses: scan.lenses,
-            baseCtx,
-            tier: currentTier,
-            brain: this.brain,
-            registry: this.registry,
-            store: this.store,
-            now: t,
-            goldenCapture: this.goldenCapture,
-            ...(brainConfig !== undefined ? { brainConfig } : {}),
-            debitUsage: (usage) => debitTreeState(treeState, usage),
-            hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
-          });
-          if ('ceiling' in scanResult) {
-            return this.ceilingReport(goal, treeState);
-          }
-          decision = scanResult.decision;
-          terracedLoserFindings = scanResult.loserFindings;
-          decideUsage = scanResult.winnerUsage;
-        } else {
-          // Normal single-derive path: no memo, or scan not warranted.
-          const decideResult = await this.brain.decide(goal, baseCtx);
-          decision = decideResult.value;
-          decideUsage = decideResult.usage;
-          debitTreeState(treeState, decideResult.usage);
-          if (hasReachedSpendCeiling(treeState)) {
-            await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision, usage: decideResult.usage });
-            return this.ceilingReport(goal, treeState);
-          }
-        }
-      }
-    }
-
-    // Backstop: a comprehend-family goal that DECIDES to block here is blocking
-    // before running a single tool (this top-level decide precedes the attempt
-    // loop) — blocking-without-effort, almost always a misread (e.g. it tried an
-    // absolute path, got refused, and concluded the repo is unreachable; traced on
-    // AC-3 run #1). A comprehension goal cannot legitimately know it is blocked
-    // until it has actually probed the sandbox. Coerce the block into a satisfy so
-    // the goal MUST try its tools; a genuine blocker can still surface from the
-    // attempt loop after real probing. Scoped to the comprehend family (the
-    // discovery family) so deliver/build blocks are untouched.
-    if (decision.kind === 'block' && typeDef.family === 'comprehend') {
-      await this.store.append({
-        type: 'decided',
-        at: t(),
-        goalId: goal.id,
-        decision,
-        ...(decideUsage !== undefined ? { usage: decideUsage } : {}),
-      });
-      decision = { kind: 'satisfy' };
-    }
-
-    // ── CANNOT-SATISFY GUARD (with one corrective re-decide) ───────────────
-    // A `mustDecompose` type (canonically the deliver-intent root) has no
-    // producing tool and CANNOT satisfy — its only legitimate decisions are split
-    // or block. The decide prompt already omits the satisfy shape and forbids it
-    // (`mustDecompose` ctx). But the brain can still return satisfy in defiance
-    // (observed live-self-2e2ece33: a fresh first decision came back `satisfy` in
-    // 8 completion tokens despite the instruction). A terminal block on that single
-    // slip dead-ends the whole intent with no recovery, even though the model
-    // plainly did not deliberate. So RE-DECIDE ONCE with a sharp correction; only a
-    // REPEATED satisfy (the model had its chance and refused) terminal-blocks. A
-    // corrected split/block then flows through the normal SPLIT EVAL + dispatch
-    // below, so this must run BEFORE the split-eval. The invariant is declared on
-    // the type (`mustDecompose`), not inferred from grants — "capability is the
-    // type" (GOAL-TYPES.md) — so it stays lintable.
-    // (See docs/issues/mustdecompose-satisfy-terminal-block.md.)
-    const mustDecompose = await runMustDecomposeGuard({
-      enabled: typeDef.mustDecompose === true,
+    const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
+    const decisionPhase = await resolveDecisionPhase({
       goal,
-      decision,
-      decideUsage,
+      typeDef,
       tier: currentTier,
-      skill: this.decideSkillBlock(goal.type),
-      repoShape: this.repoShapeHint(goal),
+      registry: this.registry,
       brain: this.brain,
       store: this.store,
       now: t,
+      patterns: this.patterns,
+      goldenCapture: this.goldenCapture,
+      ...(brainConfig !== undefined ? { brainConfig } : {}),
+      skillForGoalType: (goalType) => this.decideSkillBlock(goalType),
+      repoShapeForGoal: (goalForShape) => this.repoShapeHint(goalForShape),
       debitUsage: (usage) => debitTreeState(treeState, usage),
       hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
     });
-    if (mustDecompose.kind === 'ceiling') {
+    if (decisionPhase.kind === 'ceiling') {
       return this.ceilingReport(goal, treeState);
     }
-    if (mustDecompose.kind === 'blocked') {
-      return mustDecompose.report;
-    }
-    if (mustDecompose.kind === 'adopted') {
-      // The corrected decision is a split or block — adopt it and fall through to
-      // the normal SPLIT EVAL + dispatch path (which records the `decided` event).
-      decision = mustDecompose.decision;
-      decideUsage = mustDecompose.decideUsage;
+    if (decisionPhase.kind === 'emitted') {
+      return decisionPhase.report;
     }
 
-    // The shape is captured for the post-subtree record call.
-    const goalShape = typeDef.leafOnly ? null : specShape(goal);
-
-    // ── SPLIT EVAL (before committing to a split) ──────────────────────────
-    // When the decision is a split, validate it and optionally judge it.
-    if (decision.kind === 'split') {
-      const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
-      const accepted = await acceptSplitDecision({
-        goal,
-        typeDef,
-        decision,
-        decideUsage,
-        tier: currentTier,
-        registry: this.registry,
-        brain: this.brain,
-        store: this.store,
-        now: t,
-        goldenCapture: this.goldenCapture,
-        ...(brainConfig !== undefined ? { brainConfig } : {}),
-        debitUsage: (usage) => debitTreeState(treeState, usage),
-        hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
-      });
-      if (accepted.kind === 'ceiling') {
-        return this.ceilingReport(goal, treeState);
-      }
-      if (accepted.kind === 'emitted') {
-        return accepted.report;
-      }
-      decision = accepted.decision;
-      decideUsage = accepted.decideUsage;
-    }
-
+    const { decision, decideUsage, terracedLoserFindings, goalShape } = decisionPhase;
     await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision, ...(decideUsage !== undefined ? { usage: decideUsage } : {}) });
 
     // ── DISPATCH on decision kind ──────────────────────────────────────────
@@ -1215,13 +1037,6 @@ export class Engine {
       });
     }
   }
-
-  /**
-   * Run the engine-owned step loop for a tool-granted leaf. The brain is called
-   * pure per step; the engine gates each step on remaining toolCalls budget,
-   * routes tool calls through the broker, and logs every step and result. Returns
-   * either the final artifact (with updated budget) or a failure descriptor.
-   */
 
   /**
    * Append a `golden-candidate` event when goldenCapture is enabled (ADR-024).
