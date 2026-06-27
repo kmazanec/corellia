@@ -23,7 +23,7 @@ import type { Goal, Metered, TransportIncident, Usage } from '../contract/goal.j
 import { ZERO_USAGE } from '../contract/goal.js';
 import type { Tier } from '../contract/goal.js';
 import type { MemoryPointer } from '../contract/goal.js';
-import type { Decision, ChildPlan } from '../contract/decision.js';
+import type { Decision, ChildPlan, DecisionBrief } from '../contract/decision.js';
 import type { Artifact } from '../contract/report.js';
 import type { ToolDef, ToolCall } from '../contract/tool.js';
 import type { Verdict, Finding } from '../contract/verdict.js';
@@ -765,11 +765,68 @@ function parseDecision(raw: string, mustDecompose = false): Decision {
     return { kind: 'split', children: fillBudgetShares(normalized) };
   }
   if (kind === 'block') {
-    const brief = obj['brief'];
-    if (typeof brief !== 'object' || brief === null) throw new Error('block decision missing brief');
-    return { kind: 'block', brief: brief as Decision extends { kind: 'block'; brief: infer B } ? B : never };
+    return { kind: 'block', brief: normalizeDecisionBrief(obj['brief']) };
   }
   throw new Error(`Unknown decision kind: ${String(kind)}`);
+}
+
+function normalizeDecisionBrief(raw: unknown): DecisionBrief {
+  if (!isPlainObject(raw)) throw new Error('block decision missing brief');
+
+  const question = stringField(raw, 'question');
+  if (question.length === 0) throw new Error('block decision brief.question must be a non-empty string');
+
+  const options = stringArrayField(raw, 'options');
+  if (options.length === 0) throw new Error('block decision brief.options must contain at least one option');
+
+  const links = stringArrayField(raw, 'links');
+  const deadlineMs = raw['deadlineMs'];
+  if (typeof deadlineMs !== 'number' || !Number.isFinite(deadlineMs) || deadlineMs < 0) {
+    throw new Error('block decision brief.deadlineMs must be a non-negative finite number');
+  }
+
+  const onTimeout = raw['onTimeout'];
+  if (onTimeout !== 'deny' && onTimeout !== 'park' && onTimeout !== 'bounce') {
+    throw new Error('block decision brief.onTimeout must be deny, park, or bounce');
+  }
+
+  const teaching = raw['teaching'];
+  return {
+    question,
+    options,
+    links,
+    deadlineMs,
+    onTimeout,
+    ...(teaching === undefined ? {} : { teaching: normalizeBriefTeaching(teaching) }),
+  };
+}
+
+function normalizeBriefTeaching(raw: unknown): NonNullable<DecisionBrief['teaching']> {
+  if (!isPlainObject(raw)) throw new Error('block decision brief.teaching must be an object when present');
+  return {
+    finding: stringField(raw, 'finding'),
+    confidence: stringField(raw, 'confidence'),
+    costs: stringField(raw, 'costs'),
+    recommendation: stringField(raw, 'recommendation'),
+  };
+}
+
+function stringField(obj: Record<string, unknown>, key: string): string {
+  const value = obj[key];
+  if (typeof value !== 'string') throw new Error(`block decision brief.${key} must be a string`);
+  return value.trim();
+}
+
+function stringArrayField(obj: Record<string, unknown>, key: string): string[] {
+  const value = obj[key];
+  if (!Array.isArray(value) || !value.every((entry) => typeof entry === 'string')) {
+    throw new Error(`block decision brief.${key} must be an array of strings`);
+  }
+  return value.map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isValidDimension(d: unknown): d is Finding['dimension'] {

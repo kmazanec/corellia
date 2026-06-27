@@ -157,6 +157,54 @@ describe('LlmBrain.decide', () => {
     expect(result.value.kind).toBe('split');
   });
 
+  it('parses and trims a valid block decision brief', async () => {
+    const { fetch } = stubFetch(
+      chatResponse(JSON.stringify({
+        kind: 'block',
+        brief: {
+          question: '  Choose a path  ',
+          options: [' wait ', ' stop '],
+          links: [' docs/decision.md '],
+          deadlineMs: 1000,
+          onTimeout: 'park',
+        },
+      })),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(result.value.kind).toBe('block');
+    if (result.value.kind !== 'block') throw new Error('expected block');
+    expect(result.value.brief.question).toBe('Choose a path');
+    expect(result.value.brief.options).toEqual(['wait', 'stop']);
+    expect(result.value.brief.links).toEqual(['docs/decision.md']);
+    expect(result.value.brief.onTimeout).toBe('park');
+  });
+
+  it('re-asks when a block decision brief is malformed', async () => {
+    const { fetch, calls } = stubFetch(
+      chatResponse(JSON.stringify({
+        kind: 'block',
+        brief: { question: 'missing required fields', options: ['deny'], links: [], deadlineMs: 1000 },
+      })),
+      chatResponse(JSON.stringify({
+        kind: 'block',
+        brief: {
+          question: 'Valid now?',
+          options: ['deny'],
+          links: [],
+          deadlineMs: 1000,
+          onTimeout: 'deny',
+        },
+      })),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(calls).toHaveLength(2);
+    expect(result.value.kind).toBe('block');
+    if (result.value.kind !== 'block') throw new Error('expected block');
+    expect(result.value.brief.question).toBe('Valid now?');
+  });
+
   it('treats a split with no children array as satisfy (not a hard error)', async () => {
     // Regression (iteration-08 live:self): the model returned `{"kind":"split"}`
     // with no `children`. parseDecision threw, the decide-fallback then blocked
