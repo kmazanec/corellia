@@ -808,6 +808,31 @@ describe('LlmBrain.repair', () => {
   });
 });
 
+describe('LlmBrain.summarize (working-memory bound, ADR-036)', () => {
+  it('distills a read on the LOW tier regardless of ctx.tier, returning the gist + usage', async () => {
+    const { fetch, calls } = stubFetch(
+      chatResponseWithUsage('exports parseConfig() at line 12; validates env.', {
+        prompt_tokens: 200, completion_tokens: 18, cost: 0.0001,
+      }),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    // Pass a HIGH ctx tier — summarize must still use the low model (cheap compression).
+    const result = await brain.summarize('export function parseConfig() { /* ... */ }', { tier: 'high', memories: [] });
+    expect(result.value).toContain('parseConfig');
+    expect(result.usage.completionTokens).toBe(18);
+    expect(JSON.parse(calls[0]!.options.body as string).model).toBe('low-model');
+  });
+
+  it('feeds the read content into the user message', async () => {
+    const { fetch, calls } = stubFetch(chatResponseWithUsage('gist', { prompt_tokens: 1, completion_tokens: 1 }));
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    await brain.summarize('UNIQUE_MARKER_CONTENT_42', { tier: 'mid', memories: [] });
+    const body = JSON.parse(calls[0]!.options.body as string);
+    const userMsg: string = body.messages.find((m: { role: string }) => m.role === 'user').content;
+    expect(userMsg).toContain('UNIQUE_MARKER_CONTENT_42');
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Real usage parsing (ADR-017)
 // ---------------------------------------------------------------------------

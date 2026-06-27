@@ -1864,7 +1864,7 @@ describe('working-memory bound (ADR-036)', () => {
 
   it('evicts an oversized tool read and emits a context-evicted event; the stub replaces it', async () => {
     const store = new MemoryEventStore();
-    const huge = 'A'.repeat(300_000); // ~75K tokens > 60K cap
+    const huge = 'A'.repeat(600_000); // ~150K tokens > 140K cap
     const { brain, transcripts } = capturingBrain([
       { kind: 'tool-calls', calls: [toolCall('r1', 'read_file')], usage: ZERO_USAGE },
       { kind: 'tool-calls', calls: [toolCall('r2', 'read_file')], usage: ZERO_USAGE },

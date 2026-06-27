@@ -51,11 +51,19 @@ export function transcriptTokens(transcript: StepTranscript): number {
  * Set well below the model's context/output limits so a tool-call response is never
  * truncated by transcript size (build #8 truncated near ~117K prompt tokens). The
  * cap bounds the PROMPT the leaf sends; it is not a budget lever (ADR-033).
+ *
+ * Raised 60K→140K (run live-self-bcc825bb): at 60K a build leaf evicted after only
+ * ~6 of corellia's large source files and thrashed — 170 reads / 46 evictions / 0
+ * writes, a re-read sawtooth that never converged. The mid build tier (DeepSeek V4
+ * Pro) has a ~384K context, so 140K leaves ample headroom against truncation while
+ * letting a cross-cutting change hold a real working set in view. Paired with
+ * summarize-on-evict (a distilling stub, not a bare re-read invite) and ranged reads
+ * so a single huge file cannot blow the cap alone.
  */
-export const TRANSCRIPT_TOKEN_CAP = 60_000;
+export const TRANSCRIPT_TOKEN_CAP = 140_000;
 
 /** Keep at least this many of the most-recent `role: 'tool'` reads verbatim. */
-export const KEEP_RECENT_READS = 4;
+export const KEEP_RECENT_READS = 8;
 
 /** The stub a path's evicted content is replaced with. `lines` is best-effort. */
 export function evictionStub(callId: string, lines: number): string {
@@ -63,6 +71,19 @@ export function evictionStub(callId: string, lines: number): string {
     `[evicted: a tool result read earlier (~${lines} lines) has been dropped from ` +
     `context to bound working memory (ADR-036). Re-read the file if you need it ` +
     `again, or consult your notes.] (ref ${callId})`
+  );
+}
+
+/**
+ * The stub for an evicted read whose content was DISTILLED by the summarizer — it
+ * carries the gist so the leaf retains orientation without re-reading. Falls back to
+ * {@link evictionStub} when no summary is available.
+ */
+export function summarizedEvictionStub(callId: string, gist: string): string {
+  return (
+    `[evicted-summary: a longer tool result read earlier was distilled to bound ` +
+    `working memory (ADR-036). Gist: ${gist} — re-read the file only if you need ` +
+    `exact detail beyond this.] (ref ${callId})`
   );
 }
 
@@ -128,6 +149,64 @@ export function evictTranscript(
     beforeTokens,
     afterTokens: transcriptTokens(transcript),
     evictedCallIds,
+  };
+}
+
+/**
+ * Like {@link evictTranscript}, but each evicted read is replaced with a DISTILLED
+ * stub: `summarize(content)` produces a gist that survives in context, so the leaf
+ * keeps orientation without re-reading (ADR-036; run live-self-bcc825bb). The
+ * selection logic (oldest-first, protect the recent `keepRecent`, the cap is a hard
+ * bound) is identical to the sync path. If `summarize` throws for a given read, that
+ * read falls back to the blind stub — eviction must never fail the step. Returns the
+ * same {@link EvictionResult} plus the total tokens the summarizer call(s) spent.
+ */
+export async function evictTranscriptWithSummary(
+  transcript: StepTranscript,
+  summarize: (text: string) => Promise<{ gist: string; tokens: number }>,
+  cap: number = TRANSCRIPT_TOKEN_CAP,
+  keepRecent: number = KEEP_RECENT_READS,
+): Promise<EvictionResult & { summaryTokens: number }> {
+  const beforeTokens = transcriptTokens(transcript);
+  const evictedCallIds: string[] = [];
+  let summaryTokens = 0;
+
+  if (beforeTokens <= cap) {
+    return { evicted: false, beforeTokens, afterTokens: beforeTokens, evictedCallIds, summaryTokens };
+  }
+
+  const toolIdxs: number[] = [];
+  transcript.forEach((m, i) => {
+    if (m.role === 'tool' && !isStub(m.content)) toolIdxs.push(i);
+  });
+  const preferredEvictable = toolIdxs.slice(0, Math.max(0, toolIdxs.length - keepRecent));
+  const evictOrder = [...preferredEvictable, ...toolIdxs.slice(preferredEvictable.length)];
+
+  for (const idx of evictOrder) {
+    if (transcriptTokens(transcript) <= cap) break;
+    const msg = transcript[idx] as Extract<StepMessage, { role: 'tool' }>;
+    const lines = msg.content.split('\n').length;
+    let stub: string;
+    try {
+      const { gist, tokens } = await summarize(msg.content);
+      summaryTokens += tokens;
+      stub = gist.trim().length > 0
+        ? summarizedEvictionStub(msg.callId, gist.trim())
+        : evictionStub(msg.callId, lines);
+    } catch {
+      // Summarizer failed — never fail eviction; fall back to the blind stub.
+      stub = evictionStub(msg.callId, lines);
+    }
+    transcript[idx] = { role: 'tool', callId: msg.callId, content: stub };
+    evictedCallIds.push(msg.callId);
+  }
+
+  return {
+    evicted: evictedCallIds.length > 0,
+    beforeTokens,
+    afterTokens: transcriptTokens(transcript),
+    evictedCallIds,
+    summaryTokens,
   };
 }
 

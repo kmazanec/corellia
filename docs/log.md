@@ -16,6 +16,17 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-26
 
+- **The build-leaf working-memory bound stops thrashing — bigger cap, summarize-on-evict,
+  ranged reads.** A fully-fed implement leaf read 170 files across 46 evictions with 0
+  writes (slice-C run 16): the ADR-036 bound evicted after ~6 of corellia's large files,
+  blind-stubbed ~85% of context per pass, and read_file was whole-file only. Three fixes:
+  raise `TRANSCRIPT_TOKEN_CAP` 60K→140K (+ keep 8 recent reads); add an optional
+  `Brain.summarize` (low tier) so an evicted read leaves a distilled gist behind instead
+  of a bare re-read invite (`evictTranscriptWithSummary`, engine-wired with token debit,
+  blind-stub fallback); and give `read_file` `offset`/`limit` with a 400-line auto-bound
+  so one giant file can't blow the cap. Partially closes
+  [build-leaf-context-thrash](issues/build-leaf-context-thrash.md) (live re-proof pending).
+
 - **The deep-dive size-split signal measures bytes, not only file count.**
   `repoShapeHint` fired only on `files >= 40`, missing a few-but-huge region:
   `tests/engine` (33 files but ~642KB / ~17K lines) deep-dived as one node, ballooned,

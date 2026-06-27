@@ -44,7 +44,8 @@ import {
 } from './assembly.js';
 import { diffWithinScope, collectTree, preserveTree, commitRound, diffBodiesWithinScope, treeChangedWithinScope } from './worktree.js';
 import {
-  newScratchpad, addNote, renderScratchpad, evictTranscript, type Scratchpad,
+  newScratchpad, addNote, renderScratchpad, evictTranscript, evictTranscriptWithSummary,
+  type Scratchpad, type EvictionResult,
 } from './scratchpad.js';
 import {
   parseAcceptanceCriteria,
@@ -2168,6 +2169,31 @@ export class Engine {
     );
   }
 
+  /**
+   * Bound the transcript under the working-memory cap (ADR-036). When the brain
+   * provides `summarize`, each evicted read is distilled to a gist so the leaf keeps
+   * orientation without re-reading (run live-self-bcc825bb: blind eviction forced a
+   * read/evict thrash). The summarizer's tokens are debited to the tree spend like
+   * any other call. When `summarize` is absent (test brains, or a provider without
+   * it), falls back to the pure blind-stub eviction — behavior as before.
+   */
+  private async evictBoundedTranscript(
+    transcript: StepTranscript,
+    ctx: BrainContext,
+    treeState: TreeState,
+  ): Promise<EvictionResult & { summarized: boolean }> {
+    const summarizeFn = this.brain.summarize?.bind(this.brain);
+    if (summarizeFn === undefined) {
+      return { ...evictTranscript(transcript), summarized: false };
+    }
+    const result = await evictTranscriptWithSummary(transcript, async (text) => {
+      const metered = await summarizeFn(text, ctx);
+      this.debitTreeState(treeState, metered.usage);
+      return { gist: metered.value, tokens: metered.usage.completionTokens };
+    });
+    return { ...result, summarized: result.evicted };
+  }
+
   private async runStepLoop(
     goal: Goal,
     grants: string[],
@@ -2497,12 +2523,12 @@ export class Engine {
       // (distilled by the model) and recent reads survive; evicted paths are
       // released from the duplicate-read guard so the model may re-read on demand.
       syncScratchpadMessage(transcript, scratchpad);
-      const eviction = evictTranscript(transcript);
+      const eviction = await this.evictBoundedTranscript(transcript, ctx, treeState);
       if (eviction.evicted) {
         for (const cid of eviction.evictedCallIds) releaseGuardForCallId(seenCalls, callKeyByCallId, cid);
         await this.store.append({
           type: 'context-evicted', at: t(), goalId: goal.id,
-          detail: `${eviction.beforeTokens}→${eviction.afterTokens} est. tokens; ${eviction.evictedCallIds.length} read(s) stubbed`,
+          detail: `${eviction.beforeTokens}→${eviction.afterTokens} est. tokens; ${eviction.evictedCallIds.length} read(s) ${eviction.summarized ? 'summarized' : 'stubbed'}`,
         });
       }
 

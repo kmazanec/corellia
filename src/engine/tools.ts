@@ -44,6 +44,82 @@ export function resolveSandboxPath(root: string, rawPath: string): string | null
 }
 
 // ---------------------------------------------------------------------------
+// read_file line-range + large-file bounding
+// ---------------------------------------------------------------------------
+
+/**
+ * A whole-file read of a file longer than this many lines is auto-bounded to the
+ * first chunk, with a notice telling the model to page the rest via offset/limit.
+ * Stops one giant file (corellia's engine.ts is thousands of lines) from filling
+ * the working-memory cap on a single read (run live-self-bcc825bb context-thrash).
+ */
+export const READ_FILE_AUTO_BOUND_LINES = 400;
+
+type LineRange = { ok: true; offset: number; limit: number | undefined } | { ok: false; detail: string };
+
+/** Validate optional offset/limit args. Both must be positive integers when present. */
+function parseLineRange(args: Record<string, unknown>): LineRange {
+  let offset = 1;
+  let limit: number | undefined;
+  if (args['offset'] !== undefined) {
+    const o = args['offset'];
+    if (typeof o !== 'number' || !Number.isInteger(o) || o < 1) {
+      return { ok: false, detail: 'offset must be a positive integer (1-based line number)' };
+    }
+    offset = o;
+  }
+  if (args['limit'] !== undefined) {
+    const l = args['limit'];
+    if (typeof l !== 'number' || !Number.isInteger(l) || l < 1) {
+      return { ok: false, detail: 'limit must be a positive integer (max lines to return)' };
+    }
+    limit = l;
+  }
+  return { ok: true, offset, limit };
+}
+
+/**
+ * Return the requested slice of a file's content.
+ * - An explicit range (offset/limit) returns exactly that line window verbatim.
+ * - With NO range, a file at or under {@link READ_FILE_AUTO_BOUND_LINES} returns
+ *   whole; a longer file returns the first chunk plus a notice to page the rest.
+ * Content is returned verbatim (not line-numbered) so a leaf that copies a region
+ * into write_file is never corrupted by prefixes; the notice rides on a separate
+ * trailing line and names the line bounds so the model can page or narrow.
+ */
+export function sliceForRead(content: string, offset: number, limit: number | undefined): string {
+  const lines = content.split('\n');
+  // A trailing newline yields a final empty segment that is not a real line.
+  const lineCount = content.endsWith('\n') ? lines.length - 1 : lines.length;
+
+  const explicitRange = offset > 1 || limit !== undefined;
+  let start = offset; // 1-based
+  let end: number; // inclusive, 1-based
+  let notice = '';
+
+  if (explicitRange) {
+    if (start > lineCount) {
+      return `[read_file: offset ${start} is past end of file (${lineCount} lines).]`;
+    }
+    end = limit !== undefined ? Math.min(lineCount, start + limit - 1) : lineCount;
+    notice = `\n[read_file: lines ${start}-${end} of ${lineCount}.]`;
+  } else if (lineCount > READ_FILE_AUTO_BOUND_LINES) {
+    start = 1;
+    end = READ_FILE_AUTO_BOUND_LINES;
+    notice =
+      `\n[read_file: file is ${lineCount} lines; showing 1-${end}. ` +
+      `Call read_file again with offset=${end + 1} (and an optional limit) for the rest, ` +
+      `or read only the range you need.]`;
+  } else {
+    // Small whole-file read — return content exactly as before (no notice), so the
+    // common case is byte-identical to the pre-change behavior.
+    return content;
+  }
+
+  return lines.slice(start - 1, end).join('\n') + notice;
+}
+
+// ---------------------------------------------------------------------------
 // Tool factories bound to a sandbox root
 // ---------------------------------------------------------------------------
 
@@ -65,11 +141,24 @@ export function createFileTools(root: string): {
   const readFileImpl: ToolImpl = {
     def: {
       name: 'read_file',
-      description: 'Read the contents of a file inside the sandbox root. The path must be relative and must not escape the root.',
+      description:
+        'Read a file inside the sandbox root. The path must be relative and must not escape the root. ' +
+        'Optionally read a LINE RANGE via offset (1-based first line) and limit (max lines) — prefer a ' +
+        'range when you only need part of a large file, so you do not pull a whole huge file into context. ' +
+        `A whole-file read of a file longer than ${READ_FILE_AUTO_BOUND_LINES} lines is automatically ` +
+        'truncated to the first chunk with a notice; call again with offset/limit for the rest.',
       parameters: {
         type: 'object',
         properties: {
           path: { type: 'string', description: 'Relative path to the file, e.g. src/index.ts' },
+          offset: {
+            type: 'number',
+            description: '1-based line number to start reading from (optional; default 1).',
+          },
+          limit: {
+            type: 'number',
+            description: 'Maximum number of lines to return from offset (optional).',
+          },
         },
         required: ['path'],
       },
@@ -84,9 +173,16 @@ export function createFileTools(root: string): {
       if (full === null) {
         return { ok: false, output: `read_file: path "${rawPath}" is outside the sandbox root` };
       }
+
+      // Parse optional line-range args. A non-integer / out-of-range value is a
+      // soft error (the model can retry) rather than a silent whole-file read.
+      const rangeResult = parseLineRange(args);
+      if (!rangeResult.ok) return { ok: false, output: `read_file: ${rangeResult.detail}` };
+      const { offset, limit } = rangeResult;
+
       try {
         const content = await readFile(full, 'utf-8');
-        return { ok: true, output: content };
+        return { ok: true, output: sliceForRead(content, offset, limit) };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         return { ok: false, output: `read_file: ${message}` };

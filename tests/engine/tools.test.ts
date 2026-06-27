@@ -118,6 +118,58 @@ describe('read_file', () => {
     expect(result.ok).toBe(true);
     expect(result.output).toBe('hello');
   });
+
+  // ── ranged + large-file bounding (run live-self-bcc825bb context-thrash) ──
+  it('returns a small whole file byte-identically (no range, no notice)', async () => {
+    const { readFile } = createFileTools(sandboxRoot);
+    await writeFile(join(sandboxRoot, 'src', 'small.ts'), 'a\nb\nc\n');
+    const result = await readFile.execute(makeGoal(), { path: 'src/small.ts' });
+    expect(result.ok).toBe(true);
+    expect(result.output).toBe('a\nb\nc\n'); // exact — common case unchanged
+  });
+
+  it('returns only the requested line range with a range notice', async () => {
+    const { readFile } = createFileTools(sandboxRoot);
+    const body = Array.from({ length: 20 }, (_, i) => `line${i + 1}`).join('\n');
+    await writeFile(join(sandboxRoot, 'src', 'ranged.ts'), body);
+    const result = await readFile.execute(makeGoal(), { path: 'src/ranged.ts', offset: 5, limit: 3 });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain('line5\nline6\nline7');
+    expect(result.output).not.toContain('line8');
+    expect(result.output).toContain('lines 5-7 of 20');
+  });
+
+  it('auto-bounds a whole-file read of a large file and tells the model to page', async () => {
+    const { readFile } = createFileTools(sandboxRoot);
+    const body = Array.from({ length: 600 }, (_, i) => `L${i + 1}`).join('\n');
+    await writeFile(join(sandboxRoot, 'src', 'huge.ts'), body);
+    const result = await readFile.execute(makeGoal(), { path: 'src/huge.ts' });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain('L1\n');
+    expect(result.output).toContain('L400'); // first chunk
+    expect(result.output).not.toContain('L401');
+    expect(result.output).toContain('file is 600 lines; showing 1-400');
+    expect(result.output).toMatch(/offset=401/);
+  });
+
+  it('rejects a non-positive-integer offset/limit as a soft error', async () => {
+    const { readFile } = createFileTools(sandboxRoot);
+    await writeFile(join(sandboxRoot, 'src', 'r.ts'), 'x\n');
+    const bad = await readFile.execute(makeGoal(), { path: 'src/r.ts', offset: 0 });
+    expect(bad.ok).toBe(false);
+    expect(bad.output).toContain('offset must be a positive integer');
+    const bad2 = await readFile.execute(makeGoal(), { path: 'src/r.ts', limit: -3 });
+    expect(bad2.ok).toBe(false);
+    expect(bad2.output).toContain('limit must be a positive integer');
+  });
+
+  it('reports when offset is past end of file', async () => {
+    const { readFile } = createFileTools(sandboxRoot);
+    await writeFile(join(sandboxRoot, 'src', 'tiny.ts'), 'a\nb\n');
+    const result = await readFile.execute(makeGoal(), { path: 'src/tiny.ts', offset: 99 });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain('past end of file');
+  });
 });
 
 // ---------------------------------------------------------------------------

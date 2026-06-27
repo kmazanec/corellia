@@ -9,6 +9,7 @@ import {
   estimateTokens,
   transcriptTokens,
   evictTranscript,
+  evictTranscriptWithSummary,
   evictionStub,
   newScratchpad,
   addNote,
@@ -96,6 +97,50 @@ describe('evictTranscript', () => {
     expect(stub).toContain('812');
     expect(stub).toContain('call-9');
     expect(stub.toLowerCase()).toContain('re-read');
+  });
+});
+
+describe('evictTranscriptWithSummary', () => {
+  it('replaces an evicted read with the summarizer gist (not a blind re-read stub)', async () => {
+    const t: StepTranscript = Array.from({ length: 6 }, (_, i) => toolMsg(`c${i}`, 1000));
+    const r = await evictTranscriptWithSummary(
+      t,
+      async (text) => ({ gist: `gist of ${text.length} chars`, tokens: 7 }),
+      800,
+      KEEP_RECENT_READS,
+    );
+    expect(r.evicted).toBe(true);
+    expect(r.summaryTokens).toBeGreaterThan(0); // each evicted read cost summary tokens
+    const oldest = (t[0] as { content: string }).content;
+    expect(oldest).toContain('[evicted-summary:'); // distilled, not blind
+    expect(oldest).toContain('gist of');
+    // Recent reads still verbatim.
+    expect(t[5]!.content).toBe('x'.repeat(1000));
+  });
+
+  it('falls back to the blind stub for a read whose summarizer throws', async () => {
+    const t: StepTranscript = Array.from({ length: 6 }, (_, i) => toolMsg(`c${i}`, 1000));
+    const r = await evictTranscriptWithSummary(
+      t,
+      async () => { throw new Error('summarizer down'); },
+      800,
+      KEEP_RECENT_READS,
+    );
+    // Eviction still happened (never fails the step), via the blind stub.
+    expect(r.evicted).toBe(true);
+    expect((t[0] as { content: string }).content.startsWith('[evicted:')).toBe(true);
+  });
+
+  it('does nothing (no summarizer calls) when under the cap', async () => {
+    const t: StepTranscript = [toolMsg('a', 100), toolMsg('b', 100)];
+    let calls = 0;
+    const r = await evictTranscriptWithSummary(
+      t,
+      async (text) => { calls++; return { gist: 'x', tokens: 1 }; },
+      1_000_000,
+    );
+    expect(r.evicted).toBe(false);
+    expect(calls).toBe(0);
   });
 });
 

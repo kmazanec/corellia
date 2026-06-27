@@ -195,4 +195,15 @@ export interface Brain {
    * events, and gates the next step on remaining budget.
    */
   step(goal: Goal, transcript: StepTranscript, tools: ToolDef[], ctx: BrainContext): Promise<StepOutput>;
+  /**
+   * OPTIONAL: distill an evicted read into a terse gist for the working-memory
+   * bound (ADR-036). When the engine evicts a raw read to stay under the transcript
+   * cap, a summarizing brain replaces the content with this gist (what the file
+   * contained and why it mattered to the task) instead of a bare "re-read me" stub —
+   * so a build leaf retains orientation without re-reading (run live-self-bcc825bb:
+   * blind eviction forced a 170-read / 46-evict / 0-write thrash). Runs on the cheap
+   * tier by default. When absent (test brains, or a provider without it), the engine
+   * falls back to the blind stub — behavior as before, no test churn.
+   */
+  summarize?(text: string, ctx: BrainContext): Promise<Metered<string>>;
 }

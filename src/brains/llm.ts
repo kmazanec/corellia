@@ -1236,6 +1236,38 @@ export class LlmBrain implements Brain {
     return { value, usage: result.usage };
   }
 
+  /**
+   * Distill an evicted read to a terse gist for the working-memory bound (ADR-036).
+   * Runs on the cheap tier regardless of ctx.tier — eviction is a frequent, low-stakes
+   * compression, not the leaf's reasoning, so the LOW model is correct and keeps the
+   * cost negligible. Free-form text (no structured output): a few sentences naming
+   * what the read contained and the symbols/anchors that matter, so the leaf keeps
+   * orientation without re-reading.
+   */
+  async summarize(text: string, _ctx: BrainContext): Promise<Metered<string>> {
+    const model = this.config.modelByTier['low'];
+    const messages: ChatMessage[] = [
+      {
+        role: 'system',
+        content:
+          'You compress a single tool-read (usually a source file or file slice) into a ' +
+          'terse gist for an agent\'s durable working memory. The raw text is being dropped ' +
+          'from context to stay bounded; your gist is what survives.',
+      },
+      {
+        role: 'user',
+        content:
+          `Distill the following read into at most ~5 lines: what it is (path/kind if ` +
+          `discernible), the key symbols/exports/structures it defines, and any specific ` +
+          `line anchors or signatures an editor would need. Be concrete and factual; no ` +
+          `preamble, no markdown. If it is already short or trivial, say so in one line.\n\n` +
+          `READ CONTENT:\n${text}`,
+      },
+    ];
+    const result = await this.callCompletions(model, messages, false);
+    return { value: result.content.trim(), usage: result.usage };
+  }
+
   async step(
     _goal: Goal,
     transcript: StepTranscript,
