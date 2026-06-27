@@ -13,18 +13,16 @@
  * human-signoff step the engine never performs.
  */
 
-import type { Goal, Tier, Budget, Usage } from '../contract/goal.js';
+import type { Goal, Tier, Usage } from '../contract/goal.js';
 import type { ChildPlan } from '../contract/decision.js';
 import type { Artifact, Report } from '../contract/report.js';
-import type { Verdict } from '../contract/verdict.js';
 import type { EventStore } from '../contract/events.js';
 import type { Brain } from '../contract/brain.js';
-import type { Registry, GoalTypeDef } from '../contract/goal-type.js';
+import type { Registry } from '../contract/goal-type.js';
 import type { MemoryView } from '../contract/memory.js';
 import type { RiskClass, SensitivityFact } from '../contract/risk.js';
 import type { PatternStore } from '../contract/pattern.js';
 import type { ToolBroker } from '../contract/tool.js';
-import { debitAttempt } from './budget-events.js';
 import { lintLibrary } from '../library/constitution.js';
 import { loadFamilySkill } from '../library/skills.js';
 import type { CheckContext } from '../contract/goal-type.js';
@@ -41,7 +39,6 @@ import {
 } from '../library/coverage.js';
 import {
   blockedReport,
-  exhaustedBrief,
 } from './reports.js';
 import {
   DEFAULT_SPEND_CEILING_USD,
@@ -56,15 +53,7 @@ import { applyRootEmissionGate } from './root-emission-gate.js';
 import { finalizeSandboxedRun } from './sandbox-finalization.js';
 import { runSplitDispatch } from './split-dispatch.js';
 import { enterGoal } from './goal-entry.js';
-import { produceAttemptArtifact } from './attempt/artifact-production.js';
-import { evaluateAttemptArtifact } from './attempt/artifact-evaluation.js';
-import { resolveAttemptFailure } from './attempt/failure.js';
-import {
-  attemptBrainContext,
-  createAttemptLoopState,
-  withAttemptBudget,
-} from './attempt/state.js';
-import { recheckArtifactAfterRepair } from './attempt/recheck.js';
+import { createAttemptRunner } from './attempt/loop.js';
 import { resolveDecisionPhase } from './decision/phase.js';
 import { createSplitRunner } from './split-runner.js';
 
@@ -484,7 +473,15 @@ export class Engine {
     // ── DISPATCH on decision kind ──────────────────────────────────────────
     switch (decision.kind) {
       case 'satisfy':
-        return this.runAttemptLoop(goal, tier, tierIndex, tierLadder, deadline, entryRisk, treeState);
+        return this.attemptRunner().runAttemptLoop({
+          goal,
+          initialTier: tier,
+          initialTierIndex: tierIndex,
+          tierLadder,
+          deadline,
+          entryRisk,
+          treeState,
+        });
 
       case 'split': {
         const splitRunner = this.splitRunner();
@@ -528,6 +525,26 @@ export class Engine {
     await persist(goal, artifact);
   }
 
+  private attemptRunner() {
+    return createAttemptRunner({
+      registry: this.registry,
+      brain: this.brain,
+      store: this.store,
+      now: this.now,
+      effectiveBroker: () => this.effectiveBroker,
+      sandboxRepoRoot: () => this._activeAssembly?.worktree.repoRoot,
+      checkContextFor: (goalId) => this.checkContextFor(goalId),
+      sensitivity: this.sensitivity,
+      onGate: this.onGate,
+      onBrief: () => this.effectiveOnBrief,
+      enforceToolCallBudget: this.enforceToolCallBudget,
+      goldenCapture: this.goldenCapture,
+      persistLeafKnowledge: (goal, artifact) => this.persistLeafKnowledge(goal, artifact),
+      runBlock: (goal, brief) => this.runBlock(goal, brief),
+      ceilingReport: (goal, treeState) => this.ceilingReport(goal, treeState),
+    });
+  }
+
   private splitRunner() {
     return createSplitRunner({
       memory: this.memory,
@@ -545,222 +562,6 @@ export class Engine {
       decideSkillBlock: (goalType) => this.decideSkillBlock(goalType),
       ceilingReachedOnce: (goal, treeState) => this.ceilingReachedOnce(goal, treeState),
       ceilingReport: (goal, treeState) => this.ceilingReport(goal, treeState),
-    });
-  }
-
-  // ── ATTEMPT LOOP (the control loop) ──────────────────────────────────────
-  private async runAttemptLoop(
-    goal: Goal,
-    initialTier: Tier,
-    initialTierIndex: number,
-    tierLadder: Tier[],
-    deadline: number,
-    entryRisk: RiskClass = 'low',
-    treeState: TreeState = createTreeState(),
-  ): Promise<Report> {
-    const t = this.now;
-    const typeDef = this.registry.get(goal.type);
-    let attemptState = createAttemptLoopState({
-      budget: goal.budget,
-      tier: initialTier,
-      tierIndex: initialTierIndex,
-    });
-
-    while (true) {
-      // Check wall-clock budget before each attempt
-      if (t() >= deadline) {
-        await this.store.append({
-          type: 'budget-exhausted',
-          at: t(),
-          goalId: goal.id,
-          dimension: 'wallClockMs',
-        });
-        return this.runBlock(goal, exhaustedBrief(goal, 'wallClockMs'));
-      }
-
-      // Attempts is an observability counter, not a terminator (ADR-033). Emit
-      // the budget-exhausted signal once it crosses zero, then keep going — the
-      // dollar ceiling and wall-clock (checked above) are the only hard bounds.
-      attemptState = withAttemptBudget(
-        attemptState,
-        await debitAttempt({ budget: attemptState.budget, goal, store: this.store, now: t }),
-      );
-
-      const ctx = attemptBrainContext(goal, attemptState);
-
-      const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
-      const production = await produceAttemptArtifact({
-        goal,
-        typeDef,
-        state: attemptState,
-        ctx,
-        tierLadder,
-        broker: this.effectiveBroker,
-        sandboxRepoRoot: this._activeAssembly?.worktree.repoRoot,
-        brain: this.brain,
-        registry: this.registry,
-        store: this.store,
-        now: t,
-        enforceToolCallBudget: this.enforceToolCallBudget,
-        goldenCapture: this.goldenCapture,
-        ...(brainConfig !== undefined ? { brainConfig } : {}),
-        debitUsage: (usage) => debitTreeState(treeState, usage),
-        hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
-        resolveStepLoopFailure: (failureContext) =>
-          this.handleFailure(
-            goal,
-            failureContext.artifact,
-            failureContext.verdict,
-            failureContext.budget,
-            failureContext.tier,
-            failureContext.tierIndex,
-            tierLadder,
-            failureContext.priorAttempt,
-            treeState,
-          ),
-      });
-      if (production.kind === 'ceiling') {
-        return this.ceilingReport(goal, treeState);
-      }
-      if (production.kind === 'return') {
-        return production.report;
-      }
-      if (production.kind === 'retry') {
-        attemptState = production.state;
-        continue;
-      }
-      const {
-        artifact,
-        stepLoopTranscriptTail,
-        stepLoopTailFinding,
-        tournamentRan,
-      } = production;
-      attemptState = production.state;
-
-      const evaluation = await evaluateAttemptArtifact({
-        goal,
-        artifact,
-        typeDef,
-        state: attemptState,
-        tierLadder,
-        entryRisk,
-        stepLoopTailFinding,
-        stepLoopTranscriptTail,
-        tournamentRan,
-        registry: this.registry,
-        brain: this.brain,
-        store: this.store,
-        now: t,
-        checkContext: this.checkContextFor(goal.id),
-        sensitivity: this.sensitivity,
-        onGate: this.onGate,
-        onBrief: this.effectiveOnBrief,
-        enforceToolCallBudget: this.enforceToolCallBudget,
-        goldenCapture: this.goldenCapture,
-        ...(brainConfig !== undefined ? { brainConfig } : {}),
-        debitUsage: (usage) => debitTreeState(treeState, usage),
-        hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
-        blockOnToolCallExhausted: () => this.runBlock(goal, exhaustedBrief(goal, 'toolCalls')),
-        resolveFailure: (failureContext) =>
-          this.handleFailure(
-            goal,
-            failureContext.artifact,
-            failureContext.verdict,
-            failureContext.budget,
-            failureContext.tier,
-            failureContext.tierIndex,
-            tierLadder,
-            failureContext.priorAttempt,
-            treeState,
-          ),
-        recheck: (repairedArtifact, repairedBudget, repairedTier) =>
-          this.recheckArtifactAfterRepair(
-            goal,
-            repairedArtifact,
-            repairedBudget,
-            repairedTier,
-            typeDef,
-            treeState,
-          ),
-        persist: (persistGoal, persistArtifact) =>
-          this.persistLeafKnowledge(persistGoal, persistArtifact),
-      });
-      if (evaluation.kind === 'ceiling') {
-        return this.ceilingReport(goal, treeState);
-      }
-      if (evaluation.kind === 'retry') {
-        attemptState = evaluation.state;
-        continue;
-      }
-      return evaluation.report;
-    }
-  }
-
-  private async recheckArtifactAfterRepair(
-    goal: Goal,
-    artifact: Artifact,
-    budget: Budget,
-    tier: Tier,
-    typeDef: GoalTypeDef,
-    treeState: TreeState = createTreeState(),
-  ): Promise<{ passed: boolean; budget: Budget; verdict: Verdict | null; tier: Tier; ceiling?: true }> {
-    const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
-    return recheckArtifactAfterRepair({
-      goal,
-      artifact,
-      budget,
-      tier,
-      typeDef,
-      registry: this.registry,
-      brain: this.brain,
-      store: this.store,
-      now: this.now,
-      checkContext: this.checkContextFor(goal.id),
-      goldenCapture: this.goldenCapture,
-      ...(brainConfig !== undefined ? { brainConfig } : {}),
-      debitUsage: (usage) => debitTreeState(treeState, usage),
-      hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
-    });
-  }
-
-  /**
-   * After a failing verdict, decide what to do:
-   * - escalated finding → block
-   * - has prescriptions → repair rung
-   * - no prescription → tier escalation
-   * - isomorphic failure → block early
-   */
-  private async handleFailure(
-    goal: Goal,
-    artifact: Artifact,
-    verdict: Verdict,
-    budget: Budget,
-    tier: Tier,
-    tierIndex: number,
-    tierLadder: Tier[],
-    priorAttempt: { artifact: Artifact | null; verdict: Verdict } | undefined,
-    treeState: TreeState = createTreeState(),
-  ): Promise<
-    | { kind: 'repaired'; artifact: Artifact; budget: Budget }
-    | { kind: 'escalated'; tier: Tier; budget: Budget }
-    | { kind: 'blocked'; report: Report }
-  > {
-    return resolveAttemptFailure({
-      goal,
-      artifact,
-      verdict,
-      budget,
-      tier,
-      tierIndex,
-      tierLadder,
-      priorAttempt,
-      brain: this.brain,
-      store: this.store,
-      now: this.now,
-      onBrief: this.effectiveOnBrief,
-      debitUsage: (usage) => debitTreeState(treeState, usage),
-      hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
-      onCeilingReached: async () => this.ceilingReport(goal, treeState),
     });
   }
 
