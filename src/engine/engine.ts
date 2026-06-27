@@ -43,7 +43,6 @@ import {
   type KnowledgeForCoverage,
   type MissingRequirement,
 } from '../library/coverage.js';
-import { validateSplit } from './split-validation.js';
 import { runForcedEmit, runStructuredArtifactEmit } from './step-loop-emit.js';
 import { handleStepLoopStepError } from './step-loop-errors.js';
 import { routeStepToolCalls } from './step-loop-router.js';
@@ -83,7 +82,6 @@ import { runAuthorityGate } from './authority-gate.js';
 import { runDeterministicGate } from './deterministic-gate.js';
 import { judgeLeafArtifact } from './leaf-judge.js';
 import {
-  rejectedSplitSatisfyReport,
   runMustDecomposeGuard,
 } from './decision/must-decompose-guard.js';
 import {
@@ -97,12 +95,7 @@ import { resolveAttemptFailure } from './attempt/failure.js';
 import { runLeafTournament } from './attempt/leaf-tournament.js';
 import { recheckArtifactAfterRepair } from './attempt/recheck.js';
 import { emitSuccessfulArtifact } from './attempt/success.js';
-import {
-  invalidSplitStructureVerdict,
-  isomorphicSplitFailure,
-  judgeSplitDecision,
-  splitPlanArtifact,
-} from './decision/split-eval.js';
+import { acceptSplitDecision } from './decision/split-acceptance.js';
 import { runTerracedScan } from './decision/terraced-scan.js';
 import {
   appendChildSpawnedEvents,
@@ -819,155 +812,30 @@ export class Engine {
     // ── SPLIT EVAL (before committing to a split) ──────────────────────────
     // When the decision is a split, validate it and optionally judge it.
     if (decision.kind === 'split') {
-      // leafOnly types must never split
-      if (typeDef.leafOnly) {
-        const report = blockedReport(
-          `Type "${goal.type}" is leafOnly but brain returned a split decision`,
-        );
-        await this.store.append({
-          type: 'decided',
-          at: t(),
-          goalId: goal.id,
-          decision,
-        });
-        await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
-        return report;
+      const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
+      const accepted = await acceptSplitDecision({
+        goal,
+        typeDef,
+        decision,
+        decideUsage,
+        tier: currentTier,
+        registry: this.registry,
+        brain: this.brain,
+        store: this.store,
+        now: t,
+        goldenCapture: this.goldenCapture,
+        ...(brainConfig !== undefined ? { brainConfig } : {}),
+        debitUsage: (usage) => debitTreeState(treeState, usage),
+        hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
+      });
+      if (accepted.kind === 'ceiling') {
+        return this.ceilingReport(goal, treeState);
       }
-
-      // Validate structural constraints on the split
-      let budget = goal.budget;
-      let priorVerdict: Verdict | undefined;
-
-      while (true) {
-        const structErr = validateSplit(decision.children, (tp) => (this.registry.has(tp) ? this.registry.get(tp) : undefined));
-        if (structErr) {
-          // Structural violation of the split → fail verdict, re-decide with
-          // priorAttempt carrying the rejection
-          budget = await debitAttempt({ budget, goal, store: this.store, now: t });
-          const failVerdict = invalidSplitStructureVerdict(structErr);
-
-          // Isomorphic failure check: the same structural violation twice in a
-          // row is non-convergence, not budget exhaustion — that is the real
-          // terminator here (ADR-033). The attempts counter never terminates.
-          if (isomorphicSplitFailure(priorVerdict, failVerdict)) {
-            const report = blockedReport(
-              `Isomorphic split structural failure (signature: ${failVerdict.failureSignature})`,
-            );
-            await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
-            return report;
-          }
-          priorVerdict = failVerdict;
-
-          // Re-decide with failure context
-          const reDecideCtx: BrainContext = {
-            tier: currentTier,
-            memories: goal.memories,
-            priorAttempt: { artifact: splitPlanArtifact(decision.children), verdict: failVerdict },
-          };
-          const reDecideResult = await this.brain.decide(goal, reDecideCtx);
-          decision = reDecideResult.value;
-          decideUsage = reDecideResult.usage;
-          debitTreeState(treeState, reDecideResult.usage);
-          if (hasReachedSpendCeiling(treeState)) {
-            await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision, usage: reDecideResult.usage });
-            return this.ceilingReport(goal, treeState);
-          }
-          if (decision.kind !== 'split') {
-            // The re-decide changed its mind away from split. For a `mustDecompose`
-            // type a `satisfy` is STILL invalid (it has no producing tool) — and
-            // breaking here would dispatch it to the attempt loop, BYPASSING the
-            // cannot-satisfy guard that runs only once before the split-eval. Block
-            // honestly instead: the model had the split-rejection feedback and still
-            // would not produce a valid split (surfaced live-self-c9329860, where a
-            // requiresScope rejection forced a re-decide that returned satisfy and
-            // ran the deliver-intent root as a leaf).
-            if (decision.kind === 'satisfy' && typeDef.mustDecompose) {
-              const report = rejectedSplitSatisfyReport(goal);
-              await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision, ...(decideUsage !== undefined ? { usage: decideUsage } : {}) });
-              await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
-              return report;
-            }
-            break; // changed its mind (block, or satisfy for a non-mustDecompose type)
-          }
-          continue;
-        }
-
-        // Structure is valid. If there is a judge-split type, judge the split.
-        if (this.registry.has('judge-split')) {
-          const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
-          const splitJudgeResult = await judgeSplitDecision({
-            goal,
-            children: decision.children,
-            tier: currentTier,
-            registry: this.registry,
-            brain: this.brain,
-            store: this.store,
-            now: t,
-            goldenCapture: this.goldenCapture,
-            ...(brainConfig !== undefined ? { brainConfig } : {}),
-          });
-          const splitVerdict = splitJudgeResult.verdict;
-          debitTreeState(treeState, splitJudgeResult.usage);
-          if (hasReachedSpendCeiling(treeState)) {
-            return this.ceilingReport(goal, treeState);
-          }
-
-          if (!splitVerdict.pass) {
-            budget = await debitAttempt({ budget, goal, store: this.store, now: t });
-
-            // Non-convergence check: the split judge failed again. If it repeats
-            // the same failure signature — or fails twice with no signature to
-            // distinguish the rounds — the re-decide is not converging. This is a
-            // non-convergence terminator, NOT a budget bound (ADR-033): without
-            // it a signature-less repeated failure would loop until wall-clock.
-            if (isomorphicSplitFailure(priorVerdict, splitVerdict)) {
-              const sig = splitVerdict.failureSignature ?? 'unsignatured';
-              const report = blockedReport(
-                `Isomorphic split failure (signature: ${sig})`,
-              );
-              await this.store.append({
-                type: 'decided',
-                at: t(),
-                goalId: goal.id,
-                decision,
-                ...(decideUsage !== undefined ? { usage: decideUsage } : {}),
-              });
-              await this.store.append({
-                type: 'emitted',
-                at: t(),
-                goalId: goal.id,
-                report,
-              });
-              return report;
-            }
-
-            priorVerdict = splitVerdict;
-
-            // Re-decide carrying the rejected split
-            const reDecideCtx2: BrainContext = {
-              tier: currentTier,
-              memories: goal.memories,
-              priorAttempt: {
-                artifact: splitPlanArtifact(decision.children),
-                verdict: splitVerdict,
-              },
-            };
-            const reDecideResult2 = await this.brain.decide(goal, reDecideCtx2);
-            decision = reDecideResult2.value;
-            decideUsage = reDecideResult2.usage;
-            debitTreeState(treeState, reDecideResult2.usage);
-            if (hasReachedSpendCeiling(treeState)) {
-              await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision, usage: reDecideResult2.usage });
-              return this.ceilingReport(goal, treeState);
-            }
-            if (decision.kind !== 'split') break; // changed to satisfy or block
-            continue;
-          }
-        }
-
-        // Split passed validation (and judge if present)
-        break;
+      if (accepted.kind === 'emitted') {
+        return accepted.report;
       }
+      decision = accepted.decision;
+      decideUsage = accepted.decideUsage;
     }
 
     await this.store.append({ type: 'decided', at: t(), goalId: goal.id, decision, ...(decideUsage !== undefined ? { usage: decideUsage } : {}) });
