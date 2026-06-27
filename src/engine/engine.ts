@@ -63,6 +63,7 @@ import {
   releaseGuardForCallId,
 } from './step-loop-guards.js';
 import { buildStepLoopInitialTranscript } from './step-loop-context.js';
+import { runForcedEmit } from './step-loop-emit.js';
 import { routeStepToolCalls } from './step-loop-router.js';
 import { NOTE_TOOL_DEF, deriveToolDefs, isToolGranted } from './step-loop-tools.js';
 
@@ -2194,74 +2195,34 @@ export class Engine {
       // artifact rather than read-looping to exhaustion.
       if (forceEmitNext) {
         forceEmitNext = false; // consume — one forced emit per attempt
-        // The force can be reached two ways: the read ceiling (after N reads) or
-        // the malform-recovery (possibly at read 0). Only mention the read count
-        // when there actually were reads, so the nudge is honest on either path.
-        const readCountPhrase =
-          exploreReadCalls > 0
-            ? `You have read enough (${exploreReadCalls} read-class calls). STOP reading. `
-            : '';
-        transcript.push({
-          role: 'context',
-          content:
-            readCountPhrase +
-            `Emit the artifact NOW from what you have already ` +
-            `read — over-reading a bounded region is a failure, not thoroughness. ` +
-            (typeDef.outputSchema !== undefined
-              ? 'Respond with ONLY the JSON object matching the required schema, no tool calls.'
-              : 'Respond with ONLY the artifact as your message content, no tool calls.'),
+        const forcedEmit = await runForcedEmit({
+          goal,
+          typeDef,
+          ctx,
+          transcript,
+          brain: this.brain,
+          store: this.store,
+          now: t,
+          state: { remainingToolCalls, stepIndex, totalTokensUsed, exploreReadCalls },
+          debitUsage: (usage) => this.debitTreeState(treeState, usage),
+          checkCeiling: () => this.checkCeiling(goal, treeState),
         });
-        const forceCtx: BrainContext =
-          typeDef.outputSchema !== undefined
-            ? { ...ctx, outputSchema: typeDef.outputSchema }
-            : ctx;
-        // Force the emit with NO tools (ADR-039): passing the full tool set let the
-        // model ignore the "emit now" instruction and keep calling read tools — so
-        // the ceiling never actually forced anything (observed run live-self-56492678:
-        // a dive read 30 files past the 16 ceiling, 7 steps all tool-calls, then
-        // blocked "ignored the forced emit"). With an outputSchema the provider's
-        // json_schema response_format guarantees a structured artifact; with no schema
-        // the model must return the artifact as content. Either way, removing the
-        // tools closes the escape hatch so the forced emit is genuinely forced.
-        let forcedOutput: import('../contract/brain.js').StepOutput;
-        try {
-          forcedOutput = await this.brain.step(goal, transcript, [], forceCtx);
-        } catch (err) {
-          const error = err instanceof Error ? err.message : String(err);
-          return { kind: 'failed', error, budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
-        }
-        await this.store.append({
-          type: 'step',
-          at: t(),
-          goalId: goal.id,
-          index: stepIndex,
-          outputKind: forcedOutput.kind,
-          usage: forcedOutput.usage,
-        });
-        this.debitTreeState(treeState, forcedOutput.usage);
-        totalTokensUsed += forcedOutput.usage.promptTokens + forcedOutput.usage.completionTokens;
-        stepIndex++;
-        if (await this.checkCeiling(goal, treeState)) {
+        ({ stepIndex, totalTokensUsed } = forcedEmit.state);
+        if (forcedEmit.kind === 'ceiling') {
           return { kind: 'ceiling', budget: { ...budget, toolCalls: remainingToolCalls }, transcript };
         }
-        if (forcedOutput.kind === 'artifact') {
+        if (forcedEmit.kind === 'artifact') {
           return {
             kind: 'artifact',
-            artifact: forcedOutput.artifact,
+            artifact: forcedEmit.artifact,
             budget: { ...budget, toolCalls: remainingToolCalls },
             transcript,
             tokensUsed: totalTokensUsed,
           };
         }
-        // The model ignored the forced emit (only reachable now via malform-recovery)
-        // and returned tool-calls anyway. Fail the attempt with a useful signal; the
-        // control loop re-decides (and the carried transcript means the next attempt
-        // starts already-read).
         return {
           kind: 'failed',
-          error:
-            `ignored the malform-recovery forced emit after ${exploreReadCalls} ` +
-            `read-class calls`,
+          error: forcedEmit.error,
           budget: { ...budget, toolCalls: remainingToolCalls },
           transcript,
         };
