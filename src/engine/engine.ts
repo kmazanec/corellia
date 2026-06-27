@@ -13,7 +13,7 @@
  * human-signoff step the engine never performs.
  */
 
-import type { Goal, Tier, MemoryPointer, Budget, Usage } from '../contract/goal.js';
+import type { Goal, Tier, Budget, Usage } from '../contract/goal.js';
 import type { Decision, ChildPlan } from '../contract/decision.js';
 import type { Artifact, Report } from '../contract/report.js';
 import type { Verdict, Finding } from '../contract/verdict.js';
@@ -94,6 +94,11 @@ import {
   buildSplitChildGoals,
   runSplitChildren,
 } from './split-children.js';
+import {
+  buildSplitRoundReport,
+  childOutcomes,
+  promoteChildReports,
+} from './split-report.js';
 
 export { WORST_CASE_PRICE_PER_TOKEN };
 
@@ -2875,72 +2880,26 @@ export class Engine {
       }
     }
 
-    // ── PROMOTE: lessons and memory reinforcement ─────────────────────────
-    const allLessons: string[] = [];
-    const allLearnedLines: string[] = [];
-
-    for (let i = 0; i < childReports.length; i++) {
-      const r = childReports[i]!;
-      const childGoal = childGoals[i]!;
-      const succeeded = r.blockers.length === 0;
-
-      // Promote each lesson as a provisional memory write
-      for (const lesson of r.lessons) {
-        const pointer: MemoryPointer = {
-          id: `${childGoal.id}:lesson:${lesson.slice(0, 40)}`,
-          layer: 'project',
-          content: lesson,
-          provenance: 'provisional',
-        };
-        await this.store.append({
-          type: 'memory-written',
-          at: t(),
-          goalId: childGoal.id,
-          pointer,
-        });
-        allLessons.push(lesson);
-      }
-
-      // Reinforce memories actually used
-      for (const memId of r.memoriesUsed) {
-        await this.store.append({
-          type: 'memory-reinforced',
-          at: t(),
-          goalId: childGoal.id,
-          memoryId: memId,
-          outcome: succeeded ? 'success' : 'failure',
-        });
-      }
-
-      if (r.learned) allLearnedLines.push(r.learned);
-    }
-
-    // Deduplicate lessons
-    const uniqueLessons = [...new Set(allLessons)];
-    const uniqueLearnedLines = [...new Set(allLearnedLines)];
-
-    // Collect all blockers and child findings, plus terraced-scan loser findings.
-    const allBlockers: string[] = [...integrationBlockers, ...comprehendBlockers];
-    const allFindings: string[] = [...extraFindings, ...integrationFindings, ...comprehendFindings];
-    for (const r of childReports) {
-      allBlockers.push(...r.blockers);
-      allFindings.push(...r.findings);
-    }
-
-    const report: Report = {
-      artifact: mergedArtifact,
-      proof: [],
-      lessons: uniqueLessons,
-      memoriesUsed: childReports.flatMap((r) => r.memoriesUsed),
-      blockers: allBlockers,
-      findings: allFindings,
-      learned: uniqueLearnedLines.join('\n'),
-    };
+    const promotion = await promoteChildReports({
+      childGoals,
+      childReports,
+      store: this.store,
+      now: t,
+    });
+    const report = buildSplitRoundReport({
+      mergedArtifact,
+      childReports,
+      promotion,
+      extraFindings,
+      integrationFindings,
+      integrationBlockers,
+      comprehendFindings,
+      comprehendBlockers,
+    });
 
     // `passingCount` is computed by the iterative caller (runMilestone) against
     // the round's worktree; a non-iterative split ignores it (0).
-    const childOutcomes = children.map((plan, i) => ({ plan, report: childReports[i]! }));
-    return { report, mergedArtifact, passingCount: 0, childOutcomes };
+    return { report, mergedArtifact, passingCount: 0, childOutcomes: childOutcomes(children, childReports) };
   }
 
   private async runSplit(
