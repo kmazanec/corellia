@@ -70,7 +70,6 @@ import {
 } from './step-loop-result.js';
 import {
   blockedReport,
-  buildReport,
   escalatedBrief,
   exhaustedBrief,
   isomorphicBrief,
@@ -107,6 +106,7 @@ import {
 } from './decision/context.js';
 import { produceClassicArtifact } from './attempt/classic-produce.js';
 import { checkEmissionAuthority } from './attempt/emission-authority.js';
+import { emitSuccessfulArtifact } from './attempt/success.js';
 import {
   invalidSplitStructureVerdict,
   isomorphicSplitFailure,
@@ -1301,15 +1301,14 @@ export class Engine {
               return this.ceilingReport(goal, treeState);
             }
             if (recheck.passed) {
-              await this.persistLeafKnowledge(goal, resolution.artifact);
-              const report = buildReport(goal, resolution.artifact);
-              await this.store.append({
-                type: 'emitted',
-                at: t(),
-                goalId: goal.id,
-                report,
+              return emitSuccessfulArtifact({
+                goal,
+                artifact: resolution.artifact,
+                store: this.store,
+                now: t,
+                persist: (persistGoal, persistArtifact) =>
+                  this.persistLeafKnowledge(persistGoal, persistArtifact),
               });
-              return report;
             } else {
               // Repair didn't hold — continue loop with failure context
               priorAttempt = {
@@ -1431,15 +1430,14 @@ export class Engine {
               return this.ceilingReport(goal, treeState);
             }
             if (recheck.passed) {
-              await this.persistLeafKnowledge(goal, resolution.artifact);
-              const report = buildReport(goal, resolution.artifact);
-              await this.store.append({
-                type: 'emitted',
-                at: t(),
-                goalId: goal.id,
-                report,
+              return emitSuccessfulArtifact({
+                goal,
+                artifact: resolution.artifact,
+                store: this.store,
+                now: t,
+                persist: (persistGoal, persistArtifact) =>
+                  this.persistLeafKnowledge(persistGoal, persistArtifact),
               });
-              return report;
             } else {
               priorAttempt = {
                 artifact: resolution.artifact,
@@ -1474,10 +1472,14 @@ export class Engine {
       }
 
       // Both gates passed (or no judge) — emit the report
-      await this.persistLeafKnowledge(goal, artifact);
-      const report = buildReport(goal, artifact);
-      await this.store.append({ type: 'emitted', at: t(), goalId: goal.id, report });
-      return report;
+      return emitSuccessfulArtifact({
+        goal,
+        artifact,
+        store: this.store,
+        now: t,
+        persist: (persistGoal, persistArtifact) =>
+          this.persistLeafKnowledge(persistGoal, persistArtifact),
+      });
     }
   }
 
