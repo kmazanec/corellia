@@ -16,15 +16,15 @@
 import type { Goal, Tier, Budget, Usage } from '../contract/goal.js';
 import type { ChildPlan } from '../contract/decision.js';
 import type { Artifact, Report } from '../contract/report.js';
-import type { Verdict, Finding } from '../contract/verdict.js';
+import type { Verdict } from '../contract/verdict.js';
 import type { EventStore } from '../contract/events.js';
-import type { Brain, BrainContext, StepTranscript } from '../contract/brain.js';
+import type { Brain } from '../contract/brain.js';
 import type { Registry, GoalTypeDef } from '../contract/goal-type.js';
 import type { MemoryView } from '../contract/memory.js';
 import type { RiskClass, SensitivityFact } from '../contract/risk.js';
 import type { PatternStore } from '../contract/pattern.js';
 import type { ToolBroker } from '../contract/tool.js';
-import { debitAttempt, debitTokenCount, debitTokenUsage } from './budget-events.js';
+import { debitAttempt, debitTokenUsage } from './budget-events.js';
 import { lintLibrary } from '../library/constitution.js';
 import { loadFamilySkill } from '../library/skills.js';
 import { classifyRisk } from '../library/risk.js';
@@ -41,11 +41,6 @@ import {
   type KnowledgeForCoverage,
   type MissingRequirement,
 } from '../library/coverage.js';
-import { isToolGranted } from './step-loop-tools.js';
-import {
-  stepLoopTranscriptFinding,
-} from './step-loop-result.js';
-import { runStepLoop } from './step-loop.js';
 import {
   blockedReport,
   exhaustedBrief,
@@ -67,20 +62,17 @@ import { appendGoldenCandidate } from './judge-support.js';
 import { runAuthorityGate } from './authority-gate.js';
 import { runDeterministicGate } from './deterministic-gate.js';
 import { judgeLeafArtifact } from './leaf-judge.js';
-import { produceClassicArtifact } from './attempt/classic-produce.js';
+import { produceAttemptArtifact } from './attempt/artifact-production.js';
 import { checkEmissionAuthority } from './attempt/emission-authority.js';
 import { resolveAttemptFailure } from './attempt/failure.js';
 import { transitionArtifactFailure } from './attempt/failure-transition.js';
-import { transitionStepLoopFailure } from './attempt/step-loop-failure.js';
 import {
   attemptBrainContext,
   continueAfterArtifactFailure,
-  continueAfterStepLoopFailure,
   createAttemptLoopState,
   withAttemptBudget,
   withAttemptRetry,
 } from './attempt/state.js';
-import { runLeafTournament } from './attempt/leaf-tournament.js';
 import { recheckArtifactAfterRepair } from './attempt/recheck.js';
 import { emitSuccessfulArtifact } from './attempt/success.js';
 import { resolveDecisionPhase } from './decision/phase.js';
@@ -633,148 +625,54 @@ export class Engine {
 
       const ctx = attemptBrainContext(goal, attemptState);
 
-      // ── STEP LOOP (tool-granted path) ──────────────────────────────────────
-      // Run the step loop when the goal type has at least one grant that maps to
-      // a known tool AND a broker is configured. Otherwise fall through to the
-      // classic produce path.
-      let artifact: Artifact;
-      let stepLoopTranscriptTail: StepTranscript | undefined;
-      // when the step loop produces an artifact, carry a compact
-      // serialization of the transcript tail so that any subsequent failure
-      // (deterministic or judge) can thread it into the next attempt's
-      // BrainContext.priorAttempt. Stored as a non-gating advisory finding so
-      // it travels through every priorAttempt assignment that follows.
-      let stepLoopTailFinding: Finding | null = null;
-      // Set to true when the leaf tournament ran for this attempt — when true, the
-      // standard judgeType judge section is skipped (the tournament IS the judge).
-      let tournamentRan = false;
-
-      if (isToolGranted(typeDef.grants) && this.effectiveBroker !== undefined) {
-        const loopResult = await runStepLoop({
-          goal,
-          grants: typeDef.grants,
-          budget: attemptState.budget,
-          ctx,
-          typeDef,
-          broker: this.effectiveBroker,
-          sandboxRepoRoot: this._activeAssembly?.worktree.repoRoot,
-          priorTranscript: attemptState.priorLoopTranscript,
-          brain: this.brain,
-          store: this.store,
-          now: t,
-          enforceToolCallBudget: this.enforceToolCallBudget,
-          debitUsage: (usage) => debitTreeState(treeState, usage),
-          hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
-        });
-
-        if (loopResult.kind === 'ceiling') {
-          // step loop tripped the ceiling — surface ceiling-reached once
-          // and return immediately (no further brain calls).
-          return this.ceilingReport(goal, treeState);
-        } else if (loopResult.kind === 'artifact') {
-          artifact = loopResult.artifact;
-          attemptState = withAttemptBudget(attemptState, loopResult.budget);
-          stepLoopTranscriptTail = loopResult.transcript;
-          stepLoopTailFinding = stepLoopTranscriptFinding(stepLoopTranscriptTail);
-          // Track accumulated step token usage on the tokens counter for
-          // observability (ADR-033). Tokens never block work; the dollar ceiling
-          // is the real bound on spend, enforced by the step loop's ceiling check.
-          attemptState = withAttemptBudget(
-            attemptState,
-            await debitTokenCount({
-              budget: attemptState.budget,
-              tokens: loopResult.tokensUsed,
-              goal,
-              store: this.store,
-              now: t,
-            }),
-          );
-        } else {
-          const failure = await transitionStepLoopFailure({
+      const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
+      const production = await produceAttemptArtifact({
+        goal,
+        typeDef,
+        state: attemptState,
+        ctx,
+        tierLadder,
+        broker: this.effectiveBroker,
+        sandboxRepoRoot: this._activeAssembly?.worktree.repoRoot,
+        brain: this.brain,
+        registry: this.registry,
+        store: this.store,
+        now: t,
+        enforceToolCallBudget: this.enforceToolCallBudget,
+        goldenCapture: this.goldenCapture,
+        ...(brainConfig !== undefined ? { brainConfig } : {}),
+        debitUsage: (usage) => debitTreeState(treeState, usage),
+        hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
+        resolveStepLoopFailure: (failureContext) =>
+          this.handleFailure(
             goal,
-            loopResult,
-            tier: attemptState.tier,
-            tierIndex: attemptState.tierIndex,
+            failureContext.artifact,
+            failureContext.verdict,
+            failureContext.budget,
+            failureContext.tier,
+            failureContext.tierIndex,
             tierLadder,
-            priorAttempt: attemptState.priorAttempt,
-            store: this.store,
-            now: t,
-            resolveFailure: (failureContext) =>
-              this.handleFailure(
-                goal,
-                failureContext.artifact,
-                failureContext.verdict,
-                failureContext.budget,
-                failureContext.tier,
-                failureContext.tierIndex,
-                tierLadder,
-                failureContext.priorAttempt,
-                treeState,
-              ),
-          });
-          const continuation = continueAfterStepLoopFailure(failure);
-          if (continuation.kind === 'return') {
-            return continuation.report;
-          }
-          attemptState = withAttemptRetry(attemptState, continuation.retry);
-          continue;
-        }
-      } else {
-        // Classic produce path
-        const produceResult = await produceClassicArtifact({
-          goal,
-          ctx,
-          budget: attemptState.budget,
-          brain: this.brain,
-          store: this.store,
-          now: t,
-          debitUsage: (usage) => debitTreeState(treeState, usage),
-          hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
-        });
-        if (produceResult.kind === 'ceiling') {
-          return this.ceilingReport(goal, treeState);
-        }
-        artifact = produceResult.artifact;
-        attemptState = withAttemptBudget(attemptState, produceResult.budget);
-
-        // ── LEAF TOURNAMENT (F-65 A9) ───────────────────────────────────────
-        // When the type declares scan.k > 1 and has a judgeType, run a
-        // k-candidate tournament: generate k-1 additional artifacts with
-        // different lenses, judge all k, and select the winner by fewest
-        // findings. The winner replaces the single artifact so the normal
-        // deterministic + judge gates evaluate the best candidate.
-        //
-        // Fires only on the classic produce path (no-tool path): step-loop
-        // types already use tool calls to produce a high-quality artifact and
-        // do not benefit from blind-text comparison.
-        if (typeDef.scan && typeDef.scan.k > 1 && typeDef.judgeType !== null) {
-          const brainConfig = (this.brain as { config?: { modelByTier?: Record<string, string> } }).config;
-          const tournResult = await runLeafTournament({
-            goal,
-            firstArtifact: artifact,
-            scan: typeDef.scan,
-            judgeType: typeDef.judgeType,
-            typeDef,
-            tier: attemptState.tier,
-            budget: attemptState.budget,
-            ctx,
-            registry: this.registry,
-            brain: this.brain,
-            store: this.store,
-            now: t,
-            goldenCapture: this.goldenCapture,
-            ...(brainConfig !== undefined ? { brainConfig } : {}),
-            debitUsage: (usage) => debitTreeState(treeState, usage),
-            hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
-          });
-          if (tournResult.kind === 'ceiling') {
-            return this.ceilingReport(goal, treeState);
-          }
-          artifact = tournResult.artifact;
-          attemptState = withAttemptBudget(attemptState, tournResult.budget);
-          tournamentRan = true;
-        }
+            failureContext.priorAttempt,
+            treeState,
+          ),
+      });
+      if (production.kind === 'ceiling') {
+        return this.ceilingReport(goal, treeState);
       }
+      if (production.kind === 'return') {
+        return production.report;
+      }
+      if (production.kind === 'retry') {
+        attemptState = production.state;
+        continue;
+      }
+      const {
+        artifact,
+        stepLoopTranscriptTail,
+        stepLoopTailFinding,
+        tournamentRan,
+      } = production;
+      attemptState = production.state;
 
       // ── DETERMINISTIC CHECKS ───────────────────────────────────────────
       const deterministicGate = await runDeterministicGate({
