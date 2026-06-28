@@ -13,6 +13,9 @@ export interface StepLoopCounters {
   toolCallsMade: number;
   stepIndex: number;
   exploreReadCalls: number;
+  readCalls: number;
+  writeCalls: number;
+  readWithoutWriteNudged: boolean;
   totalTokensUsed: number;
   toolBudgetWarned: boolean;
   forceEmitNext: boolean;
@@ -38,6 +41,7 @@ export function createStepLoopSession(params: {
   broker: { defs?: () => ToolDef[] };
   sandboxRepoRoot: string | undefined;
   priorTranscript: StepTranscript | undefined;
+  priorRejectionReasons: string[] | undefined;
 }): StepLoopSession {
   const remainingToolCalls = params.budget.toolCalls;
   const isExploreThenEmit = isExploreThenEmitLeaf(params.typeDef);
@@ -51,6 +55,7 @@ export function createStepLoopSession(params: {
       remainingToolCalls,
       sandboxRepoRoot: params.sandboxRepoRoot,
       priorTranscript: params.priorTranscript,
+      priorRejectionReasons: params.priorRejectionReasons,
     }),
     scratchpad: newScratchpad(),
     seenCalls: new Set<string>(),
@@ -62,6 +67,9 @@ export function createStepLoopSession(params: {
       toolCallsMade: 0,
       stepIndex: 0,
       exploreReadCalls: 0,
+      readCalls: 0,
+      writeCalls: 0,
+      readWithoutWriteNudged: false,
       totalTokensUsed: 0,
       toolBudgetWarned: false,
       forceEmitNext: false,

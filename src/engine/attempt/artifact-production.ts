@@ -20,6 +20,7 @@ import {
   withAttemptBudget,
   withAttemptRetry,
   type AttemptLoopState,
+  type AttemptPrior,
 } from './state.js';
 import {
   transitionStepLoopFailure,
@@ -80,6 +81,7 @@ async function produceWithStepLoop(
     broker,
     sandboxRepoRoot: params.sandboxRepoRoot,
     priorTranscript: params.state.priorLoopTranscript,
+    priorRejectionReasons: priorRejectionReasons(params.state.priorAttempt),
     brain: params.brain,
     store: params.store,
     now: params.now,
@@ -116,6 +118,21 @@ async function produceWithStepLoop(
     stepLoopTailFinding: stepLoopTranscriptFinding(loopResult.transcript),
     tournamentRan: false,
   };
+}
+
+/**
+ * The gating-finding titles from the prior attempt's rejection, threaded into the
+ * retry prompt so it directly addresses why the last attempt failed — making the
+ * retry non-isomorphic rather than a verbatim re-run that re-trips the same block.
+ * Undefined on the first attempt (no prior) or when the prior verdict had no
+ * gating findings.
+ */
+function priorRejectionReasons(prior: AttemptPrior | undefined): string[] | undefined {
+  if (prior === undefined) return undefined;
+  const reasons = prior.verdict.findings
+    .filter((finding: Finding) => finding.gating)
+    .map((finding: Finding) => finding.title);
+  return reasons.length > 0 ? reasons : undefined;
 }
 
 async function continueFromStepLoopFailure(

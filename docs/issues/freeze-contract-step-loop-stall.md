@@ -80,6 +80,25 @@ hallucinated paths/anchors derailing a leaf.)
    prompt and produced the same wrong-mode artifact, so the no-progress detector
    fired. The detector is working as designed; the upstream behavior is the bug.
 
+## Resolution (2026-06-28)
+All four fix directions are implemented. This issue is closed once a live re-run
+confirms the tree proceeds past `freeze-contract`.
+
+- **Output-mode steering (primary)** — DONE 2026-06-27 (see below).
+- **Read-without-write nudge** — `src/engine/make-progress-nudge.ts`: a make leaf
+  that crosses `READ_WITHOUT_WRITE_THRESHOLD` (12) read-class calls with zero
+  successful writes gets a one-time in-loop reminder that reading is not delivery.
+  Wired through the step-loop router/session.
+- **Non-identical retry** — `src/engine/step-loop-context.ts` `priorRejectionBlock`:
+  the prior attempt's gating-finding titles are threaded into the retry prompt as a
+  "your prior attempt was rejected for X — do something different" block, so a retry
+  after a wrong-output-mode rejection is not isomorphic. Threaded from
+  `artifact-production.ts` (`priorRejectionReasons`) through `runStepLoop`.
+- **Worktree salvage** — `src/engine/attempt/worktree-salvage.ts`: when a make
+  goal returns prose but the worktree holds in-scope file changes,
+  `artifact-evaluation.ts` rebuilds the artifact from the files actually written,
+  so partial work is delivered instead of discarded as a prose rejection.
+
 ## Progress (2026-06-27)
 The **primary cause — output-mode steering — is addressed.** Two changes landed:
 - The make-goal step-loop preamble (`src/engine/step-loop-context.ts`,

@@ -10,6 +10,7 @@ import { debitTokenUsage } from '../budget-events.js';
 import { runDeterministicGate } from '../deterministic-gate.js';
 import { judgeLeafArtifact } from '../leaf-judge.js';
 import { isDeliveryRefusal, deliveryRefusalVerdict } from './delivery-refusal.js';
+import { salvageWorktreeArtifact } from './worktree-salvage.js';
 import { checkEmissionAuthority } from './emission-authority.js';
 import type { AttemptFailureResolution } from './failure.js';
 import { transitionArtifactFailure } from './failure-transition.js';
@@ -62,33 +63,46 @@ export async function evaluateAttemptArtifact(params: {
 }): Promise<AttemptArtifactEvaluationResult> {
   let state = params.state;
 
+  // Worktree salvage: a make leaf that wrote files but returned prose loses its
+  // work to a judge that rejects prose. When the returned artifact is text but the
+  // worktree holds in-scope changes, deliver the files actually written instead.
+  const evalParams = {
+    ...params,
+    artifact: salvageMakeArtifact(
+      params.typeDef,
+      params.artifact,
+      params.checkContext,
+      params.goal.scope,
+    ),
+  };
+
   const deterministic = await runDeterministicGate({
-    goal: params.goal,
-    artifact: params.artifact,
-    checks: params.typeDef.deterministic,
+    goal: evalParams.goal,
+    artifact: evalParams.artifact,
+    checks: evalParams.typeDef.deterministic,
     budget: state.budget,
-    checkContext: params.checkContext,
-    store: params.store,
-    now: params.now,
+    checkContext: evalParams.checkContext,
+    store: evalParams.store,
+    now: evalParams.now,
   });
   state = withAttemptBudget(state, deterministic.budget);
 
   if (deterministic.verdict !== null) {
     if (deterministic.toolCallsExhausted) {
-      await params.store.append({
+      await evalParams.store.append({
         type: 'budget-exhausted',
-        at: params.now(),
-        goalId: params.goal.id,
+        at: evalParams.now(),
+        goalId: evalParams.goal.id,
         dimension: 'toolCalls',
       });
-      if (params.enforceToolCallBudget) {
-        return { kind: 'emitted', report: await params.blockOnToolCallExhausted() };
+      if (evalParams.enforceToolCallBudget) {
+        return { kind: 'emitted', report: await evalParams.blockOnToolCallExhausted() };
       }
     }
 
     if (!deterministic.verdict.pass) {
       return handleFailingVerdict({
-        ...params,
+        ...evalParams,
         state,
         verdict: deterministic.verdict,
       });
@@ -98,44 +112,44 @@ export async function evaluateAttemptArtifact(params: {
   // Refusal floor: an artifact that states it cannot deliver is non-delivery by
   // construction. Fail it deterministically, before any judge can read it as a
   // coherent artifact and pass — a refusal must surface as a blocker, not a PASS.
-  if (isDeliveryRefusal(params.artifact)) {
+  if (isDeliveryRefusal(evalParams.artifact)) {
     const refusalVerdict = deliveryRefusalVerdict();
-    await params.store.append({
+    await evalParams.store.append({
       type: 'deterministic-checked',
-      at: params.now(),
-      goalId: params.goal.id,
+      at: evalParams.now(),
+      goalId: evalParams.goal.id,
       verdict: refusalVerdict,
     });
-    return handleFailingVerdict({ ...params, state, verdict: refusalVerdict });
+    return handleFailingVerdict({ ...evalParams, state, verdict: refusalVerdict });
   }
 
   const emissionAuthorityReport = await checkEmissionAuthority({
-    goal: params.goal,
-    artifact: params.artifact,
-    entryRisk: params.entryRisk,
-    sensitivity: params.sensitivity,
-    store: params.store,
-    now: params.now,
-    onGate: params.onGate,
-    onBrief: params.onBrief,
+    goal: evalParams.goal,
+    artifact: evalParams.artifact,
+    entryRisk: evalParams.entryRisk,
+    sensitivity: evalParams.sensitivity,
+    store: evalParams.store,
+    now: evalParams.now,
+    onGate: evalParams.onGate,
+    onBrief: evalParams.onBrief,
   });
   if (emissionAuthorityReport !== null) {
     return { kind: 'emitted', report: emissionAuthorityReport };
   }
 
-  if (params.typeDef.judgeType !== null && !params.tournamentRan) {
+  if (evalParams.typeDef.judgeType !== null && !evalParams.tournamentRan) {
     const judgeResult = await judgeLeafArtifact({
-      goal: params.goal,
-      artifact: params.artifact,
-      typeDef: params.typeDef,
-      judgeType: params.typeDef.judgeType,
+      goal: evalParams.goal,
+      artifact: evalParams.artifact,
+      typeDef: evalParams.typeDef,
+      judgeType: evalParams.typeDef.judgeType,
       tier: state.tier,
-      registry: params.registry,
-      brain: params.brain,
-      store: params.store,
-      now: params.now,
-      goldenCapture: params.goldenCapture,
-      ...(params.brainConfig !== undefined ? { brainConfig: params.brainConfig } : {}),
+      registry: evalParams.registry,
+      brain: evalParams.brain,
+      store: evalParams.store,
+      now: evalParams.now,
+      goldenCapture: evalParams.goldenCapture,
+      ...(evalParams.brainConfig !== undefined ? { brainConfig: evalParams.brainConfig } : {}),
     });
 
     params.debitUsage(judgeResult.usage);
@@ -148,15 +162,15 @@ export async function evaluateAttemptArtifact(params: {
       await debitTokenUsage({
         budget: state.budget,
         usage: judgeResult.usage,
-        goal: params.goal,
-        store: params.store,
-        now: params.now,
+        goal: evalParams.goal,
+        store: evalParams.store,
+        now: evalParams.now,
       }),
     );
 
     if (!judgeResult.verdict.pass) {
       return handleFailingVerdict({
-        ...params,
+        ...evalParams,
         state,
         verdict: judgeResult.verdict,
       });
@@ -166,13 +180,31 @@ export async function evaluateAttemptArtifact(params: {
   return {
     kind: 'emitted',
     report: await emitSuccessfulArtifact({
-      goal: params.goal,
-      artifact: params.artifact,
-      store: params.store,
-      now: params.now,
-      persist: params.persist,
+      goal: evalParams.goal,
+      artifact: evalParams.artifact,
+      store: evalParams.store,
+      now: evalParams.now,
+      persist: evalParams.persist,
     }),
   };
+}
+
+/**
+ * For a make goal whose returned artifact is prose (text) while the worktree holds
+ * in-scope file changes, replace it with the files actually written — recovering
+ * work a leaf wrote but failed to echo as fenced blocks. Returns the original
+ * artifact unchanged for non-make goals, file artifacts, or an empty worktree.
+ */
+function salvageMakeArtifact(
+  typeDef: GoalTypeDef,
+  artifact: Artifact,
+  checkContext: CheckContext | undefined,
+  scope: string[],
+): Artifact {
+  if (typeDef.kind !== 'make' || artifact.kind !== 'text') return artifact;
+  const root = checkContext?.sandboxRoot;
+  if (root === undefined) return artifact;
+  return salvageWorktreeArtifact(root, scope) ?? artifact;
 }
 
 export interface ArtifactFailureContext {

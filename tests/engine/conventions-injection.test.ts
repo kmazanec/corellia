@@ -301,6 +301,48 @@ describe('make-goal artifact steering: the artifact is the written files', () =>
   });
 });
 
+// ── retry prompt carries the prior rejection reasons (non-isomorphic retry) ───
+
+describe('retry prompt: prior rejection reasons are injected', () => {
+  it('buildStepLoopInitialTranscript surfaces prior rejection reasons as a fix-this block', async () => {
+    const { buildStepLoopInitialTranscript } = await import(
+      '../../src/engine/step-loop-context.js'
+    );
+    const goal = makeGoal({ type: 'freeze-contract' });
+    const transcript = buildStepLoopInitialTranscript({
+      goal,
+      typeDef: makeKindType('freeze-contract'),
+      isExploreThenEmit: false,
+      remainingToolCalls: 5,
+      sandboxRepoRoot: undefined,
+      priorTranscript: undefined,
+      priorRejectionReasons: ['No implementation artifacts present — architecture characterization only'],
+    });
+    const ctx = transcript[0] && 'content' in transcript[0] ? (transcript[0].content as string) : '';
+    expect(ctx).toContain('YOUR PRIOR ATTEMPT WAS REJECTED');
+    expect(ctx).toContain('No implementation artifacts present');
+    expect(ctx).toContain('Do something DIFFERENT this');
+  });
+
+  it('omits the prior-rejection block on a first attempt (no reasons)', async () => {
+    const { buildStepLoopInitialTranscript } = await import(
+      '../../src/engine/step-loop-context.js'
+    );
+    const goal = makeGoal({ type: 'freeze-contract' });
+    const transcript = buildStepLoopInitialTranscript({
+      goal,
+      typeDef: makeKindType('freeze-contract'),
+      isExploreThenEmit: false,
+      remainingToolCalls: 5,
+      sandboxRepoRoot: undefined,
+      priorTranscript: undefined,
+      priorRejectionReasons: undefined,
+    });
+    const ctx = transcript[0] && 'content' in transcript[0] ? (transcript[0].content as string) : '';
+    expect(ctx).not.toContain('YOUR PRIOR ATTEMPT WAS REJECTED');
+  });
+});
+
 // ── Chunk 3: override precedence — label and ordering ────────────────────────
 
 describe('Chunk 3 — override precedence: host label and ordering (AC-3)', () => {

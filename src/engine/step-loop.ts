@@ -24,6 +24,7 @@ export async function runStepLoop(params: {
   broker: ToolBroker & { defs?: () => ToolDef[] };
   sandboxRepoRoot: string | undefined;
   priorTranscript: StepTranscript | undefined;
+  priorRejectionReasons: string[] | undefined;
   brain: Brain;
   store: EventStore;
   now: () => number;
@@ -39,6 +40,7 @@ export async function runStepLoop(params: {
     broker: params.broker,
     sandboxRepoRoot: params.sandboxRepoRoot,
     priorTranscript: params.priorTranscript,
+    priorRejectionReasons: params.priorRejectionReasons,
   });
   const {
     tools,
@@ -54,6 +56,9 @@ export async function runStepLoop(params: {
     toolCallsMade,
     stepIndex,
     exploreReadCalls,
+    readCalls,
+    writeCalls,
+    readWithoutWriteNudged,
     totalTokensUsed,
     toolBudgetWarned,
     forceEmitNext,
@@ -219,14 +224,29 @@ export async function runStepLoop(params: {
       now: params.now,
       enforceToolCallBudget: params.enforceToolCallBudget,
       isExploreThenEmit,
+      typeDef: params.typeDef,
       seenCalls,
       callKeyByCallId,
-      state: { remainingToolCalls, toolCallsMade, exploreReadCalls },
+      state: {
+        remainingToolCalls,
+        toolCallsMade,
+        exploreReadCalls,
+        readCalls,
+        writeCalls,
+        readWithoutWriteNudged,
+      },
     });
     if (routing.kind === 'exhausted') {
       return routing;
     }
-    ({ remainingToolCalls, toolCallsMade, exploreReadCalls } = routing.state);
+    ({
+      remainingToolCalls,
+      toolCallsMade,
+      exploreReadCalls,
+      readCalls,
+      writeCalls,
+      readWithoutWriteNudged,
+    } = routing.state);
   }
 }
 

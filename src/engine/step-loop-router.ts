@@ -1,7 +1,12 @@
 import type { StepTranscript } from '../contract/brain.js';
 import type { EventStore } from '../contract/events.js';
 import type { Budget, Goal } from '../contract/goal.js';
+import type { GoalTypeDef } from '../contract/goal-type.js';
 import type { ToolBroker, ToolCall } from '../contract/tool.js';
+import {
+  shouldNudgeReadWithoutWrite,
+  readWithoutWriteNudge,
+} from './make-progress-nudge.js';
 import { addNote, type Scratchpad } from './scratchpad.js';
 import {
   READ_ONLY_TOOL_NAMES,
@@ -14,6 +19,12 @@ export interface StepToolRoutingState {
   remainingToolCalls: number;
   toolCallsMade: number;
   exploreReadCalls: number;
+  /** Read-class calls made so far (any goal) — drives the read-without-write nudge. */
+  readCalls: number;
+  /** write_file calls that succeeded so far — drives the read-without-write nudge. */
+  writeCalls: number;
+  /** Whether the read-without-write nudge has already fired this attempt. */
+  readWithoutWriteNudged: boolean;
 }
 
 export type StepToolRoutingResult =
@@ -31,6 +42,7 @@ export interface StepToolRoutingParams {
   now: () => number;
   enforceToolCallBudget: boolean;
   isExploreThenEmit: boolean;
+  typeDef: GoalTypeDef;
   seenCalls: Set<string>;
   callKeyByCallId: Map<string, string>;
   state: StepToolRoutingState;
@@ -65,8 +77,12 @@ export async function routeStepToolCalls(params: StepToolRoutingParams): Promise
     const result = await params.broker.execute(params.goal, call);
     state.remainingToolCalls--;
     state.toolCallsMade++;
-    if (params.isExploreThenEmit && READ_ONLY_TOOL_NAMES.has(call.name)) {
-      state.exploreReadCalls++;
+    if (READ_ONLY_TOOL_NAMES.has(call.name)) {
+      state.readCalls++;
+      if (params.isExploreThenEmit) state.exploreReadCalls++;
+    }
+    if (call.name === 'write_file' && result.ok) {
+      state.writeCalls++;
     }
 
     const summary = summarizeToolArgs(call.args);
@@ -93,6 +109,18 @@ export async function routeStepToolCalls(params: StepToolRoutingParams): Promise
       callId: call.id,
       content: result.output,
     });
+  }
+
+  if (
+    shouldNudgeReadWithoutWrite({
+      typeDef: params.typeDef,
+      readCalls: state.readCalls,
+      writeCalls: state.writeCalls,
+      alreadyNudged: state.readWithoutWriteNudged,
+    })
+  ) {
+    state.readWithoutWriteNudged = true;
+    params.transcript.push({ role: 'context', content: readWithoutWriteNudge(state.readCalls) });
   }
 
   return { kind: 'routed', state };

@@ -16,6 +16,12 @@ export interface StepLoopInitialTranscriptInput {
   remainingToolCalls: number;
   sandboxRepoRoot: string | undefined;
   priorTranscript: StepTranscript | undefined;
+  /**
+   * The gating-finding titles from the prior attempt's rejection, if this is a
+   * retry. Threaded into the prompt as an explicit "fix this" block so the retry
+   * is genuinely different from the attempt that failed — not an isomorphic re-run.
+   */
+  priorRejectionReasons: string[] | undefined;
 }
 
 export function buildStepLoopInitialTranscript(input: StepLoopInitialTranscriptInput): StepTranscript {
@@ -35,6 +41,7 @@ export function buildStepLoopInitialTranscript(input: StepLoopInitialTranscriptI
         memoryBlock(input.goal) +
         conventionsBlock(input.typeDef, input.sandboxRepoRoot) +
         codeShapeBlock(input.goal, input.typeDef, input.sandboxRepoRoot) +
+        priorRejectionBlock(input.priorRejectionReasons) +
         priorEvidenceBlock(input.priorTranscript),
     },
     {
@@ -137,6 +144,19 @@ function sandboxPathsBlock(hasSandbox: boolean): string {
       `Start by listing "." — do not conclude the repo is missing if an ` +
       `absolute path is refused; switch to a relative path.`
     : '';
+}
+
+function priorRejectionBlock(reasons: string[] | undefined): string {
+  if (reasons === undefined || reasons.length === 0) {
+    return '';
+  }
+  return (
+    `\n\n--- YOUR PRIOR ATTEMPT WAS REJECTED ---\n` +
+    `The previous attempt failed for the reason(s) below. Do something DIFFERENT this ` +
+    `time — directly address each one; do not repeat the attempt that was rejected:\n` +
+    reasons.map((reason) => `  - ${reason}`).join('\n') +
+    `\n--- END PRIOR REJECTION ---`
+  );
 }
 
 function priorEvidenceBlock(transcript: StepTranscript | undefined): string {
