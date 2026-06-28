@@ -56,8 +56,13 @@ export type FactoryEvent =
   | { type: 'pattern-consulted'; at: number; goalId: string; shape: string; status: 'none' | 'provisional' | 'trusted' }
   /** A split's outcome was recorded against its shape — the flywheel's write. */
   | { type: 'pattern-recorded'; at: number; goalId: string; shape: string; outcome: 'success' | 'failure' }
-  /** The broker mediated a tool call: it ran, or it was refused with a reason. */
-  | { type: 'tool-call'; at: number; goalId: string; tool: string; callId: string; outcome: 'ran' | 'refused'; reason?: string }
+  /**
+   * The broker mediated a tool call: it ran, or it was refused with a reason.
+   * `args` is a bounded, structured summary of the salient call arguments (path,
+   * pattern, target, offset, …) for observability — never the bulk payload, which
+   * is reduced to a length attribute (e.g. `content_len`).
+   */
+  | { type: 'tool-call'; at: number; goalId: string; tool: string; callId: string; outcome: 'ran' | 'refused'; reason?: string; args?: Record<string, string | number> }
   /** One step of the engine-owned tool loop resolved to tool calls or an artifact. */
   | { type: 'step'; at: number; goalId: string; index: number; outputKind: 'tool-calls' | 'artifact'; usage?: Usage }
   /** A repo-declared script ran in the tree's sandbox; output retained by ref. */

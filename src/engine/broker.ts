@@ -14,6 +14,7 @@ import { GRANT_TOOL_MAP } from '../contract/tool.js';
 import type { EventStore } from '../contract/events.js';
 import type { Registry } from '../contract/goal-type.js';
 import { resolveSandboxPath, isInScope } from './tools.js';
+import { summarizeToolArgs } from './tool-call-summary.js';
 
 /**
  * Options for constructing a Broker. The dispatch table is injectable so
@@ -117,6 +118,7 @@ export class Broker {
     }
 
     // 5. Append a 'ran' event and dispatch.
+    const summary = summarizeToolArgs(call.args);
     await this.#store.append({
       type: 'tool-call',
       at: Date.now(),
@@ -124,6 +126,7 @@ export class Broker {
       tool: call.name,
       callId: call.id,
       outcome: 'ran',
+      ...(summary !== undefined ? { args: summary } : {}),
     });
 
     const outcome = await impl.execute(goal, call.args);
@@ -141,6 +144,7 @@ export class Broker {
 
   /** Append a refusal event and return a refusal ToolResult. */
   async #refuse(goal: Goal, call: ToolCall, reason: string): Promise<ToolResult> {
+    const summary = summarizeToolArgs(call.args);
     await this.#store.append({
       type: 'tool-call',
       at: Date.now(),
@@ -149,6 +153,7 @@ export class Broker {
       callId: call.id,
       outcome: 'refused',
       reason,
+      ...(summary !== undefined ? { args: summary } : {}),
     });
     return { callId: call.id, ok: false, output: reason };
   }

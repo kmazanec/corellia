@@ -104,7 +104,8 @@ const EVENT_VALIDATORS = {
     hasString(event, 'tool') &&
     hasString(event, 'callId') &&
     hasSetValue(event, 'outcome', TOOL_OUTCOMES) &&
-    hasOptionalString(event, 'reason'),
+    hasOptionalString(event, 'reason') &&
+    hasOptionalObject(event, 'args'),
   step: (event) =>
     hasFiniteNumber(event, 'index') &&
     hasSetValue(event, 'outputKind', STEP_OUTPUT_KINDS) &&

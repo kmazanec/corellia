@@ -8,6 +8,7 @@ import {
   dupKey,
   invalidateReadGuardForPath,
 } from './step-loop-guards.js';
+import { summarizeToolArgs } from './tool-call-summary.js';
 
 export interface StepToolRoutingState {
   remainingToolCalls: number;
@@ -68,6 +69,7 @@ export async function routeStepToolCalls(params: StepToolRoutingParams): Promise
       state.exploreReadCalls++;
     }
 
+    const summary = summarizeToolArgs(call.args);
     await params.store.append({
       type: 'tool-call',
       at: params.now(),
@@ -76,6 +78,7 @@ export async function routeStepToolCalls(params: StepToolRoutingParams): Promise
       callId: call.id,
       outcome: result.ok ? 'ran' : 'refused',
       ...(result.ok ? {} : { reason: result.output }),
+      ...(summary !== undefined ? { args: summary } : {}),
     });
 
     if (call.name === 'write_file' && result.ok) {
@@ -98,6 +101,7 @@ export async function routeStepToolCalls(params: StepToolRoutingParams): Promise
 async function routeNoteToolCall(params: StepToolRoutingParams, call: ToolCall): Promise<void> {
   const text = typeof call.args['text'] === 'string' ? call.args['text'] : '';
   const landed = addNote(params.scratchpad, text);
+  const summary = summarizeToolArgs(call.args);
   await params.store.append({
     type: 'tool-call',
     at: params.now(),
@@ -106,6 +110,7 @@ async function routeNoteToolCall(params: StepToolRoutingParams, call: ToolCall):
     callId: call.id,
     outcome: landed ? 'ran' : 'refused',
     ...(landed ? {} : { reason: 'note: empty text ignored' }),
+    ...(summary !== undefined ? { args: summary } : {}),
   });
   params.transcript.push({
     role: 'tool',
@@ -130,6 +135,7 @@ async function refuseDuplicateRead(params: StepToolRoutingParams, call: ToolCall
     `Duplicate read refused (F-64): an identical call to ${call.name} with the ` +
     `same arguments was already executed this attempt. Use the earlier result ` +
     `already in the transcript instead of re-reading.`;
+  const summary = summarizeToolArgs(call.args);
   await params.store.append({
     type: 'tool-call',
     at: params.now(),
@@ -138,6 +144,7 @@ async function refuseDuplicateRead(params: StepToolRoutingParams, call: ToolCall
     callId: call.id,
     outcome: 'refused',
     reason: refusalReason,
+    ...(summary !== undefined ? { args: summary } : {}),
   });
   params.transcript.push({
     role: 'tool',
