@@ -36,6 +36,15 @@ export interface CommissionInput {
   /** Judge-strictness dial; defaults to 'production'. */
   intent?: Intent;
   /**
+   * Per-commission dollar ceiling for the whole tree. When set, the front door
+   * threads it onto the root goal's {@link Goal.spendCeilingUsd}; when absent the
+   * engine applies its learning-phase default ($15). Unlike {@link Budget} it is
+   * never subdivided — it bounds the tree, not a single goal. Added after the
+   * ADR-026 freeze: the commission artifact already declared an intended ceiling
+   * (`commissions/<id>.ts` `ceilingUsd`) that previously had no path to the goal.
+   */
+  spendCeilingUsd?: number;
+  /**
    * Optional capability pre-check: when present, the listener verifies that
    * every declared script entry point exists on disk before admitting the
    * commission. Missing entries bounce at receive with zero subtree spend.

@@ -608,6 +608,11 @@ export class Listener {
       scope: input.scope,
       budget: input.budget,
       memories: extraMemories,
+      // Per-commission ceiling threads onto the root goal; when absent the engine
+      // applies its learning-phase default ($15). Never subdivided (bounds the tree).
+      ...(input.spendCeilingUsd !== undefined
+        ? { spendCeilingUsd: input.spendCeilingUsd }
+        : {}),
     };
 
     // Wire ourselves as the brief authority for this run.

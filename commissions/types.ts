@@ -10,12 +10,11 @@ export interface CommissionDoc {
   /** The frozen front-door input the factory consumes (`brief.ts:23`). */
   commission: CommissionInput;
   /**
-   * Per-tree dollar ceiling — the PRIMARY budget bound. The listener mints the
-   * root goal without a ceiling today (`listener.ts` runIntent), so a run through
-   * the real front door uses the engine default ($15, `engine.ts:56`). Record the
-   * intended ceiling here for review; the runner warns when it differs from the
-   * effective default. A per-commission ceiling override is a separate
-   * engine/listener feature (not yet built).
+   * Per-tree dollar ceiling — the PRIMARY budget bound. The runner threads this
+   * onto `CommissionInput.spendCeilingUsd`, which the front door sets on the root
+   * goal (`listener.ts` runIntent); the engine halts the tree when measured spend
+   * reaches it. Omit-equivalent: setting it to the engine default ($15,
+   * `engine.ts:56`) is the same as not bounding it further.
    */
   ceilingUsd: number;
   /** Repo root for the declared-scripts capability check, if used. */

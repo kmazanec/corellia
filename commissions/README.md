@@ -21,12 +21,10 @@ export interface CommissionDoc {
   /** The frozen front-door input the factory consumes. */
   commission: CommissionInput;
   /**
-   * Per-tree dollar ceiling (the PRIMARY budget bound). NOTE: the listener mints
-   * the root goal without a ceiling today, so a commission run through the real
-   * front door uses the engine default ($15, DEFAULT_SPEND_CEILING_USD). Record
-   * the intended ceiling here for review; the runner warns if it differs from the
-   * effective default. A per-commission ceiling override is a separate
-   * engine/listener feature (not yet built).
+   * Per-tree dollar ceiling (the PRIMARY budget bound). The runner threads this
+   * onto CommissionInput.spendCeilingUsd, which the front door sets on the root
+   * goal; the engine halts the tree when measured spend reaches it. The engine
+   * default is $15 (DEFAULT_SPEND_CEILING_USD) when a commission omits its own.
    */
   ceilingUsd: number;
   /** Repo root for the declared-scripts capability check, if used. */
@@ -62,7 +60,8 @@ const doc = {
     },
     intent: 'production',              // 'production' | 'spike' | 'characterization'
   },
-  ceilingUsd: 5,
+  ceilingUsd: 5,                       // live per-tree dollar ceiling for the run
+
   note: '<why this commission exists>',
 } satisfies import('./README.js').CommissionDoc;
 
@@ -77,7 +76,8 @@ npm run commission:run -- <id>      # loads commissions/<id>.ts → listener.com
 
 This is a **live LLM run with real cost.** Review the artifact first. The runner
 prints the goal tree, blockers, and a cost summary, and writes events under
-`out/commission-<id>/`.
+`out/commission-<id>/`. The artifact's `ceilingUsd` is the live per-tree dollar
+ceiling for the run — the engine halts the tree when measured spend reaches it.
 
 ## Conventions
 

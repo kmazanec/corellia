@@ -81,15 +81,10 @@ console.log(
     `${commission.budget.toolCalls} tool calls, ` +
     `${Math.round(commission.budget.wallClockMs / 60_000)} min`,
 );
-if (ceilingUsd !== DEFAULT_SPEND_CEILING_USD) {
-  console.log('');
-  console.log(
-    `NOTE: artifact records ceilingUsd=$${ceilingUsd}, but the listener mints the ` +
-      `root goal without a ceiling, so this run uses the engine default ` +
-      `$${DEFAULT_SPEND_CEILING_USD}. A per-commission ceiling override is a ` +
-      `separate engine/listener feature (not yet built).`,
-  );
-}
+console.log(
+  `Ceiling:     $${ceilingUsd}` +
+    (ceilingUsd === DEFAULT_SPEND_CEILING_USD ? ' (engine default)' : ' (per-commission)'),
+);
 console.log('');
 console.log('Running... (live LLM run; costs are real)');
 console.log('');
@@ -112,7 +107,7 @@ const listener = new Listener({ engine, store });
 
 let report;
 try {
-  report = await listener.commission(commission);
+  report = await listener.commission({ ...commission, spendCeilingUsd: ceilingUsd });
 } catch (err) {
   console.error('');
   console.error('═══ COMMISSION RUN FAILED ══════════════════════════════════════');

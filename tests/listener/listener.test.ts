@@ -844,3 +844,46 @@ describe('capability check at receive: declaredScripts + repoRoot', () => {
     expect(report.blockers).toHaveLength(0);
   });
 });
+
+// ── per-commission spend ceiling threads onto the root goal ────────────────
+
+describe('per-commission spend ceiling', () => {
+  function captureRootGoal(store: MemStore): {
+    engine: InstanceType<typeof import('../../src/engine/engine.js').Engine>;
+    seen: Goal[];
+  } {
+    const seen: Goal[] = [];
+    const engine = {
+      async run(goal: Goal): Promise<Report> {
+        seen.push(goal);
+        await store.append({ type: 'goal-received', at: 1, goalId: goal.id, goal });
+        const report = successReport(goal.id);
+        await store.append({ type: 'emitted', at: 2, goalId: goal.id, report });
+        return report;
+      },
+    } as unknown as InstanceType<typeof import('../../src/engine/engine.js').Engine>;
+    return { engine, seen };
+  }
+
+  it('sets spendCeilingUsd on the root goal when the commission declares it', async () => {
+    const store = new MemStore();
+    const { engine, seen } = captureRootGoal(store);
+    const listener = new Listener({ engine, store });
+
+    await listener.commission(makeInput('capped', ['src/capped'], { spendCeilingUsd: 40 }));
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.spendCeilingUsd).toBe(40);
+  });
+
+  it('leaves spendCeilingUsd undefined when the commission omits it (engine default applies)', async () => {
+    const store = new MemStore();
+    const { engine, seen } = captureRootGoal(store);
+    const listener = new Listener({ engine, store });
+
+    await listener.commission(makeInput('uncapped', ['src/uncapped']));
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.spendCeilingUsd).toBeUndefined();
+  });
+});
