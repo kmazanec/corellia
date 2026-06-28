@@ -16,6 +16,21 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-06-27
 
+- **Iteration 17 — commission-run fixes**
+  ([iteration 17](iterations/2026-06-27-21-commission-run-fixes/index.md)).
+  Three bootstrap-driven fixes from driving the `visual-runtime-verification`
+  commission through the front door: the per-commission spend ceiling is now
+  threaded onto the root goal (a declared `ceilingUsd` is live, not dead
+  metadata); `commission:run` wires a real broker/sandbox via `buildLiveEngine`
+  so leaves get file/script tools (the first run had built nothing and
+  false-passed); and a deterministic refusal floor
+  (`src/engine/attempt/delivery-refusal.ts`) fails an artifact that states it
+  cannot deliver, before any judge can pass it — preserving the ADR-032
+  deterministic floor. Closed and deleted the `commission-runner-wires-no-broker`
+  and `judge-passes-delivery-refusal` issues. The commission itself still does
+  not deliver — it now blocks honestly on a `freeze-contract` step-loop stall,
+  captured as [freeze-contract-step-loop-stall](issues/freeze-contract-step-loop-stall.md).
+
 - **Iteration 16 — factory code-quality patterns**
   ([iteration 16](iterations/2026-06-27-18-code-quality-patterns/index.md)).
   Added deterministic code-shape evidence (`npm run code-shape -- <scope...>`)

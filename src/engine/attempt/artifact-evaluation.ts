@@ -9,6 +9,7 @@ import type { Finding, Verdict } from '../../contract/verdict.js';
 import { debitTokenUsage } from '../budget-events.js';
 import { runDeterministicGate } from '../deterministic-gate.js';
 import { judgeLeafArtifact } from '../leaf-judge.js';
+import { isDeliveryRefusal, deliveryRefusalVerdict } from './delivery-refusal.js';
 import { checkEmissionAuthority } from './emission-authority.js';
 import type { AttemptFailureResolution } from './failure.js';
 import { transitionArtifactFailure } from './failure-transition.js';
@@ -92,6 +93,20 @@ export async function evaluateAttemptArtifact(params: {
         verdict: deterministic.verdict,
       });
     }
+  }
+
+  // Refusal floor: an artifact that states it cannot deliver is non-delivery by
+  // construction. Fail it deterministically, before any judge can read it as a
+  // coherent artifact and pass — a refusal must surface as a blocker, not a PASS.
+  if (isDeliveryRefusal(params.artifact)) {
+    const refusalVerdict = deliveryRefusalVerdict();
+    await params.store.append({
+      type: 'deterministic-checked',
+      at: params.now(),
+      goalId: params.goal.id,
+      verdict: refusalVerdict,
+    });
+    return handleFailingVerdict({ ...params, state, verdict: refusalVerdict });
   }
 
   const emissionAuthorityReport = await checkEmissionAuthority({

@@ -34,5 +34,6 @@ Newest last (chronological).
 | [2026-06-25-21](2026-06-25-21-cascade-and-decide-fixes/index.md) | 14 — Cascade + decide-robustness fixes from driving slice C (ADR-037 + mustDecompose re-decide) | landed on main |
 | [2026-06-26-00](2026-06-26-00-explore-then-emit-consolidation/index.md) | 15 — Explore-then-emit consolidation (ADR-039): one root cause, three audits, proven live | landed on main |
 | [2026-06-27-18](2026-06-27-18-code-quality-patterns/index.md) | 16 — Factory code-quality patterns | landed on main |
+| [2026-06-27-21](2026-06-27-21-commission-run-fixes/index.md) | 17 — Commission-run fixes: per-commission ceiling, real broker, refusal floor | landed on main |
 
 Open follow-on work from these iterations lives in [../issues/](../issues/index.md).
