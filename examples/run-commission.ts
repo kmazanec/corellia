@@ -19,15 +19,12 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 
-import { Engine } from '../src/engine/engine.js';
 import { Listener } from '../src/listener/listener.js';
 import { loadDotEnv } from '../src/env.js';
 import { JsonlEventStore } from '../src/eventlog/jsonl-store.js';
-import { projectMemory, renderTree, traceStats } from '../src/eventlog/projections.js';
-import { createRegistry } from '../src/library/registry.js';
-import { starterTypes } from '../src/library/starter-types.js';
-import { LlmBrain } from '../src/brains/llm.js';
-import { openRouterConfig } from '../src/brains/openrouter.js';
+import { renderTree, traceStats } from '../src/eventlog/projections.js';
+import { buildLiveEngine, assertGitRepo } from '../src/daemon/live-engine.js';
+import type { DeclaredScripts } from '../src/library/script-runner.js';
 import type { CommissionDoc } from '../commissions/types.js';
 
 const DEFAULT_SPEND_CEILING_USD = 15; // mirrors engine.ts:56 (the effective default)
@@ -85,22 +82,39 @@ console.log(
   `Ceiling:     $${ceilingUsd}` +
     (ceilingUsd === DEFAULT_SPEND_CEILING_USD ? ' (engine default)' : ' (per-commission)'),
 );
+console.log(`Sandbox:     ${commission.repoRoot ?? doc.repoRoot ?? process.cwd()}`);
 console.log('');
 console.log('Running... (live LLM run; costs are real)');
 console.log('');
 
 // ── Engine + Listener (the real front door) ──────────────────────────────────────
+//
+// Wire the engine the SAME way the live front door does (buildLiveEngine, used by
+// examples/live-self.ts) — with a sandbox so leaves get real file/script tools via
+// the broker. A bare `new Engine({registry,brain,store,memory})` gives leaves NO
+// tools, so any code-writing commission stalls on "I have no file access".
 
 mkdirSync(OUT_DIR, { recursive: true });
-const types = starterTypes();
-const brain = new LlmBrain(openRouterConfig(), types.map((t) => t.name));
-const store = new JsonlEventStore(`${OUT_DIR}/events.jsonl`);
-const memory = {
-  query: async (topic: string, scope: string[]) =>
-    projectMemory(await store.list()).query(topic, scope),
+
+// The repo the tree operates against. Commissions declare repoRoot; default to cwd.
+const repoRoot = resolve(commission.repoRoot ?? doc.repoRoot ?? process.cwd());
+assertGitRepo(repoRoot, 'commission repoRoot');
+
+// run_script may only invoke DECLARED entry points. Use the commission's declared
+// scripts if present; otherwise declare the standard verification trio so a build
+// can keep typecheck/lint/test green (mirrors examples/live-self.ts).
+const declaredScripts: DeclaredScripts = commission.declaredScripts ?? {
+  test: 'npm-script:test',
+  typecheck: 'npm-script:typecheck',
+  lint: 'npm-script:lint',
 };
-const registry = createRegistry(types);
-const engine = new Engine({ registry, brain, store, memory });
+
+const store = new JsonlEventStore(`${OUT_DIR}/events.jsonl`);
+const engine = buildLiveEngine({
+  store,
+  sandbox: { repoRoot, declaredScripts },
+  goldenCapture: true,
+});
 const listener = new Listener({ engine, store });
 
 // ── Commission through the real front door ───────────────────────────────────────
