@@ -25,7 +25,7 @@ Each issue is one OKF `type: issue` file with `kind` (bug | idea | future-work),
 | [comprehension-region-wallclock-exhaustion](comprehension-region-wallclock-exhaustion.md) | bug | engine, comprehend, wall-clock, recursion |
 | [dive-anchor-hallucination-blocks-region](dive-anchor-hallucination-blocks-region.md) | bug | engine, comprehend, dive-anchor, verify-on-read, model-quality |
 | [build-leaf-context-thrash](build-leaf-context-thrash.md) | bug | engine, build, working-memory, eviction, context, read-tool |
-| [freeze-contract-step-loop-stall](freeze-contract-step-loop-stall.md) | bug | engine, build, step-loop, in-run-stall, isomorphic-failure, commission |
+| [freeze-contract-step-loop-stall](freeze-contract-step-loop-stall.md) | bug | engine, build, freeze-contract, output-mode, make-vs-comprehend, isomorphic-failure, split-scope, commission |
 | [visual-runtime-verification](visual-runtime-verification.md) | future-work | structural, verification, vision |
 | [milestone-loop-step-7-prove-live](milestone-loop-step-7-prove-live.md) | future-work | milestone-loop, engine, live-proof |
 | [operator-console-ui](operator-console-ui.md) | future-work | ui, operator-console, observability, read-model, front-door |
