@@ -34,7 +34,7 @@ const SALIENT_KEYS = [
 /** Args whose value is bulk text — recorded as a `<key>_len` count, never inlined. */
 const BULK_KEYS = ['content', 'body', 'text', 'script'] as const;
 
-const MAX_STRING_LEN = 200;
+const MAX_STRING_LEN = 2000;
 
 function boundString(value: string): string {
   return value.length <= MAX_STRING_LEN ? value : `${value.slice(0, MAX_STRING_LEN)}…`;

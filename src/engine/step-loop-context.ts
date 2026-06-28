@@ -27,6 +27,7 @@ export function buildStepLoopInitialTranscript(input: StepLoopInitialTranscriptI
         `Work the goal with the granted tools. When the work is complete, reply with the final ` +
         `artifact as your message content with no tool calls (for artifact-emitting goals, the ` +
         `content must be exactly the artifact — no preamble, no commentary).` +
+        makeArtifactBlock(input.typeDef) +
         sandboxPathsBlock(input.sandboxRepoRoot !== undefined) +
         skillBlock(input.goal, input.typeDef) +
         exploreEconomyBlock(input.isExploreThenEmit) +
@@ -41,6 +42,28 @@ export function buildStepLoopInitialTranscript(input: StepLoopInitialTranscriptI
       content: `${input.remainingToolCalls} tool calls remaining`,
     },
   ];
+}
+
+function makeArtifactBlock(typeDef: GoalTypeDef): string {
+  if (typeDef.kind !== 'make') {
+    return '';
+  }
+  // A make goal's artifact IS the files it creates or modifies, emitted as fenced
+  // file blocks (```<relative/path>\n<full file content>```), one per file. The
+  // success gate requires real file content under the declared scope — a summary,
+  // an architecture map, a plan, or a description of what you would write is NOT a
+  // deliverable and will be rejected. If you cannot produce the files (missing
+  // access, the scope path does not exist and cannot be created), raise a blocker;
+  // do not emit prose in their place.
+  return (
+    `\n\nThis is a make goal: your final artifact is the FILES you create or modify, ` +
+    `emitted as fenced file blocks — each block opens with the relative file path on ` +
+    `the fence line and contains the file's FULL new content:\n` +
+    '```src/path/to/file.ts\n<entire file content>\n```\n' +
+    `Emit one block per file you create or change. Do NOT emit a summary, plan, or ` +
+    `architecture map as the artifact — only real files count. If the work genuinely ` +
+    `cannot be done, raise a blocker rather than emitting prose.`
+  );
 }
 
 function skillBlock(goal: Goal, typeDef: GoalTypeDef): string {

@@ -45,11 +45,16 @@ describe('summarizeToolArgs', () => {
     expect(summarizeToolArgs({ script: 'echo hi' })).toEqual({ script_len: 'echo hi'.length });
   });
 
-  it('bounds an over-long string value', () => {
-    const longPath = 'a/'.repeat(300);
-    const result = summarizeToolArgs({ path: longPath });
+  it('does not truncate a realistically long path or pattern', () => {
+    const deepPath = 'src/' + 'nested/'.repeat(60) + 'file.ts'; // ~430 chars
+    expect(summarizeToolArgs({ path: deepPath })).toEqual({ path: deepPath });
+  });
+
+  it('bounds only a degenerate over-long string value', () => {
+    const huge = 'a/'.repeat(2000); // 4000 chars
+    const result = summarizeToolArgs({ path: huge });
     expect(typeof result?.path).toBe('string');
-    expect((result!.path as string).length).toBeLessThanOrEqual(201);
+    expect((result!.path as string).length).toBeLessThanOrEqual(2001);
     expect((result!.path as string).endsWith('…')).toBe(true);
   });
 

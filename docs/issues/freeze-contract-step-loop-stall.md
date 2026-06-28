@@ -80,12 +80,26 @@ hallucinated paths/anchors derailing a leaf.)
    prompt and produced the same wrong-mode artifact, so the no-progress detector
    fired. The detector is working as designed; the upstream behavior is the bug.
 
+## Progress (2026-06-27)
+The **primary cause — output-mode steering — is addressed.** Two changes landed:
+- The make-goal step-loop preamble (`src/engine/step-loop-context.ts`,
+  `makeArtifactBlock`) now states explicitly that a make goal's artifact is the
+  FILES it creates/modifies, emitted as fenced file blocks, and that a summary /
+  plan / architecture map is NOT a deliverable.
+- The `freeze-contract` skill section (`src/library/skills/build.md`) now leads
+  with "your deliverable is the declaration FILES, written" and "read only enough
+  to write the declaration, then write" — the action-orientation the `implement`
+  section already had.
+
+Still open (needs a live re-run to verify, plus the secondary items below):
+scope-path validation, non-identical retry, and salvage. A deterministic
+"you have read N files and written none" nudge is a candidate if steering alone
+proves insufficient.
+
 ## Proposed direction
-- Steer the `freeze-contract` (and `make`-family) leaf to **write declaration
-  files**: tighten the type skill / step-loop preamble so a freeze leaf's success
-  is "files created/modified under scope", and consider a deterministic nudge when
-  many reads accrue with zero writes ("you have read N files and written none;
-  emit the artifact").
+- ~~Steer the `freeze-contract` (and `make`-family) leaf to **write declaration
+  files**~~ — DONE (see Progress). A deterministic read-without-write nudge
+  remains a fallback if the steering proves insufficient on re-run.
 - Fix the split so scoped paths are **real** (validate scope paths against the
   repo at split time, or have the freeze leaf create the declared file even when
   it does not pre-exist rather than searching for it).

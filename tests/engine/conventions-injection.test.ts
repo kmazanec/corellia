@@ -255,6 +255,52 @@ describe('Chunk 2 — make goal WITHOUT sandbox: no throw, global-only block', (
   });
 });
 
+// ── make-goal artifact steering: artifact is fenced file blocks ───────────────
+
+describe('make-goal artifact steering: the artifact is the written files', () => {
+  it('a make goal is told its artifact is fenced file blocks, not a summary/map', async () => {
+    const captured: string[] = [];
+    const store = new MemoryEventStore();
+    const engine = new Engine({
+      registry: buildRegistry([makeKindType('freeze-contract')]),
+      brain: capturingBrain(captured),
+      store,
+      memory: new NoopMemoryView(),
+      broker: new FakeBroker([]),
+    });
+
+    await engine.run(makeGoal({
+      type: 'freeze-contract',
+      budget: { attempts: 3, tokens: 10000, toolCalls: 5, wallClockMs: 60_000 },
+    }));
+
+    const ctx = captured[0]!;
+    expect(ctx).toContain('This is a make goal: your final artifact is the FILES');
+    expect(ctx).toContain('fenced file blocks');
+    expect(ctx).toContain('Do NOT emit a summary, plan, or architecture map as the artifact');
+  });
+
+  it('a learn-kind goal does NOT get the make-artifact steering', async () => {
+    const captured: string[] = [];
+    const store = new MemoryEventStore();
+    const engine = new Engine({
+      registry: buildRegistry([learnKindType()]),
+      brain: capturingBrain(captured),
+      store,
+      memory: new NoopMemoryView(),
+      broker: new FakeBroker([]),
+    });
+
+    await engine.run(makeGoal({
+      type: 'map-repo',
+      budget: { attempts: 3, tokens: 10000, toolCalls: 5, wallClockMs: 60_000 },
+    }));
+
+    const ctx = captured[0]!;
+    expect(ctx).not.toContain('This is a make goal: your final artifact is the FILES');
+  });
+});
+
 // ── Chunk 3: override precedence — label and ordering ────────────────────────
 
 describe('Chunk 3 — override precedence: host label and ordering (AC-3)', () => {

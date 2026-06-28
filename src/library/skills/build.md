@@ -26,6 +26,20 @@ delete it.
 
 ## freeze-contract
 
+Your deliverable is the declaration FILES, written. Create or modify each file in
+the declared scope with the interface and type declarations the spec names, and
+emit them as fenced file blocks. A characterization of the existing contract — a
+map, a summary, a list of where things live — is NOT the deliverable and will be
+rejected; freezing a contract means writing the new shapes, not describing the
+old ones. If a scoped file does not yet exist, create it; do not keep searching
+for it.
+
+Read only enough to write the declaration, then write. You do not need the whole
+codebase in mind to declare an interface. Read the one or two files whose shapes
+you must match, `note` what you need, and emit the file blocks. Reaching for the
+next file when you already have enough to declare is how a leaf balloons its
+context and produces nothing.
+
 Land every shared shape before any sibling fan-out. The diff must contain no
 feature behavior — shapes, their exhaustive type-level consumers, and scoped
 contract tests only. Run the scoped test suite to confirm; if any test exercises
