@@ -60,9 +60,17 @@ export interface LiveEngineOptions {
   /** SandboxConfig for the target repo. Must include repoRoot. */
   sandbox: SandboxConfig;
   /**
-   * When true, enable knowledge wiring (coverage gate, comprehension minting,
-   * artifact persist). Enable for comprehension / eyes runs; disable for
-   * deliver / implement runs where coverage is not the goal.
+   * When true, enable the knowledge COVERAGE GATE (comprehension minting, artifact
+   * persist). Enable for comprehension / eyes runs; disable for deliver / implement
+   * runs where coverage is not the goal.
+   *
+   * Note this is the gate only. The five read-only retrieval TOOLS (find_symbol,
+   * find_exemplar, conventions_for, stack_versions, impact) are a per-leaf
+   * capability — always registered in the broker regardless of this flag — so any
+   * leaf whose type grants `retrieval.api` can use them. The broker still
+   * grant-checks each call, so registering them is harmless for leaves without the
+   * grant. (Keeping tool availability tied to this gate flag is the footgun that
+   * left author-acceptance-criteria with every retrieval call refused.)
    */
   knowledge?: boolean;
   /**
@@ -110,7 +118,11 @@ export function buildLiveEngine(opts: LiveEngineOptions): Engine {
     brain,
     store: opts.store,
     memory,
-    sandbox: opts.sandbox,
+    // Always register the read-only retrieval tools in the broker. They are a
+    // per-leaf capability (grant-checked per call), not a run-mode choice, so a
+    // leaf granted retrieval.api can always use them. The coverage GATE below is
+    // the run-mode choice, kept separate behind opts.knowledge.
+    sandbox: { ...opts.sandbox, knowledge: true },
     goldenCapture: opts.goldenCapture ?? true,
   };
 
