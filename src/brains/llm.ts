@@ -392,9 +392,19 @@ function buildStepRequest(
     },
   }));
 
-  const responseFormat: StepRequest['response_format'] = outputSchema !== undefined
-    ? { type: 'json_schema', json_schema: { name: 'artifact', strict: true, schema: outputSchema } }
-    : undefined;
+  // Apply the strict json_schema response_format ONLY on a tool-less step (the
+  // dedicated emit call). Sending a strict output-schema grammar AND tools on the
+  // same request is a contradiction — "your message must match the criteria
+  // schema" vs "call a tool" — which providers handle inconsistently and which
+  // wedges/hangs the request, so an outputSchema leaf never produces a clean
+  // tool-less emit turn (run ee51401d: the author-acceptance-criteria leaf hung
+  // every attempt, criteriaTotal stayed 0). During exploration the model is free
+  // to call tools or return a plain message; the schema is enforced on the
+  // tool-less emit step that runStructuredArtifactEmit issues.
+  const responseFormat: StepRequest['response_format'] =
+    outputSchema !== undefined && wireTools.length === 0
+      ? { type: 'json_schema', json_schema: { name: 'artifact', strict: true, schema: outputSchema } }
+      : undefined;
 
   return {
     model,

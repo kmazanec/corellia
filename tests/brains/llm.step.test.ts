@@ -982,7 +982,9 @@ describe('step response with both content and tool_calls drops prose (T2b)', () 
 // ---------------------------------------------------------------------------
 
 describe('step response_format: json_schema when ctx.outputSchema present', () => {
-  it('request includes response_format.json_schema when ctx.outputSchema is set', async () => {
+  it('omits response_format on a tool-bearing step even when ctx.outputSchema is set', async () => {
+    // A strict json_schema response_format sent ALONGSIDE tools is a contradiction
+    // that wedges the provider; the schema is enforced only on the tool-less emit.
     const { fetch, calls } = stubFetch({ status: 200, body: contentResponse('{"result":"done"}') });
     const brain = new LlmBrain({ baseUrl: BASE, apiKey: KEY, modelByTier, fetchImpl: fetch });
     const schema: Record<string, unknown> = {
@@ -992,6 +994,21 @@ describe('step response_format: json_schema when ctx.outputSchema present', () =
     };
     const ctxWithSchema: BrainContext = { tier: 'mid', memories: [], outputSchema: schema };
     await brain.step(baseGoal, [{ role: 'context', content: 'sys' }], tools, ctxWithSchema);
+
+    const body = JSON.parse(calls[0]!.options.body as string);
+    expect(body.response_format).toBeUndefined();
+  });
+
+  it('applies response_format.json_schema on a tool-less step (the emit call)', async () => {
+    const { fetch, calls } = stubFetch({ status: 200, body: contentResponse('{"result":"done"}') });
+    const brain = new LlmBrain({ baseUrl: BASE, apiKey: KEY, modelByTier, fetchImpl: fetch });
+    const schema: Record<string, unknown> = {
+      type: 'object',
+      properties: { result: { type: 'string' } },
+      required: ['result'],
+    };
+    const ctxWithSchema: BrainContext = { tier: 'mid', memories: [], outputSchema: schema };
+    await brain.step(baseGoal, [{ role: 'context', content: 'sys' }], [], ctxWithSchema);
 
     const body = JSON.parse(calls[0]!.options.body as string);
     expect(body.response_format).toBeDefined();
@@ -1023,8 +1040,8 @@ describe('step response_format: json_schema when ctx.outputSchema present', () =
   });
 });
 
-describe('step malformation re-prompt preserves response_format when ctx.outputSchema is set', () => {
-  it('re-prompt request body carries response_format.json_schema when ctx.outputSchema was set on the initial call', async () => {
+describe('step malformation re-prompt omits response_format on the tool-bearing retry', () => {
+  it('re-prompt request body omits response_format (tools are present; schema is for the tool-less emit)', async () => {
     const malformedBody = {
       choices: [
         {
@@ -1061,10 +1078,7 @@ describe('step malformation re-prompt preserves response_format when ctx.outputS
 
     expect(calls).toHaveLength(2);
     const repromptBody = JSON.parse(calls[1]!.options.body as string);
-    expect(repromptBody.response_format).toBeDefined();
-    expect(repromptBody.response_format.type).toBe('json_schema');
-    expect(repromptBody.response_format.json_schema.strict).toBe(true);
-    expect(repromptBody.response_format.json_schema.schema).toEqual(schema);
+    expect(repromptBody.response_format).toBeUndefined();
   });
 });
 
