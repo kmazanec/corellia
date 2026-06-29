@@ -14,6 +14,20 @@ the [iteration](iterations/index.md) or [ADR](adrs/index.md) that owns the detai
 This file replaces the former `STATUS.md`. Forward strategy is no longer a
 standalone roadmap — it lives as open issues.
 
+## 2026-06-28
+
+- **Iteration 18 — make-leaf progress**
+  ([iteration 18](iterations/2026-06-28-20-make-leaf-progress/index.md)). Stops a
+  make leaf from reading-but-never-delivering and then blocking with nothing
+  salvaged: output-mode steering, a read-without-write nudge
+  (`make-progress-nudge.ts`), a non-isomorphic retry that carries the prior
+  rejection reason into the next prompt (`priorRejectionBlock`), worktree salvage
+  on both the success path and the hard-block path
+  (`worktree-salvage.ts` → blocked reports carry the partial diff instead of
+  null), and an error-signature → fix repair-hint library (`repair-hints.ts`).
+  Closed and deleted three issues: `freeze-contract-step-loop-stall`,
+  `salvage-on-repeated-failure`, and `error-signature-repair-hints`.
+
 ## 2026-06-27
 
 - **Iteration 17 — commission-run fixes**

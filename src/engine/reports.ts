@@ -4,9 +4,16 @@ import type { Artifact, Report } from '../contract/report.js';
 import type { RiskClass } from '../contract/risk.js';
 import type { Finding } from '../contract/verdict.js';
 
-export function blockedReport(reason: string, findings: string[] = []): Report {
+export function blockedReport(
+  reason: string,
+  findings: string[] = [],
+  salvagedArtifact: Artifact | null = null,
+): Report {
   return {
-    artifact: null,
+    // A blocked make leaf may still have written partial work to the worktree;
+    // carry it as a draft artifact so a resume starts from the partial work
+    // instead of an empty worktree, rather than discarding it as null.
+    artifact: salvagedArtifact,
     proof: [],
     lessons: [],
     memoriesUsed: [],

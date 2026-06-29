@@ -6,6 +6,7 @@ import {
   resolveAttemptFailure,
   type AttemptFailureResolution,
 } from './failure.js';
+import { salvageWorktreeArtifact } from './worktree-salvage.js';
 import type { AttemptLoopContext } from './loop.js';
 
 export function handleAttemptFailure(params: {
@@ -26,6 +27,7 @@ export function handleAttemptFailure(params: {
     tierIndex: params.tierIndex,
     tierLadder: params.context.tierLadder,
     priorAttempt: params.priorAttempt,
+    salvagedArtifact: blockSalvage(params.context),
     brain: params.context.deps.brain,
     store: params.context.deps.store,
     now: params.context.deps.now,
@@ -35,4 +37,16 @@ export function handleAttemptFailure(params: {
     onCeilingReached: () =>
       params.context.deps.ceilingReport(params.context.goal, params.context.treeState),
   });
+}
+
+/**
+ * Partial work to carry on a blocked report: for a make goal with a sandbox, the
+ * in-scope files written to the worktree. Null for non-make goals, no sandbox, or
+ * an empty worktree — the report's artifact stays null, exactly as before.
+ */
+function blockSalvage(context: AttemptLoopContext): Artifact | null {
+  if (context.typeDef.kind !== 'make') return null;
+  const root = context.deps.sandboxRepoRoot();
+  if (root === undefined) return null;
+  return salvageWorktreeArtifact(root, context.goal.scope) ?? null;
 }

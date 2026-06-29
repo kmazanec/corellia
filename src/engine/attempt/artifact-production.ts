@@ -12,6 +12,7 @@ import {
   type StepLoopResult,
 } from '../step-loop-result.js';
 import { isToolGranted } from '../step-loop-tools.js';
+import { repairHintsFor } from './repair-hints.js';
 import type { AttemptFailureResolution } from './failure.js';
 import { produceClassicArtifact } from './classic-produce.js';
 import { runLeafTournament } from './leaf-tournament.js';
@@ -124,15 +125,19 @@ async function produceWithStepLoop(
  * The gating-finding titles from the prior attempt's rejection, threaded into the
  * retry prompt so it directly addresses why the last attempt failed — making the
  * retry non-isomorphic rather than a verbatim re-run that re-trips the same block.
- * Undefined on the first attempt (no prior) or when the prior verdict had no
- * gating findings.
+ * When a finding matches a known error signature, the matching suggested fix is
+ * appended so the leaf converges on a recognized class of error instead of
+ * thrashing. Undefined on the first attempt (no prior) or when the prior verdict
+ * had no gating findings.
  */
 function priorRejectionReasons(prior: AttemptPrior | undefined): string[] | undefined {
   if (prior === undefined) return undefined;
-  const reasons = prior.verdict.findings
+  const titles = prior.verdict.findings
     .filter((finding: Finding) => finding.gating)
     .map((finding: Finding) => finding.title);
-  return reasons.length > 0 ? reasons : undefined;
+  if (titles.length === 0) return undefined;
+  const hints = repairHintsFor(titles).map((hint) => `Suggested fix: ${hint}`);
+  return [...titles, ...hints];
 }
 
 async function continueFromStepLoopFailure(

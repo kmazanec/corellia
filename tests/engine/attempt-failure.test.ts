@@ -69,6 +69,36 @@ describe('attempt failure resolver', () => {
     expect(store.types()).toEqual(['blocked', 'emitted']);
   });
 
+  it('carries salvaged partial work on the blocked report instead of a null artifact', async () => {
+    const store = new MemoryEventStore();
+    const verdict = failVerdict('same failure', undefined, undefined, 'same-signature');
+    const salvaged = { kind: 'files' as const, files: [{ path: 'src/x.ts', content: 'export type X = 1;\n' }] };
+
+    const result = await resolveAttemptFailure({
+      goal: makeGoal(),
+      artifact: textArtifact('a prose summary, not files'),
+      verdict,
+      budget,
+      tier: 'mid',
+      tierIndex: 1,
+      tierLadder: ['low', 'mid', 'high'],
+      priorAttempt: { artifact: textArtifact('prior'), verdict },
+      salvagedArtifact: salvaged,
+      brain: new ScriptedBrain(),
+      store,
+      now: () => 2,
+      onBrief: undefined,
+      debitUsage: () => {},
+      hasReachedCeiling: () => false,
+      onCeilingReached: async () => {
+        throw new Error('ceiling should not run');
+      },
+    });
+
+    expect(result.kind).toBe('blocked');
+    expect(result.kind === 'blocked' ? result.report.artifact : null).toEqual(salvaged);
+  });
+
   it('repairs prescribed gating findings', async () => {
     const store = new MemoryEventStore();
     let usageDebited = false;

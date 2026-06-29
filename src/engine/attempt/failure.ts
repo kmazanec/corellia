@@ -27,6 +27,9 @@ export async function resolveAttemptFailure(params: {
   tierIndex: number;
   tierLadder: Tier[];
   priorAttempt: { artifact: Artifact | null; verdict: Verdict } | undefined;
+  /** Partial work salvaged from the worktree, carried on a blocked report so a
+   * resume starts from the partial diff instead of an empty worktree. */
+  salvagedArtifact: Artifact | null;
   brain: Brain;
   store: EventStore;
   now: () => number;
@@ -47,6 +50,7 @@ export async function resolveAttemptFailure(params: {
       report: blockedReport(
         `Escalated finding requires human decision: ${escalatedFinding.title}`,
         params.verdict.findings.map((finding) => finding.title),
+        params.salvagedArtifact,
       ),
       brief: escalatedBrief(params.goal, escalatedFinding),
     });
@@ -61,6 +65,7 @@ export async function resolveAttemptFailure(params: {
       report: blockedReport(
         `Isomorphic failure detected (signature: ${params.verdict.failureSignature}) — escalating to block`,
         params.verdict.findings.map((finding) => finding.title),
+        params.salvagedArtifact,
       ),
       brief: isomorphicBrief(params.goal, params.verdict.failureSignature!),
     });
@@ -113,7 +118,7 @@ export async function resolveAttemptFailure(params: {
     store: params.store,
     now: params.now,
     onBrief: params.onBrief,
-    report: blockedReport(brief.question),
+    report: blockedReport(brief.question, [], params.salvagedArtifact),
     brief,
   });
 }
