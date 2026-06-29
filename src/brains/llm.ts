@@ -67,11 +67,48 @@ export interface LlmBrainConfig {
   /**
    * Per-request abort timeout (ms). Aborts a hung fetch so it routes through the
    * retry/backoff instead of blocking forever. Default 120s; inject small in tests.
+   * Applies to every tier unless {@link requestTimeoutMsByTier} overrides it.
    */
   requestTimeoutMs?: number;
+  /**
+   * Optional per-tier request timeout override (ms). The high tier composes large
+   * structured artifacts over big prompts and is slower per token, so a flat 120s
+   * aborts legitimate authoring calls mid-stream (run ee51401d: the
+   * author-acceptance-criteria leaf timed out every attempt on a ~44K-token
+   * prompt). Higher tiers get more headroom; cheap tiers still fail fast. A tier
+   * absent here falls back to {@link requestTimeoutMs}, then the flat default.
+   */
+  requestTimeoutMsByTier?: Partial<Record<Tier, number>>;
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
+
+/**
+ * Default per-tier request timeouts. Cheap tiers fail fast; the high tier gets
+ * room to compose a large artifact over a big prompt without a mid-stream abort.
+ */
+const DEFAULT_REQUEST_TIMEOUT_MS_BY_TIER: Record<Tier, number> = {
+  low: 120_000,
+  mid: 180_000,
+  high: 360_000,
+};
+
+/**
+ * Resolve the request timeout for a tier: an explicit per-tier override wins,
+ * then the flat {@link LlmBrainConfig.requestTimeoutMs}, then the per-tier default.
+ * `tier` is undefined for tier-agnostic calls (e.g. the eviction summarizer);
+ * those use the flat default.
+ */
+export function requestTimeoutMsForTier(
+  config: Pick<LlmBrainConfig, 'requestTimeoutMs' | 'requestTimeoutMsByTier'>,
+  tier: Tier | undefined,
+): number {
+  const perTier = tier !== undefined ? config.requestTimeoutMsByTier?.[tier] : undefined;
+  if (perTier !== undefined) return perTier;
+  if (config.requestTimeoutMs !== undefined) return config.requestTimeoutMs;
+  if (tier !== undefined) return DEFAULT_REQUEST_TIMEOUT_MS_BY_TIER[tier];
+  return DEFAULT_REQUEST_TIMEOUT_MS;
+}
 const STEP_MAX_RETRIES = 3;
 
 // ---------------------------------------------------------------------------
@@ -214,6 +251,7 @@ interface StepFetchParams {
   transcript: StepTranscript;
   tools: ToolDef[];
   model: string;
+  tier: Tier;
   outputSchema: Record<string, unknown> | undefined;
   providerConfig: ProviderRoutingConfig | undefined;
   transportIncidents: TransportIncident[];
@@ -223,6 +261,7 @@ interface MalformedStepRetryParams {
   transcript: StepTranscript;
   tools: ToolDef[];
   model: string;
+  tier: Tier;
   outputSchema: Record<string, unknown> | undefined;
   providerConfig: ProviderRoutingConfig | undefined;
   incidents: TransportIncident[];
@@ -1043,6 +1082,7 @@ export class LlmBrain implements Brain {
      *   `kind`), which `json_object` mode does nothing to prevent.
      */
     jsonMode: boolean | { schemaName: string; schema: Record<string, unknown> },
+    tier?: Tier,
   ): Promise<{ content: string; usage: Usage; truncated?: boolean }> {
     const fetchFn = this.config.fetchImpl ?? globalThis.fetch;
     const responseFormat: ChatRequest['response_format'] =
@@ -1076,7 +1116,7 @@ export class LlmBrain implements Brain {
           },
           body: JSON.stringify(body),
           // Abort a hung request → falls into the retry below.
-          signal: AbortSignal.timeout(this.config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS),
+          signal: AbortSignal.timeout(requestTimeoutMsForTier(this.config, tier)),
         });
         if (!response.ok) {
           const text = await response.text();
@@ -1122,9 +1162,10 @@ export class LlmBrain implements Brain {
     messages: ChatMessage[],
     parse: (raw: string) => T,
     schema?: { schemaName: string; schema: Record<string, unknown> },
+    tier?: Tier,
   ): Promise<{ value: T; usage: Usage }> {
     const mode = schema ?? true;
-    const first = await this.callCompletions(model, messages, mode);
+    const first = await this.callCompletions(model, messages, mode, tier);
     try {
       return { value: parse(first.content), usage: first.usage };
     } catch (firstErr) {
@@ -1173,7 +1214,7 @@ export class LlmBrain implements Brain {
         first.truncated && model !== this.config.modelByTier.mid
           ? this.config.modelByTier.mid
           : model;
-      const second = await this.callCompletions(retryModel, correctionMessages, mode);
+      const second = await this.callCompletions(retryModel, correctionMessages, mode, tier);
       const usage: Usage = {
         promptTokens: first.usage.promptTokens + second.usage.promptTokens,
         completionTokens: first.usage.completionTokens + second.usage.completionTokens,
@@ -1303,6 +1344,7 @@ export class LlmBrain implements Brain {
           schemaName: 'decision',
           schema: DECISION_SCHEMA,
         },
+        ctx.tier,
       );
       return { value: result.value, usage: result.usage };
     } catch (err) {
@@ -1343,7 +1385,7 @@ export class LlmBrain implements Brain {
           `Do not truncate or summarize file content — emit every line.`,
       },
     ];
-    const result = await this.callCompletions(model, messages, false);
+    const result = await this.callCompletions(model, messages, false, ctx.tier);
     const files = parseFileBlocks(result.content);
     const value: Artifact = files.length > 0 ? { kind: 'files', files } : { kind: 'text', text: result.content };
     return { value, usage: result.usage };
@@ -1397,7 +1439,7 @@ export class LlmBrain implements Brain {
     const result = await this.callJson(model, messages, parseVerdict, {
       schemaName: 'verdict',
       schema: VERDICT_SCHEMA,
-    });
+    }, ctx.tier);
     return { value: result.value, usage: result.usage };
   }
 
@@ -1432,7 +1474,7 @@ export class LlmBrain implements Brain {
           `Return ALL files in full — do not truncate, summarize, or omit unchanged files.`,
       },
     ];
-    const result = await this.callCompletions(model, messages, false);
+    const result = await this.callCompletions(model, messages, false, ctx.tier);
     const files = parseFileBlocks(result.content);
     const value: Artifact = files.length > 0 ? { kind: 'files', files } : { kind: 'text', text: result.content };
     return { value, usage: result.usage };
@@ -1487,6 +1529,7 @@ export class LlmBrain implements Brain {
       transcript,
       tools,
       model,
+      tier: ctx.tier,
       outputSchema: ctx.outputSchema,
       providerConfig,
       transportIncidents,
@@ -1502,6 +1545,7 @@ export class LlmBrain implements Brain {
       transcript,
       tools,
       model,
+      tier: ctx.tier,
       outputSchema: ctx.outputSchema,
       providerConfig,
       incidents,
@@ -1529,7 +1573,7 @@ export class LlmBrain implements Brain {
     while (true) {
       let response: Response;
       try {
-        response = await this.postStepRequest(requestBody);
+        response = await this.postStepRequest(requestBody, params.tier);
       } catch (networkErr) {
         const isTimeout = isTimeoutError(networkErr);
         if (await retryNetworkStepRequest(params.transportIncidents, sleepFn, attempt, networkErr, isTimeout)) {
@@ -1569,7 +1613,7 @@ export class LlmBrain implements Brain {
       params.outputSchema,
       params.providerConfig,
     );
-    const repromptResponse = await this.postStepRequest(repromptBody);
+    const repromptResponse = await this.postStepRequest(repromptBody, params.tier);
 
     if (!repromptResponse.ok) {
       const errorText = await repromptResponse.text();
@@ -1595,7 +1639,7 @@ export class LlmBrain implements Brain {
     return mergeMalformedStepRetry(params.firstResponse, repromptWire, repromptUsage, repromptResult, params.incidents);
   }
 
-  private async postStepRequest(requestBody: StepRequest): Promise<Response> {
+  private async postStepRequest(requestBody: StepRequest, tier: Tier): Promise<Response> {
     const fetchFn = this.config.fetchImpl ?? globalThis.fetch;
     return fetchFn(`${this.config.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -1605,7 +1649,7 @@ export class LlmBrain implements Brain {
         ...this.config.headers,
       },
       body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(this.config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(requestTimeoutMsForTier(this.config, tier)),
     });
   }
 }
