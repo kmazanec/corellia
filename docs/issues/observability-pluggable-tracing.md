@@ -45,6 +45,12 @@ by tailing a file.
   wire optional sinks.
 - Surfaced while debugging the ADR-034/035 build runs (2026-06-25): every progress
   check meant hand-parsing `out/build-okfN-events.jsonl`. See [docs/log.md](../log.md).
+- Re-surfaced 2026-06-28: asked the plain question "is there a simple way to trail
+  the logs for an active run?" — the only answer today is `tail -f
+  out/<run>/events.jsonl | jq`. There is no `--follow` and no `bin`/CLI at all
+  (`package.json` has no `bin`; `scripts/trace.ts` reads a finished log only). The
+  live-tail is the smallest, most-requested slice of this issue — see the build-shape
+  note below.
 
 ## Proposed direction
 
@@ -86,6 +92,12 @@ turns the event stream into abstract spans, with each adapter rendering those in
 its wire format.
 
 ### Part 2 — `corellia logs` local CLI (developer ergonomics)
+
+> **Shippable on its own, first.** Part 2 (and within it, just `--follow`) is the
+> smallest standalone slice and does not depend on Part 1. The repo has no `bin`
+> entry today, so this slice also establishes the `corellia` CLI binary that future
+> subcommands hang off. Ship `corellia logs --follow` ahead of the sink fan-out if
+> the live-tail need is the pressing one.
 
 Graduate `scripts/trace.ts` into a real `corellia logs` subcommand:
 
