@@ -252,13 +252,15 @@ export function runCommandTool(runner: { run(command: string, timeLimitMs?: numb
     def: {
       name: 'run_command',
       description:
-        'Run a shell command in the sandbox worktree (your isolated checkout). Use it like a ' +
-        'developer terminal: run your own tests/lint/build, format code, and use LOCAL git to ' +
-        'manage your work — `git status`, `git diff`, `git checkout <path>` / `git restore <path>` ' +
-        'to undo a bad edit, `git add`/`git commit` per chunk. The command runs with the worktree ' +
-        'as its working directory. Network access is blocked (no push/pull/fetch/clone, no curl/wget, ' +
-        'no package installs) — to publish, use push_branch/open_pr. A command is killed after a ' +
-        'wall-clock timeout, so scope test runs to what you changed rather than the whole suite.',
+        'Run a shell command in the sandbox worktree to INSPECT and VERIFY your work — run ' +
+        'tests/lint/build, and use read-only git (`git status`, `git diff`) to review what you ' +
+        'changed, or `git checkout <path>` / `git restore <path>` to undo a bad edit. Do NOT use ' +
+        'it to author or deliver code: create and change files with write_file (the only thing ' +
+        'that counts as the deliverable), never with shell redirection, heredocs, sed, or ' +
+        '`git add`/`git commit`. The command runs with the worktree as its working directory. ' +
+        'Network access is blocked (no push/pull/fetch/clone, no curl/wget, no package installs) ' +
+        '— to publish, use push_branch/open_pr. A command is killed after a wall-clock timeout, ' +
+        'so scope test runs to what you changed rather than the whole suite.',
       parameters: {
         type: 'object',
         properties: {

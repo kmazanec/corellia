@@ -118,6 +118,7 @@ export const GRANT_TOOL_MAP = {
   search: ['fs.read'],
   head_sha: ['fs.read'],
   write_file: ['fs.write'],
+  edit_file: ['fs.write'],
   delete_file: ['fs.write'],
   run_script: ['test.run_scoped', 'test.run_impacted'],
   // A general worktree shell (ADR-016 amendment): runs arbitrary commands pinned

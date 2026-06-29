@@ -32,7 +32,7 @@ const SALIENT_KEYS = [
 ] as const;
 
 /** Args whose value is bulk text — recorded as a `<key>_len` count, never inlined. */
-const BULK_KEYS = ['content', 'body', 'text', 'script'] as const;
+const BULK_KEYS = ['content', 'body', 'text', 'script', 'old_string', 'new_string'] as const;
 
 const MAX_STRING_LEN = 2000;
 

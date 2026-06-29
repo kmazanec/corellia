@@ -275,8 +275,9 @@ describe('make-goal artifact steering: the artifact is the written files', () =>
     }));
 
     const ctx = captured[0]!;
-    expect(ctx).toContain('This is a make goal: your final artifact is the FILES');
-    expect(ctx).toContain('fenced file blocks');
+    expect(ctx).toContain('This is a make goal: your deliverable is the FILES');
+    expect(ctx).toContain('write_file');
+    expect(ctx).toContain('edit_file');
     expect(ctx).toContain('Do NOT emit a summary, plan, or architecture map as the artifact');
   });
 
@@ -297,7 +298,7 @@ describe('make-goal artifact steering: the artifact is the written files', () =>
     }));
 
     const ctx = captured[0]!;
-    expect(ctx).not.toContain('This is a make goal: your final artifact is the FILES');
+    expect(ctx).not.toContain('This is a make goal: your deliverable is the FILES');
   });
 });
 

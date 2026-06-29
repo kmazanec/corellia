@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Brain, StepOutput } from '../../src/contract/brain.js';
 import type { Decision } from '../../src/contract/decision.js';
+import type { EventStore } from '../../src/contract/events.js';
 import type { Goal, Usage } from '../../src/contract/goal.js';
 import { ZERO_USAGE } from '../../src/contract/goal.js';
 import type { Artifact } from '../../src/contract/report.js';
@@ -77,6 +78,7 @@ describe('produceAttemptArtifact', () => {
     const broker = new RecordingBroker(
       [{ callId: 'ignored', ok: true, output: 'file contents' }],
       [READ_FILE_TOOL],
+      store,
     );
 
     const result = await produceAttemptArtifact({
@@ -178,6 +180,7 @@ class RecordingBroker implements ToolBroker {
   constructor(
     private readonly results: ToolResult[],
     private readonly toolDefs: ToolDef[],
+    private readonly store?: EventStore,
   ) {}
 
   defs(): ToolDef[] {
@@ -186,6 +189,16 @@ class RecordingBroker implements ToolBroker {
 
   async execute(goal: Goal, call: ToolCall): Promise<ToolResult> {
     this.calls.push({ goalId: goal.id, call });
-    return this.results[0] ?? { callId: call.id, ok: false, output: 'no scripted result' };
+    const result = this.results[0] ?? { callId: call.id, ok: false, output: 'no scripted result' };
+    // The broker is the single logger for dispatched calls (mirrors the real broker).
+    await this.store?.append({
+      type: 'tool-call',
+      at: Date.now(),
+      goalId: goal.id,
+      tool: call.name,
+      callId: call.id,
+      outcome: result.ok ? 'ran' : 'refused',
+    });
+    return result;
   }
 }

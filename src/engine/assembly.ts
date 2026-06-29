@@ -307,6 +307,7 @@ export async function openSandboxAssembly(
     tools: [
       fileTools.readFile,
       fileTools.writeFile,
+      fileTools.editFile,
       fileTools.deleteFile,
       fileTools.listDir,
       fileTools.search,

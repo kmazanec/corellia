@@ -74,6 +74,8 @@ export async function routeStepToolCalls(params: StepToolRoutingParams): Promise
       continue;
     }
 
+    // The broker is the single logger for dispatched calls (it appends the
+    // tool-call event with the true outcome). The router does not re-log here.
     const result = await params.broker.execute(params.goal, call);
     state.remainingToolCalls--;
     state.toolCallsMade++;
@@ -81,23 +83,9 @@ export async function routeStepToolCalls(params: StepToolRoutingParams): Promise
       state.readCalls++;
       if (params.isExploreThenEmit) state.exploreReadCalls++;
     }
-    if (call.name === 'write_file' && result.ok) {
+    const isWrite = call.name === 'write_file' || call.name === 'edit_file';
+    if (isWrite && result.ok) {
       state.writeCalls++;
-    }
-
-    const summary = summarizeToolArgs(call.args);
-    await params.store.append({
-      type: 'tool-call',
-      at: params.now(),
-      goalId: params.goal.id,
-      tool: call.name,
-      callId: call.id,
-      outcome: result.ok ? 'ran' : 'refused',
-      ...(result.ok ? {} : { reason: result.output }),
-      ...(summary !== undefined ? { args: summary } : {}),
-    });
-
-    if (call.name === 'write_file' && result.ok) {
       const writtenPath = typeof call.args['path'] === 'string' ? call.args['path'] : undefined;
       if (writtenPath !== undefined) {
         invalidateReadGuardForPath(params.seenCalls, writtenPath);

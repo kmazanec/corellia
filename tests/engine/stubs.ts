@@ -25,22 +25,36 @@ export class FakeBroker implements ToolBroker {
   private readonly results: ToolResult[];
   private callCount = 0;
   readonly calls: Array<{ goal: Goal; call: ToolCall }> = [];
+  private readonly store: EventStore | undefined;
 
-  constructor(results: ToolResult[]) {
+  // The real broker is the single logger for dispatched calls; mirror that here so
+  // tests counting tool-call events see the same shape. Pass a store to log.
+  constructor(results: ToolResult[], store?: EventStore) {
     this.results = results;
+    this.store = store;
   }
 
   async execute(goal: Goal, call: ToolCall): Promise<ToolResult> {
     this.calls.push({ goal, call });
     const idx = Math.min(this.callCount, this.results.length - 1);
     this.callCount++;
-    const result = this.results[idx];
-    if (result === undefined) {
-      // No scripted results — return a refusal
-      return { callId: call.id, ok: false, output: 'FakeBroker: no scripted result' };
+    const scripted = this.results[idx];
+    const result: ToolResult =
+      scripted === undefined
+        ? { callId: call.id, ok: false, output: 'FakeBroker: no scripted result' }
+        : { ...scripted, callId: call.id };
+    if (this.store !== undefined) {
+      await this.store.append({
+        type: 'tool-call',
+        at: Date.now(),
+        goalId: goal.id,
+        tool: call.name,
+        callId: call.id,
+        outcome: result.ok ? 'ran' : 'refused',
+        ...(result.ok ? {} : { reason: result.output }),
+      });
     }
-    // Return the scripted result, but use the actual call's id for correlation
-    return { ...result, callId: call.id };
+    return result;
   }
 }
 

@@ -230,7 +230,7 @@ describe('multi-step success', () => {
       { callId: 'c1', ok: true, output: 'wrote' },
       { callId: 'c2', ok: true, output: 'wrote2' },
       { callId: 'c3', ok: true, output: 'content' },
-    ]);
+    ], store);
 
     const registry = buildRegistry([toolGrantedType()]);
     const engine = new Engine({
@@ -458,7 +458,7 @@ describe('refusal recovery', () => {
 
     const broker = new FakeBroker([
       { callId: 'r1', ok: false, output: 'permission denied' },
-    ]);
+    ], store);
 
     const registry = buildRegistry([toolGrantedType()]);
     const engine = new Engine({

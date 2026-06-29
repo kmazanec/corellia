@@ -117,7 +117,10 @@ export class Broker {
       return this.#refuse(goal, call, `tool "${call.name}" is not registered in this broker`);
     }
 
-    // 5. Append a 'ran' event and dispatch.
+    // 5. Dispatch, then append ONE tool-call event carrying the true outcome.
+    // The broker is the single logger for dispatched calls; the step-loop router
+    // logs only its own pre-broker cases (the note tool, duplicate-read refusals).
+    const outcome = await impl.execute(goal, call.args);
     const summary = summarizeToolArgs(call.args);
     await this.#store.append({
       type: 'tool-call',
@@ -125,11 +128,10 @@ export class Broker {
       goalId: goal.id,
       tool: call.name,
       callId: call.id,
-      outcome: 'ran',
+      outcome: outcome.ok ? 'ran' : 'refused',
+      ...(outcome.ok ? {} : { reason: outcome.output }),
       ...(summary !== undefined ? { args: summary } : {}),
     });
-
-    const outcome = await impl.execute(goal, call.args);
     return { callId: call.id, ok: outcome.ok, output: outcome.output };
   }
 

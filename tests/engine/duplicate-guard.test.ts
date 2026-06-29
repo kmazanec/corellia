@@ -105,7 +105,7 @@ describe('duplicate guard — read-only call refused on repeat (AC 3)', () => {
 
     // Step 1: read the same file twice, then finish.
     // The second read is a duplicate and should be refused without budget debit.
-    const broker = new FakeBroker([successResult('r1'), successResult('r2')]);
+    const broker = new FakeBroker([successResult('r1'), successResult('r2')], store);
 
     const brain = scriptedStepBrain([
       // Step 1: two reads of the same file
@@ -140,7 +140,7 @@ describe('duplicate guard — read-only call refused on repeat (AC 3)', () => {
   it('refused call has outcome:refused on the tool-call event', async () => {
     const store = new MemoryEventStore();
     const goal = makeGoalWithBudget(10);
-    const broker = new FakeBroker([successResult('r1')]);
+    const broker = new FakeBroker([successResult('r1')], store);
 
     const brain = scriptedStepBrain([
       toolCallsStep(readCall('r1', 'src/foo.ts'), readCall('r2', 'src/foo.ts')),
@@ -166,7 +166,7 @@ describe('duplicate guard — read-only call refused on repeat (AC 3)', () => {
   it('refused call does not debit toolCalls — broker is called only once for a duplicated read', async () => {
     const store = new MemoryEventStore();
     const goal = makeGoalWithBudget(10);
-    const broker = new FakeBroker([successResult('r1')]);
+    const broker = new FakeBroker([successResult('r1')], store);
 
     const brain = scriptedStepBrain([
       // Two identical reads — second should be refused without broker call
@@ -193,7 +193,7 @@ describe('duplicate guard — read-only call refused on repeat (AC 3)', () => {
   it('refused result is appended to transcript so brain can see why it was denied', async () => {
     const store = new MemoryEventStore();
     const goal = makeGoalWithBudget(10);
-    const broker = new FakeBroker([successResult('r1')]);
+    const broker = new FakeBroker([successResult('r1')], store);
     const capturedTranscripts: import('../../src/contract/brain.js').StepTranscript[] = [];
     let callCount = 0;
 
@@ -235,7 +235,7 @@ describe('duplicate guard — read-only call refused on repeat (AC 3)', () => {
   it('guards all read-only tool types — list_dir duplicate is refused', async () => {
     const store = new MemoryEventStore();
     const goal = makeGoalWithBudget(10);
-    const broker = new FakeBroker([successResult('l1', 'dir listing')]);
+    const broker = new FakeBroker([successResult('l1', 'dir listing')], store);
 
     const brain = scriptedStepBrain([
       toolCallsStep(
@@ -266,7 +266,7 @@ describe('duplicate guard — read-only call refused on repeat (AC 3)', () => {
     const broker = new FakeBroker([
       successResult('r1', 'contents of a'),
       successResult('r2', 'contents of b'),
-    ]);
+    ], store);
 
     const brain = scriptedStepBrain([
       // Two reads of DIFFERENT files — both should run
@@ -294,7 +294,7 @@ describe('duplicate guard — read-only call refused on repeat (AC 3)', () => {
     // The guard must canonicalize to catch these as duplicates.
     const store = new MemoryEventStore();
     const goal = makeGoalWithBudget(10);
-    const broker = new FakeBroker([successResult('r1')]);
+    const broker = new FakeBroker([successResult('r1')], store);
 
     const brain = scriptedStepBrain([
       toolCallsStep(
@@ -334,7 +334,7 @@ describe('duplicate guard — run_script repeats always allowed (AC 4)', () => {
     const broker = new FakeBroker([
       successResult('s1', 'FAIL: test failed'),
       successResult('s2', 'PASS: all tests pass'),
-    ]);
+    ], store);
 
     const brain = scriptedStepBrain([
       // Run the same script twice — both must run through
@@ -365,7 +365,7 @@ describe('duplicate guard — run_script repeats always allowed (AC 4)', () => {
       successResult('s1', 'FAIL'),
       { callId: 'w1', ok: true, output: 'wrote' },
       successResult('s2', 'PASS'),
-    ]);
+    ], store);
 
     const brain = scriptedStepBrain([
       toolCallsStep(runCall('s1', 'test')),   // Step 1: run tests
@@ -402,7 +402,7 @@ describe('duplicate guard — write_file invalidates guard for written path (AC 
       successResult('r1', 'old content'),
       { callId: 'w1', ok: true, output: 'wrote' },
       successResult('r2', 'new content'),
-    ]);
+    ], store);
 
     const brain = scriptedStepBrain([
       // Step 1: read the file
@@ -431,7 +431,7 @@ describe('duplicate guard — write_file invalidates guard for written path (AC 
     // Baseline: without a write, the second read of the same path is refused.
     const store = new MemoryEventStore();
     const goal = makeGoalWithBudget(10);
-    const broker = new FakeBroker([successResult('r1', 'content')]);
+    const broker = new FakeBroker([successResult('r1', 'content')], store);
 
     const brain = scriptedStepBrain([
       toolCallsStep(readCall('r1', 'src/check.ts')),
@@ -463,7 +463,7 @@ describe('duplicate guard — write_file invalidates guard for written path (AC 
       { callId: 'w1', ok: true, output: 'wrote' },
       successResult('r3', 'content a new'),
       // r4 (re-read of src/b.ts) will be refused
-    ]);
+    ], store);
 
     const brain = scriptedStepBrain([
       // Step 1: read two different files

@@ -131,6 +131,7 @@ export function sliceForRead(content: string, offset: number, limit: number | un
 export interface FileTools {
   readFile: ToolImpl;
   writeFile: ToolImpl;
+  editFile: ToolImpl;
   deleteFile: ToolImpl;
   listDir: ToolImpl;
   search: ToolImpl;
@@ -141,6 +142,7 @@ export function createFileTools(root: string): FileTools {
   return {
     readFile: createReadFileTool(root),
     writeFile: createWriteFileTool(root),
+    editFile: createEditFileTool(root),
     deleteFile: createDeleteFileTool(root),
     listDir: createListDirTool(root),
     search: createSearchTool(root),
@@ -202,7 +204,13 @@ function createWriteFileTool(root: string): ToolImpl {
   return {
     def: {
       name: 'write_file',
-      description: 'Write content to a file inside the sandbox root, within the goal\'s declared scope. The path must be relative and within scope.',
+      description:
+        'Create or overwrite a file with the given content, inside the sandbox root and ' +
+        'within the goal\'s declared scope. THIS IS HOW YOU DELIVER A MAKE GOAL: every file ' +
+        'you create or change must be written with this tool. Call it once per file, passing ' +
+        'the full file content. Do not describe the file, print it in a message, or write it ' +
+        'via run_command/git — only write_file changes count as the deliverable. The path must ' +
+        'be relative and within scope.',
       parameters: {
         type: 'object',
         properties: {
@@ -232,6 +240,98 @@ function createWriteFileTool(root: string): ToolImpl {
         return { ok: true, output: `wrote ${rawPath}` };
       } catch (err: unknown) {
         return { ok: false, output: `write_file: ${errorMessage(err)}` };
+      }
+    },
+  };
+}
+
+function createEditFileTool(root: string): ToolImpl {
+  return {
+    def: {
+      name: 'edit_file',
+      description:
+        'Make a surgical edit to an existing file by replacing an exact string, without ' +
+        'rewriting the whole file. PREFER THIS over write_file for changes to a large file — ' +
+        'appending a log line, extending a type, fixing a function — so you do not re-emit ' +
+        'unchanged content. `old_string` must appear EXACTLY ONCE in the file (include enough ' +
+        'surrounding context to make it unique); it is replaced with `new_string`. To insert, ' +
+        'let new_string contain old_string plus the addition. Pass replace_all:true to replace ' +
+        'every occurrence (e.g. renaming a symbol) instead of requiring uniqueness. Use ' +
+        'write_file only to create a new file or fully replace a small one. Path must be ' +
+        'relative and within scope.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Relative path to the file to edit' },
+          old_string: {
+            type: 'string',
+            description:
+              'The exact text to replace; must occur exactly once unless replace_all is true',
+          },
+          new_string: { type: 'string', description: 'The text to replace it with' },
+          replace_all: {
+            type: 'boolean',
+            description: 'Replace every occurrence instead of requiring a unique match (default false)',
+          },
+        },
+        required: ['path', 'old_string', 'new_string'],
+      },
+    },
+
+    async execute(goal: Goal, args: Record<string, unknown>): Promise<{ ok: boolean; output: string }> {
+      const rawPath = args['path'];
+      const oldString = args['old_string'];
+      const newString = args['new_string'];
+      const replaceAll = args['replace_all'] === true;
+      if (typeof rawPath !== 'string' || rawPath.length === 0) {
+        return { ok: false, output: 'edit_file: path must be a non-empty string' };
+      }
+      if (typeof oldString !== 'string' || oldString.length === 0) {
+        return { ok: false, output: 'edit_file: old_string must be a non-empty string' };
+      }
+      if (typeof newString !== 'string') {
+        return { ok: false, output: 'edit_file: new_string must be a string' };
+      }
+      if (oldString === newString) {
+        return { ok: false, output: 'edit_file: old_string and new_string are identical' };
+      }
+
+      const scoped = resolveScopedMutation(root, rawPath, goal.scope, 'edit_file');
+      if (!scoped.ok) return scoped;
+
+      let original: string;
+      try {
+        original = await readFile(scoped.fullPath, 'utf-8');
+      } catch {
+        return {
+          ok: false,
+          output: `edit_file: cannot read "${rawPath}" — use write_file to create a new file`,
+        };
+      }
+
+      const first = original.indexOf(oldString);
+      if (first === -1) {
+        return { ok: false, output: `edit_file: old_string not found in "${rawPath}"` };
+      }
+      const hasMore = original.indexOf(oldString, first + 1) !== -1;
+      if (hasMore && !replaceAll) {
+        return {
+          ok: false,
+          output:
+            `edit_file: old_string occurs more than once in "${rawPath}" — ` +
+            'add surrounding context to match one location, or pass replace_all:true',
+        };
+      }
+
+      const updated = replaceAll
+        ? original.split(oldString).join(newString)
+        : original.replace(oldString, newString);
+      const count = replaceAll ? (original.split(oldString).length - 1) : 1;
+      try {
+        await fsWriteFile(scoped.fullPath, updated, 'utf-8');
+        return { ok: true, output: `edited ${rawPath}${replaceAll ? ` (${count} occurrences)` : ''}` };
+      } catch (err: unknown) {
+        return { ok: false, output: `edit_file: ${errorMessage(err)}` };
       }
     },
   };
@@ -371,7 +471,7 @@ function resolveScopedMutation(
   root: string,
   rawPath: string,
   scope: string[],
-  toolName: 'write_file' | 'delete_file',
+  toolName: 'write_file' | 'edit_file' | 'delete_file',
 ): { ok: true; fullPath: string } | { ok: false; output: string } {
   const fullPath = resolveSandboxPath(root, rawPath);
   if (fullPath === null) {

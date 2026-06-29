@@ -63,13 +63,16 @@ function makeArtifactBlock(typeDef: GoalTypeDef): string {
   // access, the scope path does not exist and cannot be created), raise a blocker;
   // do not emit prose in their place.
   return (
-    `\n\nThis is a make goal: your final artifact is the FILES you create or modify, ` +
-    `emitted as fenced file blocks — each block opens with the relative file path on ` +
-    `the fence line and contains the file's FULL new content:\n` +
-    '```src/path/to/file.ts\n<entire file content>\n```\n' +
-    `Emit one block per file you create or change. Do NOT emit a summary, plan, or ` +
-    `architecture map as the artifact — only real files count. If the work genuinely ` +
-    `cannot be done, raise a blocker rather than emitting prose.`
+    `\n\nThis is a make goal: your deliverable is the FILES you create or change in the ` +
+    `worktree. Use the write tools, not prose:\n` +
+    `- write_file(path, content) — create a new file or fully replace a small one.\n` +
+    `- edit_file(path, old_string, new_string) — make a surgical change to an existing ` +
+    `file (append a log line, extend a type, fix a function) WITHOUT re-emitting the whole ` +
+    `file. Prefer this for any change to a large file.\n` +
+    `Do NOT deliver by printing files in your message, by describing what you would write, ` +
+    `or via run_command/git — only write_file/edit_file changes count. Do NOT emit a summary, ` +
+    `plan, or architecture map as the artifact. If the work genuinely cannot be done, raise a ` +
+    `blocker rather than emitting prose.`
   );
 }
 
