@@ -112,7 +112,11 @@ const declaredScripts: DeclaredScripts = commission.declaredScripts ?? {
 const store = new JsonlEventStore(`${OUT_DIR}/events.jsonl`);
 const engine = buildLiveEngine({
   store,
-  sandbox: { repoRoot, declaredScripts },
+  // knowledge:true on the sandbox registers the five retrieval tools (find_symbol,
+  // find_exemplar, conventions_for, stack_versions, impact) in the broker. Leaves
+  // granted retrieval.api (e.g. author-acceptance-criteria) need them; without it
+  // every retrieval call is refused as "not registered in this broker".
+  sandbox: { repoRoot, declaredScripts, knowledge: true },
   goldenCapture: true,
 });
 const listener = new Listener({ engine, store });
