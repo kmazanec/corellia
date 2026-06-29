@@ -411,7 +411,7 @@ function translateStepResponse(
       if (typeof args !== 'object' || args === null || Array.isArray(args)) {
         return null;
       }
-      calls.push({ id: wc.id, name: wc.function.name, args });
+      calls.push({ id: wc.id, name: normalizeToolName(wc.function.name), args });
     }
     return { kind: 'tool-calls', calls, usage, ...incidentField };
   }
@@ -428,6 +428,21 @@ function translateStepResponse(
   const artifact: Artifact =
     files.length > 0 ? { kind: 'files', files } : { kind: 'text', text: content };
   return { kind: 'artifact', artifact, usage, ...incidentField };
+}
+
+/**
+ * Normalize a tool name from the model's response to the leading identifier.
+ *
+ * Some models emit a malformed call where the arguments and stray markup are
+ * baked into the function NAME — e.g. `read_file("src/x.ts")</arg_value>` instead
+ * of name `read_file` with JSON arguments. Left raw, the broker reports "unknown
+ * tool" (a dead end). Trimming to the leading [A-Za-z0-9_] run routes the call to
+ * the real tool, which then returns a correctable refusal (e.g. "path must be a
+ * non-empty string") instead. A well-formed name is returned unchanged.
+ */
+export function normalizeToolName(raw: string): string {
+  const match = /^[A-Za-z0-9_]+/.exec(raw.trim());
+  return match ? match[0] : raw;
 }
 
 function parseStepResponseBody(bodyText: string): StepResponse {

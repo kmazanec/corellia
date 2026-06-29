@@ -86,7 +86,12 @@ export async function runMilestoneLoop(params: {
     const round = await params.runRound(roundChildren);
     roundReport = round.report;
 
-    if (roundIndex === 0) {
+    // Harvest the acceptance-criteria artifact the first round it appears.
+    // It is normally a round-0 child, but the planner can place the
+    // author-acceptance-criteria leaf in a later round; extracting only from
+    // round 0 left criteriaTotal:0 and made the whole loop unwinnable
+    // (run ee51401d). Keep looking until found, then hold it.
+    if (criteriaArtifact === null) {
       criteriaArtifact = extractCriteriaArtifact(round.childOutcomes);
       if (criteriaArtifact !== null) {
         await params.persistCriteria(criteriaArtifact);

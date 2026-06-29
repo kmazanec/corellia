@@ -51,6 +51,7 @@ describe('attempt step-loop failure transition', () => {
       tierLadder: ['low', 'mid', 'high'],
       priorAttempt: undefined,
       store,
+      salvagedArtifact: null,
       now: () => 123,
       resolveFailure: async (failure) => {
         resolved = failure;
@@ -93,6 +94,33 @@ describe('attempt step-loop failure transition', () => {
     });
   });
 
+  it('uses the salvaged worktree artifact as the failure artifact when present, not the transcript', async () => {
+    const store = new MemoryEventStore();
+    const salvaged: Artifact = {
+      kind: 'files',
+      files: [{ path: 'src/x.ts', content: 'export const x = 1;\n' }],
+    };
+    let resolved: StepLoopFailureContext | null = null;
+
+    await transitionStepLoopFailure({
+      goal: makeGoal({ id: 'g-step' }),
+      loopResult: { kind: 'failed', error: 'timeout', budget, transcript },
+      tier: 'low',
+      tierIndex: 0,
+      tierLadder: ['low', 'mid', 'high'],
+      priorAttempt: undefined,
+      salvagedArtifact: salvaged,
+      store,
+      now: () => 123,
+      resolveFailure: async (failure) => {
+        resolved = failure;
+        return { kind: 'repaired', artifact: textArtifact('ignored'), budget };
+      },
+    });
+
+    expect(resolved!.artifact).toEqual(salvaged);
+  });
+
   it('uses an existing prior attempt for isomorphic comparison but stores current transcript evidence for retry', async () => {
     const store = new MemoryEventStore();
     const priorAttempt = {
@@ -115,6 +143,7 @@ describe('attempt step-loop failure transition', () => {
       tierLadder: ['low', 'mid', 'high'],
       priorAttempt,
       store,
+      salvagedArtifact: null,
       now: () => 123,
       resolveFailure: async (failure) => {
         resolvedPrior = failure.priorAttempt;
@@ -155,6 +184,7 @@ describe('attempt step-loop failure transition', () => {
       tierLadder: ['low', 'mid', 'high'],
       priorAttempt: undefined,
       store,
+      salvagedArtifact: null,
       now: () => 123,
       resolveFailure: async () => ({ kind: 'blocked', report: blocked }),
     });
@@ -174,6 +204,7 @@ describe('attempt step-loop failure transition', () => {
       tierLadder: tiers,
       priorAttempt: undefined,
       store,
+      salvagedArtifact: null,
       now: () => 123,
       resolveFailure: async () => ({ kind: 'escalated', tier: 'high', budget }),
     });

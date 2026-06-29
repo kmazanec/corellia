@@ -17,7 +17,10 @@ export function authorTypes(): GoalTypeDef[] {
      * boolean per criterion.
      *
      * Tier: high (the target the whole loop converges against must be right).
-     * Grants: retrieval API only — it authors a checklist, it does not build.
+     * Grants: fs.read + retrieval API — it authors a checklist, it does not write.
+     * It must READ the deliver-intent spec, the relevant ADRs, and the files the
+     * criteria will assert against to author a faithful, runnable checklist;
+     * retrieval alone (symbol-level) is not enough to read those sources.
      * Per ADR-023: outputSchema drives structured emission; criteriaWellFormed
      * is the semantic gate.
      */
@@ -29,7 +32,7 @@ export function authorTypes(): GoalTypeDef[] {
       tier: { default: 'high', ladder: ['high'] },
       deterministic: [criteriaWellFormed()],
       judgeType: null,
-      grants: ['retrieval.api'],
+      grants: ['fs.read', 'retrieval.api'],
       outputSchema: ACCEPTANCE_CRITERIA_SCHEMA,
       // The criteria characterize "done" for a specific region of work — an empty
       // scope is what left this leaf with no anchor and let it read 140 files of the

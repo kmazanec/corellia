@@ -13,6 +13,7 @@ import {
 } from '../step-loop-result.js';
 import { isToolGranted } from '../step-loop-tools.js';
 import { repairHintsFor } from './repair-hints.js';
+import { salvageWorktreeArtifact } from './worktree-salvage.js';
 import type { AttemptFailureResolution } from './failure.js';
 import { produceClassicArtifact } from './classic-produce.js';
 import { runLeafTournament } from './leaf-tournament.js';
@@ -144,6 +145,14 @@ async function continueFromStepLoopFailure(
   params: Parameters<typeof produceAttemptArtifact>[0],
   loopResult: Extract<StepLoopResult, { kind: 'exhausted' | 'failed' }>,
 ): Promise<AttemptArtifactProductionResult> {
+  // Salvage any in-scope files the leaf wrote before the step loop failed
+  // abnormally (timeout/transport/tool-budget) — a make leaf that built and
+  // tested real work should not have it discarded for the transcript blob.
+  const salvagedArtifact =
+    params.typeDef.kind === 'make' && params.sandboxRepoRoot !== undefined
+      ? salvageWorktreeArtifact(params.sandboxRepoRoot, params.goal.scope) ?? null
+      : null;
+
   const failure = await transitionStepLoopFailure({
     goal: params.goal,
     loopResult,
@@ -151,6 +160,7 @@ async function continueFromStepLoopFailure(
     tierIndex: params.state.tierIndex,
     tierLadder: params.tierLadder,
     priorAttempt: params.state.priorAttempt,
+    salvagedArtifact,
     store: params.store,
     now: params.now,
     resolveFailure: params.resolveStepLoopFailure,

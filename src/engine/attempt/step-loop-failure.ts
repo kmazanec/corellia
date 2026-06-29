@@ -33,6 +33,10 @@ export async function transitionStepLoopFailure(params: {
   tierIndex: number;
   tierLadder: Tier[];
   priorAttempt: AttemptPrior | undefined;
+  /** Files already written to the worktree, salvaged so an abnormal step-loop
+   * terminal (timeout, transport, tool-budget) does not discard committed-able
+   * work. When present, used as the failure artifact instead of the transcript. */
+  salvagedArtifact: Artifact | null;
   store: EventStore;
   now: () => number;
   resolveFailure: (failure: StepLoopFailureContext) => Promise<AttemptFailureResolution>;
@@ -46,7 +50,7 @@ export async function transitionStepLoopFailure(params: {
     });
   }
 
-  const artifact = stepLoopFailureArtifact(params.loopResult.transcript);
+  const artifact = params.salvagedArtifact ?? stepLoopFailureArtifact(params.loopResult.transcript);
   const verdict = stepLoopFailureVerdict(params.loopResult);
   const transcriptAttempt = { artifact, verdict };
   const resolution = await params.resolveFailure({
