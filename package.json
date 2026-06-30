@@ -17,7 +17,8 @@
     "live:self": "tsx examples/live-self.ts",
     "live:foreign": "tsx examples/live-foreign.ts",
     "live:tiutni": "tsx examples/live-tiutni.ts",
-    "commission:run": "tsx examples/run-commission.ts"
+    "commission:run": "tsx examples/run-commission.ts",
+    "commission:watch": "tsx examples/watch-commission.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

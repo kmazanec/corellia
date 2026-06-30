@@ -13,8 +13,11 @@
  * Run:
  *   npm run commission:run -- <id>          # e.g. example-word-count
  *
- * Events land in out/commission-<id>/events.jsonl; any file artifacts the factory
- * returns are written under that directory.
+ * Events land in out/commission-<id>/events-<runStamp>.jsonl — one file PER RUN,
+ * never appended across runs. A shared log would concatenate distinct runs and
+ * make every projection, cost total, and the live watcher read mixed history (a
+ * prior run's root `emitted` would even read as "this run finished"). The watcher
+ * resolves the newest events-*.jsonl. File artifacts go under the same dir.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
@@ -109,7 +112,17 @@ const declaredScripts: DeclaredScripts = commission.declaredScripts ?? {
   lint: 'npm-script:lint',
 };
 
-const store = new JsonlEventStore(`${OUT_DIR}/events.jsonl`);
+// One fresh log per run. A shared events.jsonl, appended across runs, would
+// concatenate distinct runs into one file — corrupting renderTree (a tree mixing
+// two runs' goals), costSummary (summed spend across runs), and the live watcher
+// (a stale prior-run root `emitted` reads as "this run finished"). Stamp the log
+// per run, and refresh a stable `latest.jsonl` copy-pointer the watcher resolves.
+const runStamp = new Date().toISOString().replace(/[:.]/g, '-');
+const logPath = `${OUT_DIR}/events-${runStamp}.jsonl`;
+const store = new JsonlEventStore(logPath);
+console.log(`Events:      ${logPath}`);
+console.log(`Watch:       npm run commission:watch -- ${id}`);
+console.log('');
 const engine = buildLiveEngine({
   store,
   sandbox: { repoRoot, declaredScripts },
