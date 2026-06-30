@@ -174,6 +174,56 @@ describe('split integration', () => {
     ]);
   });
 
+  it('degrades a terminal provider error (e.g. 8MB input limit) to a blocker instead of crashing', async () => {
+    const brain = new ScriptedBrain();
+    // Make the integration judge throw the exact terminal error the provider
+    // raises when the input is too large; the tree must not crash.
+    brain.judge = async () => {
+      throw new Error(
+        'LLM request failed (400): {"error":{"message":"The total text input size exceeds 8 MB","code":400}}',
+      );
+    };
+
+    const result = await judgeSplitIntegration({
+      goal: makeGoal({ type: 'splitter' }),
+      artifact: textArtifact('merged'),
+      registry: buildRegistry([
+        nonLeafTypeDef(),
+        leafTypeDef({ name: 'judge-integration', family: 'judge' }),
+      ]),
+      brain,
+      goldenCapture: false,
+      store: new MemoryEventStore(),
+      now: () => 7,
+    });
+
+    expect(result.blockers).toHaveLength(1);
+    expect(result.blockers[0]).toContain('Integration eval could not run');
+    expect(result.blockers[0]).toContain('exceeds 8 MB');
+  });
+
+  it('re-throws a non-provider error (a genuine bug must not be swallowed)', async () => {
+    const brain = new ScriptedBrain();
+    brain.judge = async () => {
+      throw new TypeError('cannot read property of undefined');
+    };
+
+    await expect(
+      judgeSplitIntegration({
+        goal: makeGoal({ type: 'splitter' }),
+        artifact: textArtifact('merged'),
+        registry: buildRegistry([
+          nonLeafTypeDef(),
+          leafTypeDef({ name: 'judge-integration', family: 'judge' }),
+        ]),
+        brain,
+        goldenCapture: false,
+        store: new MemoryEventStore(),
+        now: () => 8,
+      }),
+    ).rejects.toThrow('cannot read property');
+  });
+
   it('returns hard blockers for failing integration judgments', async () => {
     const brain = new ScriptedBrain().queueJudge(failVerdict('missing final output'));
 

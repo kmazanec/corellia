@@ -25,6 +25,20 @@ export interface SplitIntegrationJudgment {
   blockers: string[];
 }
 
+/**
+ * A provider error that retrying cannot fix — a 4xx the brain surfaces as
+ * `LLM request failed (<status>): …`. The size-limit case (400 "input size
+ * exceeds N MB") is the motivating one: identical on retry, so the integration
+ * judge degrades to a blocker rather than letting it crash the tree.
+ */
+function isTerminalProviderError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const m = /LLM request failed \((\d{3})\)/.exec(err.message);
+  if (m === null) return false;
+  const status = Number(m[1]);
+  return status >= 400 && status < 500;
+}
+
 export function mergeGenericChildArtifacts(childReports: Report[]): Artifact | null {
   const allFiles: { path: string; content: string }[] = [];
   const allTexts: string[] = [];
@@ -130,12 +144,27 @@ export async function judgeSplitIntegration(params: {
     tier,
     memories: params.goal.memories,
   };
-  const { value: verdict, usage } = await params.brain.judge(
-    params.goal,
-    params.artifact,
-    rubric,
-    judgeCtx,
-  );
+  let verdict: Verdict;
+  let usage;
+  try {
+    ({ value: verdict, usage } = await params.brain.judge(
+      params.goal,
+      params.artifact,
+      rubric,
+      judgeCtx,
+    ));
+  } catch (err) {
+    // A terminal provider error here (e.g. the input size still exceeds the
+    // provider ceiling despite the bounded subject summary) must not crash the
+    // whole tree: the children already did real, preserved work. Degrade to a
+    // blocker so the round fails gracefully and the work can be collected and
+    // reported, rather than throwing through the milestone loop.
+    if (isTerminalProviderError(err)) {
+      const reason = `Integration eval could not run: ${err instanceof Error ? err.message : String(err)}`;
+      return { findings: [reason], blockers: [reason] };
+    }
+    throw err;
+  }
 
   if (params.goldenCapture) {
     await params.store.append({

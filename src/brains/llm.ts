@@ -28,6 +28,7 @@ import type { Artifact } from '../contract/report.js';
 import type { ToolDef, ToolCall } from '../contract/tool.js';
 import type { Verdict, Finding } from '../contract/verdict.js';
 import { renderPersonaBlock } from '../library/personas.js';
+import { summarizeJudgeSubject } from './judge-subject-summary.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -1408,14 +1409,7 @@ export class LlmBrain implements Brain {
     ctx: BrainContext,
   ): Promise<Metered<Verdict>> {
     const model = this.config.modelByTier[ctx.tier];
-    const subjectSummary =
-      subject.kind === 'files'
-        ? subject.files && subject.files.length > 0
-          ? subject.files
-              .map((f) => `  File: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``)
-              .join('\n')
-          : '(empty files artifact)'
-        : `Text body:\n${subject.text ?? '(empty)'}`;
+    const subjectSummary = summarizeJudgeSubject(subject);
     const messages: ChatMessage[] = [
       {
         role: 'system',
