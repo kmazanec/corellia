@@ -14,13 +14,18 @@
  * of each test that requires it, then restored.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { InMemoryEventStore } from '../../src/eventlog/memory-store.js';
 import { pushBranchTool } from '../../src/engine/pr-tools.js';
+
+// These tests perform real git init/worktree/commit/push operations against
+// local repositories. Under the full parallel suite, subprocess contention can
+// push a valid case beyond Vitest's default 5s timeout.
+vi.setConfig({ testTimeout: 30_000 });
 
 // ---------------------------------------------------------------------------
 // Fixtures

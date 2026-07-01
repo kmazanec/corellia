@@ -6,7 +6,7 @@
   "description": "A recursive software factory — walking-skeleton prototype.",
   "scripts": {
     "lint": "tsx scripts/lint-library.ts && tsx scripts/lint-docs.ts",
-    "test": "npm run lint && npm run typecheck && vitest run",
+    "test": "npm run lint && npm run typecheck && vitest run --exclude \"**/.corellia/**\"",
     "typecheck": "tsc --noEmit",
     "code-shape": "tsx scripts/code-shape.ts .",
     "demo": "tsx examples/greeting.ts",
