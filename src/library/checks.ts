@@ -203,6 +203,45 @@ export function runScriptCheck(scriptName: string): DeterministicCheck {
 }
 
 /**
+ * The deterministic floor for a runtime/visual criterion (ADR-042): run the named
+ * capture and pass ONLY if it produced non-empty output. This is the exact
+ * analogue of `fileContains` failing on a missing file — a broken capture (the
+ * app did not start, the render produced nothing, the endpoint was unreachable)
+ * fails deterministically, before any judge runs. A capture that succeeds is not
+ * yet "correct" — the judge rules on whether the captured output meets the claim —
+ * but a capture that failed can never pass, whatever the judge thinks.
+ *
+ * Fail-safe when `ctx.runCapture` is absent (any goal that declares no captures):
+ * a `{ capture }` criterion cannot arise without declared captures, so this is a
+ * defensive floor, matching `runScriptCheck`'s "no exec context" posture.
+ */
+export function captureSucceeded(captureName: string): DeterministicCheck {
+  return {
+    name: `capture:${captureName}`,
+    async run(
+      _goal: Goal,
+      _artifact: Artifact | null,
+      ctx?: CheckContext,
+    ): Promise<{ ok: boolean; detail: string }> {
+      if (ctx?.runCapture === undefined) {
+        return { ok: false, detail: 'no capture context' };
+      }
+      const result = await ctx.runCapture(captureName);
+      if (!result.ok) {
+        return {
+          ok: false,
+          detail: `Capture "${captureName}" did not produce output: ${result.detail}`,
+        };
+      }
+      return {
+        ok: true,
+        detail: `Capture "${captureName}" produced output${result.outputRef ? ` at ${result.outputRef}` : ''} (${result.durationMs}ms).`,
+      };
+    },
+  };
+}
+
+/**
  * `criteriaWellFormed` — the deterministic floor under the milestone-loop ship
  * gate (ADR-032 §2.3). It parses the acceptance-criteria artifact and rejects
  * any criterion whose check is not a sandbox-runnable predicate. The

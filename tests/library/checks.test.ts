@@ -13,6 +13,7 @@ import {
   fileContains,
   processClean,
   runScriptCheck,
+  captureSucceeded,
 } from '../../src/library/checks.js';
 import { isInScope } from '../../src/engine/tools.js';
 import type { Goal } from '../../src/contract/goal.js';
@@ -439,5 +440,35 @@ describe('isWithinScope shared predicate', () => {
     // Both must agree: isInScope fails, filesWithinScope fails.
     expect(isInScope('lib/x.ts', ['src/'])).toBe(false);
     expect(r.ok).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// captureSucceeded — the runtime/visual deterministic floor (ADR-042)
+// ---------------------------------------------------------------------------
+
+describe('captureSucceeded', () => {
+  it('fails safe with "no capture context" when no runCapture is present', async () => {
+    const r = await captureSucceeded('shot').run(baseGoal, null, {});
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('no capture context');
+  });
+
+  it('passes when the named capture produces output', async () => {
+    const ctx: CheckContext = {
+      runCapture: async (name) => ({ ok: true, kind: 'render-document', outputRef: `${name}.png`, detail: 'ok', durationMs: 3 }),
+    };
+    const r = await captureSucceeded('shot').run(baseGoal, null, ctx);
+    expect(r.ok).toBe(true);
+    expect(r.detail).toContain('shot.png');
+  });
+
+  it('fails when the capture produced no output', async () => {
+    const ctx: CheckContext = {
+      runCapture: async () => ({ ok: false, kind: 'render-document', detail: 'render exited 1', durationMs: 3 }),
+    };
+    const r = await captureSucceeded('shot').run(baseGoal, null, ctx);
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('did not produce output');
   });
 });

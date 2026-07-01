@@ -72,6 +72,18 @@ const scriptRan: FactoryEvent = {
   outputRef: 'g1:test:9000',
 };
 
+// capture-ran fixture (ADR-042)
+const captureRan: FactoryEvent = {
+  type: 'capture-ran',
+  at: 9500,
+  goalId: 'g1',
+  captureName: 'invoice-total',
+  kind: 'render-document',
+  ok: true,
+  durationMs: 42,
+  outputRef: 'fixtures/runtime-capture/rendered.txt',
+};
+
 // Minimal valid FactoryEvent fixtures — no engine or brain imports.
 const goalA: FactoryEvent = {
   type: 'goal-received',
@@ -202,6 +214,22 @@ describe('InMemoryEventStore', () => {
     expect(ev.exitStatus).toBe(0);
     expect(ev.durationMs).toBe(123);
     expect(ev.outputRef).toBe('g1:test:9000');
+  });
+
+  it('round-trips a capture-ran event with all required fields', async () => {
+    const store = new InMemoryEventStore();
+    await store.append(captureRan);
+
+    const all = await store.list({ type: 'capture-ran' });
+    expect(all).toHaveLength(1);
+
+    const ev = all[0] as Extract<FactoryEvent, { type: 'capture-ran' }>;
+    expect(ev.type).toBe('capture-ran');
+    expect(ev.captureName).toBe('invoice-total');
+    expect(ev.kind).toBe('render-document');
+    expect(ev.ok).toBe(true);
+    expect(ev.durationMs).toBe(42);
+    expect(ev.outputRef).toBe('fixtures/runtime-capture/rendered.txt');
   });
 
   it('round-trips a knowledge-written event with artifact fields intact', async () => {

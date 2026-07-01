@@ -67,6 +67,8 @@ export type FactoryEvent =
   | { type: 'step'; at: number; goalId: string; index: number; outputKind: 'tool-calls' | 'artifact'; usage?: Usage }
   /** A repo-declared script ran in the tree's sandbox; output retained by ref. */
   | { type: 'script-ran'; at: number; goalId: string; command: string; exitStatus: number | null; durationMs: number; outputRef: string }
+  /** A declared runtime/visual capture ran in the tree's sandbox (ADR-042); ok is the deterministic floor. */
+  | { type: 'capture-ran'; at: number; goalId: string; captureName: string; kind: string; ok: boolean; durationMs: number; outputRef?: string }
   /** A per-tree worktree was created for sandboxed execution. */
   | { type: 'worktree-created'; at: number; goalId: string; treeId: string; branch: string; path: string }
   /** A tree's worktree was collected — its commits folded back — and torn down. */

@@ -167,6 +167,7 @@ export function traceStats(events: FactoryEvent[]): Record<string, GoalTypeStats
       case 'tool-call':
       case 'step':
       case 'script-ran':
+      case 'capture-ran':
       case 'worktree-created':
       case 'worktree-collected':
       case 'worktree-preserved':
@@ -336,6 +337,7 @@ export function costSummary(events: FactoryEvent[]): CostSummary {
       case 'pattern-recorded':
       case 'tool-call':
       case 'script-ran':
+      case 'capture-ran':
       case 'worktree-created':
       case 'worktree-collected':
       case 'worktree-preserved':
@@ -452,6 +454,7 @@ export function projectKnowledge(events: FactoryEvent[]): KnowledgeView {
       case 'tool-call':
       case 'step':
       case 'script-ran':
+      case 'capture-ran':
       case 'worktree-created':
       case 'worktree-collected':
       case 'worktree-preserved':

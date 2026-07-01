@@ -66,6 +66,18 @@ export function lintLibrary(defs: GoalTypeDef[], opts: LintOptions = {}): string
       }
     }
 
+    // capture.run grants belong only to make-kind types (ADR-042). Running a
+    // declared capture starts servers and writes image/response files — side
+    // effects above the judge/learn/evolve ceiling. A non-make type must not
+    // hold it, the same way a judge type must not hold a write grant.
+    for (const grant of def.grants) {
+      if (grant === 'capture.run' && def.kind !== 'make') {
+        violations.push(
+          `Type "${def.name}" (kind "${def.kind}") has a capture.run grant — only make-kind types may hold this`,
+        );
+      }
+    }
+
     // Tier ladder must not be empty
     if (def.tier.ladder.length === 0) {
       violations.push(

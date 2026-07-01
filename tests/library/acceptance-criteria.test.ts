@@ -69,6 +69,15 @@ describe('criteriaWellFormed — accept', () => {
     expect(typeof criteriaWellFormedReExport).toBe('function');
     expect(criteriaWellFormedReExport().name).toBe('criteria-well-formed');
   });
+
+  it('accepts a {capture} check whose name is in the declared captures', async () => {
+    const r = await check.run(
+      baseGoal,
+      criteriaArtifact([{ id: 'a', claim: 'renders right', check: { capture: 'invoice-total' } }]),
+      { declaredCaptures: { 'invoice-total': { kind: 'render-document', file: 'x', renderScript: 'r', outputPath: 'o' } } },
+    );
+    expect(r.ok).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -102,6 +111,25 @@ describe('criteriaWellFormed — reject', () => {
     const r = await check.run(baseGoal, criteriaArtifact([]));
     expect(r.ok).toBe(false);
     expect(r.detail).toMatch(/empty/i);
+  });
+
+  it('rejects a {capture} check naming an undeclared capture', async () => {
+    const r = await check.run(
+      baseGoal,
+      criteriaArtifact([{ id: 'a', claim: 'renders', check: { capture: 'not-declared' } }]),
+      { declaredCaptures: { 'invoice-total': { kind: 'render-document', file: 'x', renderScript: 'r', outputPath: 'o' } } },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.detail).toMatch(/not declared/i);
+  });
+
+  it('rejects a {capture} check when no captures are declared at all', async () => {
+    const r = await check.run(
+      baseGoal,
+      criteriaArtifact([{ id: 'a', claim: 'renders', check: { capture: 'anything' } }]),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.detail).toMatch(/not declared/i);
   });
 
   it('rejects a duplicated id', async () => {
@@ -254,5 +282,30 @@ describe('criterionToCheck', () => {
     };
     const r = await criterionToCheck(criterion).run(goal, artifact);
     expect(r.ok).toBe(false);
+  });
+
+  it('maps a {capture} criterion to captureSucceeded that passes when the capture produces output', async () => {
+    const criterion: AcceptanceCriterion = { id: 'c', claim: 'renders right', check: { capture: 'shot' } };
+    const ctx: CheckContext = {
+      runCapture: async () => ({ ok: true, kind: 'render-document', outputRef: 'out.png', detail: 'ok', durationMs: 5 }),
+    };
+    const r = await criterionToCheck(criterion).run(goal, null, ctx);
+    expect(r.ok).toBe(true);
+  });
+
+  it('maps a {capture} criterion to a failing check when the capture produces no output', async () => {
+    const criterion: AcceptanceCriterion = { id: 'c', claim: 'renders right', check: { capture: 'shot' } };
+    const ctx: CheckContext = {
+      runCapture: async () => ({ ok: false, kind: 'render-document', detail: 'render exited 1', durationMs: 5 }),
+    };
+    const r = await criterionToCheck(criterion).run(goal, null, ctx);
+    expect(r.ok).toBe(false);
+  });
+
+  it('a {capture} criterion fails safe when no capture context is present', async () => {
+    const criterion: AcceptanceCriterion = { id: 'c', claim: 'renders right', check: { capture: 'shot' } };
+    const r = await criterionToCheck(criterion).run(goal, null, {});
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('no capture context');
   });
 });

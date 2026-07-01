@@ -27,6 +27,7 @@ const EVENT_TYPES = new Set([
   'tool-call',
   'step',
   'script-ran',
+  'capture-ran',
   'worktree-created',
   'worktree-collected',
   'worktree-preserved',
@@ -115,6 +116,12 @@ const EVENT_VALIDATORS = {
     hasNullableNumber(event, 'exitStatus') &&
     hasFiniteNumber(event, 'durationMs') &&
     hasString(event, 'outputRef'),
+  'capture-ran': (event) =>
+    hasString(event, 'captureName') &&
+    hasString(event, 'kind') &&
+    hasBoolean(event, 'ok') &&
+    hasFiniteNumber(event, 'durationMs') &&
+    hasOptionalString(event, 'outputRef'),
   'worktree-created': (event) => hasString(event, 'treeId') && hasString(event, 'branch') && hasString(event, 'path'),
   'worktree-collected': (event) => hasString(event, 'treeId') && hasString(event, 'branch') && hasStringArray(event, 'commits'),
   'worktree-preserved': (event) =>

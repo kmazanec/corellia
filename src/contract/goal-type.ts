@@ -7,6 +7,7 @@
 import type { Goal, Kind, Tier } from './goal.js';
 import type { Artifact } from './report.js';
 import type { ScriptResult } from './tool.js';
+import type { DeclaredCaptures, CaptureRunner } from './capture.js';
 
 /**
  * The runtime context an executing check needs: where the tree's sandbox lives
@@ -19,6 +20,14 @@ export interface CheckContext {
   sandboxRoot?: string;
   /** Run one repo-declared script by name in the sandbox, returning its result. */
   runScript?: (name: string) => Promise<ScriptResult>;
+  /**
+   * The captures declared for this tree (ADR-042), parallel to declaredScripts.
+   * A `{ capture }` criterion validates its name against this map. Absent for any
+   * goal that declares no captures; a `{ capture }` criterion then fails safe.
+   */
+  declaredCaptures?: DeclaredCaptures;
+  /** Run one declared capture by name in the sandbox, returning its result. */
+  runCapture?: CaptureRunner;
 }
 
 /**

@@ -14,12 +14,19 @@
 import type { DeterministicCheck } from '../contract/goal-type.js';
 import type { Artifact } from '../contract/report.js';
 import { extractArtifactPayload } from './knowledge-checks.js';
-import { runScriptCheck, fileContains, isInScope } from './checks.js';
+import { runScriptCheck, fileContains, isInScope, captureSucceeded } from './checks.js';
 
-/** A repo-runnable predicate: a named script, or a file (optionally anchor) assertion. */
+/**
+ * A repo-runnable predicate: a named script, a file (optionally anchor) assertion,
+ * or a named runtime/visual capture (ADR-042). A `{ capture }` names a capture
+ * declared up front; the criterion cannot pass unless that capture actually runs
+ * and produces output (the deterministic floor), and the name must be in the
+ * declared set (validated by `criteriaWellFormed` against `ctx.declaredCaptures`).
+ */
 export type AcceptanceCheck =
   | { script: string }
-  | { file: string; anchor?: string };
+  | { file: string; anchor?: string }
+  | { capture: string };
 
 /** One acceptance criterion: a stable id, a human claim, and a runnable check. */
 export interface AcceptanceCriterion {
@@ -77,7 +84,11 @@ function isRunnableCheck(check: unknown): check is AcceptanceCheck {
     if (c['anchor'] !== undefined && (typeof c['anchor'] !== 'string' || c['anchor'].length === 0)) {
       return false;
     }
-    return c['script'] === undefined;
+    return c['script'] === undefined && c['capture'] === undefined;
+  }
+  if (typeof c['capture'] === 'string' && c['capture'].length > 0) {
+    // a capture check names a declared capture; no stray script/file keys.
+    return c['script'] === undefined && c['file'] === undefined && c['anchor'] === undefined;
   }
   return false;
 }
@@ -93,7 +104,7 @@ function isRunnableCheck(check: unknown): check is AcceptanceCheck {
 export function criteriaWellFormed(): DeterministicCheck {
   return {
     name: 'criteria-well-formed',
-    async run(_goal, artifact) {
+    async run(_goal, artifact, ctx) {
       if (artifact === null || artifact.kind !== 'text') {
         return { ok: false, detail: 'criteria artifact missing or not structured' };
       }
@@ -103,6 +114,7 @@ export function criteriaWellFormed(): DeterministicCheck {
       if (criteria.length === 0) {
         return { ok: false, detail: 'criteria checklist is empty' };
       }
+      const declaredCaptures = ctx?.declaredCaptures ?? {};
       const seen = new Set<string>();
       for (let i = 0; i < criteria.length; i++) {
         const c = criteria[i] as Record<string, unknown> | undefined;
@@ -123,7 +135,19 @@ export function criteriaWellFormed(): DeterministicCheck {
         if (!isRunnableCheck(c['check'])) {
           return {
             ok: false,
-            detail: `criterion "${id}" check is not a runnable predicate ({script} or {file, anchor?}) — a prose rubric line is rejected`,
+            detail: `criterion "${id}" check is not a runnable predicate ({script}, {file, anchor?}, or {capture}) — a prose rubric line is rejected`,
+          };
+        }
+        // A capture check must name a capture declared up front. An undeclared
+        // capture name is rejected at author-time, the same way a prose rubric
+        // line is — the model may only select among captures the operator declared.
+        const check = c['check'] as Record<string, unknown>;
+        if (typeof check['capture'] === 'string' && declaredCaptures[check['capture']] === undefined) {
+          const declared = Object.keys(declaredCaptures);
+          const known = declared.length > 0 ? declared.join(', ') : '(none declared)';
+          return {
+            ok: false,
+            detail: `criterion "${id}" names capture "${check['capture']}" which is not declared — declared captures: ${known}`,
           };
         }
       }
@@ -143,6 +167,9 @@ export function criterionToCheck(criterion: AcceptanceCriterion): DeterministicC
   const check = criterion.check;
   if ('script' in check) {
     return runScriptCheck(check.script);
+  }
+  if ('capture' in check) {
+    return captureSucceeded(check.capture);
   }
   return fileContains(check.file, check.anchor ?? '');
 }

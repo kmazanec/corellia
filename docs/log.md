@@ -14,6 +14,24 @@ the [iteration](iterations/index.md) or [ADR](adrs/index.md) that owns the detai
 This file replaces the former `STATUS.md`. Forward strategy is no longer a
 standalone roadmap — it lives as open issues.
 
+## 2026-06-30
+
+- **Iteration 19 — runtime/visual verification rung**
+  ([iteration 19](iterations/2026-06-30-17-runtime-visual-verification/index.md),
+  [ADR-042](adrs/ADR-042-runtime-visual-verification.md)). The factory can now
+  verify an acceptance criterion the script runner cannot — a rendered document,
+  a running UI, or a driven endpoint — via a third `{ capture }` AcceptanceCheck
+  arm backed by captures declared up front, with the same deterministic floor
+  (`captureSucceeded`) and the same safety discipline (worktree-pinned, scrubbed
+  env, time-bounded, loopback-only, constitution-linted `capture.run`) as
+  declared scripts. A `fixtures/runtime-capture/` fixture proves pass-on-correct /
+  fail-on-defect with no human eyeball. Also bounds the split-integration judge
+  input that crashed run 9b at the 8 MB provider ceiling
+  (`summarizeJudgeSubject` + degrade-on-terminal-error), and makes a live
+  commission run observable (per-run event logs + `commission:watch`). Closed and
+  deleted two issues: `visual-runtime-verification` and
+  `judge-integration-input-size-blowout`.
+
 ## 2026-06-28
 
 - **Iteration 18 — make-leaf progress**

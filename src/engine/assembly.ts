@@ -16,8 +16,10 @@ import type { Registry, CheckContext, GoalTypeDef, DeterministicCheck } from '..
 import type { Goal } from '../contract/goal.js';
 import type { ToolBroker, ToolImpl } from '../contract/tool.js';
 import type { ScriptResult } from '../contract/tool.js';
+import type { DeclaredCaptures } from '../contract/capture.js';
 import { Broker } from './broker.js';
 import { createFileTools } from './tools.js';
+import { createCaptureRunner, loggingCaptureRunner } from '../library/capture-runner.js';
 import {
   createScriptRunner,
   runScriptTool,
@@ -119,6 +121,14 @@ export interface SandboxConfig {
     /** Injectable fetch transport for tests; omit for live runs (global fetch). */
     fetchTransport?: FetchTransport;
   };
+  /**
+   * Optional runtime/visual captures declared up front (ADR-042), parallel to
+   * `declaredScripts`. When present, the assembly wires a worktree-pinned,
+   * env-scrubbed, time-bounded, loopback-only capture runner into every leaf's
+   * CheckContext, so a `{ capture }` acceptance criterion can run and be judged.
+   * Absent → no capture context; a `{ capture }` criterion fails safe.
+   */
+  declaredCaptures?: DeclaredCaptures;
 }
 
 /**
@@ -322,9 +332,20 @@ export async function openSandboxAssembly(
 
   const checkContextFor = (goalId: string): CheckContext => {
     const perGoalRunner = loggingScriptRunner(store, baseRunner, goalId, now);
+    const captures = config.declaredCaptures;
     return {
       sandboxRoot: root,
       runScript: (name: string): Promise<ScriptResult> => perGoalRunner.run(name),
+      // A capture criterion runs its declared capture through a worktree-pinned,
+      // env-scrubbed, time-bounded runner (ADR-042). The render/start scripts go
+      // through the same per-goal logging script runner, so a capture's subprocess
+      // work is evented like any other script run.
+      ...(captures !== undefined
+        ? {
+            declaredCaptures: captures,
+            runCapture: loggingCaptureRunner(store, createCaptureRunner(root, captures, perGoalRunner), goalId, now),
+          }
+        : {}),
     };
   };
 

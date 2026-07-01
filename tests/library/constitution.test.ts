@@ -66,6 +66,32 @@ describe('lintLibrary violations', () => {
     expect(violations.some((v) => v.includes('memory.write'))).toBe(true);
   });
 
+  it('reports a capture.run grant on a non-make type (ADR-042)', () => {
+    const defs: GoalTypeDef[] = [
+      {
+        ...baseLeaf,
+        name: 'rogue-capturer',
+        kind: 'judge',
+        grants: ['capture.run'],
+      },
+    ];
+    const violations = lintLibrary(defs);
+    expect(violations.some((v) => v.includes('capture.run'))).toBe(true);
+  });
+
+  it('allows a capture.run grant on a make-kind type', () => {
+    const defs: GoalTypeDef[] = [
+      {
+        ...baseLeaf,
+        name: 'capturer',
+        kind: 'make',
+        grants: ['capture.run'],
+      },
+    ];
+    const violations = lintLibrary(defs);
+    expect(violations.filter((v) => v.includes('capture.run'))).toHaveLength(0);
+  });
+
   it('reports a mustDecompose type that is leafOnly (a leaf cannot decompose)', () => {
     const defs: GoalTypeDef[] = [
       {

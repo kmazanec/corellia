@@ -140,4 +140,8 @@ export const GRANT_TOOL_MAP = {
   // The issue-filing capability (ADR-034): a brokered write tool scoped to
   // docs/issues/, available to any goal type that holds the grant.
   file_issue: ['docs.issues.write'],
+  // Runtime/visual capture (ADR-042): running a declared capture starts servers
+  // and writes image/response files — side effects above the judge/learn/evolve
+  // ceiling, so the constitution confines this grant to make-kind types.
+  run_capture: ['capture.run'],
 } as const satisfies Record<string, readonly string[]>;

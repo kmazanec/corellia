@@ -1,0 +1,8 @@
+{
+  "amount": "$1,240.00",
+  "lines": [
+    { "label": "Subtotal", "value": "$1,240.00" },
+    { "label": "Tax", "value": "$1,240.00" },
+    { "label": "Total", "value": "$0.00" }
+  ]
+}
