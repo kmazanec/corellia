@@ -2,7 +2,8 @@ import type { Brain, BrainContext } from '../../contract/brain.js';
 import type { Decision } from '../../contract/decision.js';
 import type { EventStore } from '../../contract/events.js';
 import type { Goal, Tier, Usage } from '../../contract/goal.js';
-import type { Report } from '../../contract/report.js';
+import type { Artifact, Report } from '../../contract/report.js';
+import type { Verdict } from '../../contract/verdict.js';
 import { blockedReport } from '../reports.js';
 
 export type MustDecomposeGuardResult =
@@ -72,11 +73,18 @@ export function rejectedSplitSatisfyReport(goal: Goal): Report {
   );
 }
 
-function mustDecomposeCorrectionContext(params: {
+/**
+ * The explicit "do NOT satisfy" correction context. Shared with the
+ * split-acceptance path, which issues the same corrected retry when a
+ * must-decompose goal answers "satisfy" after a rejected split (carrying the
+ * rejected split as `priorAttempt` so the retry sees WHY it was rejected).
+ */
+export function mustDecomposeCorrectionContext(params: {
   goal: Goal;
   tier: Tier;
   skill: string | undefined;
   repoShape: string | undefined;
+  priorAttempt?: { artifact: Artifact; verdict: Verdict };
 }): BrainContext {
   return {
     tier: params.tier,
@@ -91,6 +99,7 @@ function mustDecomposeCorrectionContext(params: {
       `genuinely cannot decompose. Do NOT return satisfy again.`,
     ...(params.skill ? { skill: params.skill } : {}),
     ...(params.repoShape ? { repoShape: params.repoShape } : {}),
+    ...(params.priorAttempt ? { priorAttempt: params.priorAttempt } : {}),
   };
 }
 

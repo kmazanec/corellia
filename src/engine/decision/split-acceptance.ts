@@ -12,7 +12,10 @@ import {
 import { debitAttempt } from '../budget-events.js';
 import { blockedReport } from '../reports.js';
 import { validateSplit } from '../split-validation.js';
-import { rejectedSplitSatisfyReport } from './must-decompose-guard.js';
+import {
+  mustDecomposeCorrectionContext,
+  rejectedSplitSatisfyReport,
+} from './must-decompose-guard.js';
 import {
   invalidSplitStructureVerdict,
   isomorphicSplitFailure,
@@ -21,6 +24,9 @@ import {
 } from './split-eval.js';
 
 type SplitDecision = Extract<Decision, { kind: 'split' }>;
+
+/** judgeType label for the deterministic structural check on a proposed split. */
+const SPLIT_STRUCTURE_CHECK = 'split-structure';
 
 export type SplitAcceptanceResult =
   | { kind: 'accepted'; decision: Decision; decideUsage: Usage | undefined }
@@ -71,6 +77,18 @@ export async function acceptSplitDecision(params: {
         now: params.now,
       });
       const failVerdict = invalidSplitStructureVerdict(structErr);
+      // Event the rejection: without this the run's own record shows only the
+      // re-decision, not WHY the proposed split was thrown away (observed:
+      // live-tail re-run 2026-07-01, an 8-event log that could not explain its
+      // own block). Deterministic verdict, so no usage.
+      await params.store.append({
+        type: 'judge-verdict',
+        at: params.now(),
+        goalId: params.goal.id,
+        judgeType: SPLIT_STRUCTURE_CHECK,
+        verdict: failVerdict,
+        tier: params.tier,
+      });
 
       if (isomorphicSplitFailure(priorVerdict, failVerdict)) {
         const report = blockedReport(
@@ -154,6 +172,16 @@ export async function acceptSplitDecision(params: {
       await appendDecided(params, decision, decideUsage);
       return { kind: 'ceiling' };
     }
+
+    // Same guard as the structural branch: a satisfy here would otherwise fall
+    // out of the while loop and return as "accepted" — letting a must-decompose
+    // type satisfy directly through the judge-rejection path.
+    if (decision.kind === 'satisfy' && params.typeDef.mustDecompose) {
+      const report = rejectedSplitSatisfyReport(params.goal);
+      await appendDecided(params, decision, decideUsage);
+      await appendEmitted(params, report);
+      return { kind: 'emitted', report };
+    }
   }
 
   return { kind: 'accepted', decision, decideUsage };
@@ -204,6 +232,7 @@ async function augmentSplitForCoverage(
 async function reDecideAfterSplitFailure(
   params: {
     goal: Goal;
+    typeDef: GoalTypeDef;
     tier: Tier;
     brain: Brain;
     debitUsage: (usage: Usage) => void;
@@ -211,19 +240,40 @@ async function reDecideAfterSplitFailure(
   decision: SplitDecision,
   verdict: Verdict,
 ): Promise<{ decision: Decision; decideUsage: Usage }> {
+  const priorAttempt = {
+    artifact: splitPlanArtifact(decision.children),
+    verdict,
+  };
   const reDecideResult = await params.brain.decide(params.goal, {
     tier: params.tier,
     memories: params.goal.memories,
-    priorAttempt: {
-      artifact: splitPlanArtifact(decision.children),
-      verdict,
-    },
+    priorAttempt,
   });
   params.debitUsage(reDecideResult.usage);
-  return {
-    decision: reDecideResult.value,
-    decideUsage: reDecideResult.usage,
-  };
+  if (reDecideResult.value.kind !== 'satisfy' || params.typeDef.mustDecompose !== true) {
+    return {
+      decision: reDecideResult.value,
+      decideUsage: reDecideResult.usage,
+    };
+  }
+
+  // A satisfy is structurally invalid for a must-decompose type. Mirror the
+  // must-decompose guard: ONE explicitly-corrected retry (carrying the rejected
+  // split as the prior attempt) before the caller blocks. Without it a single
+  // uncorrected "satisfy" hard-blocked a whole commission at the first decide
+  // (observed: live-tail re-run 2026-07-01).
+  const corrected = await params.brain.decide(
+    params.goal,
+    mustDecomposeCorrectionContext({
+      goal: params.goal,
+      tier: params.tier,
+      skill: undefined,
+      repoShape: undefined,
+      priorAttempt,
+    }),
+  );
+  params.debitUsage(corrected.usage);
+  return { decision: corrected.value, decideUsage: corrected.usage };
 }
 
 async function appendDecided(

@@ -128,8 +128,43 @@ describe('split acceptance policy', () => {
     });
   });
 
-  it('blocks when a must-decompose goal re-decides to satisfy after a rejected split', async () => {
+  it('events the structural rejection so the run record explains the re-decision', async () => {
     const store = new MemoryEventStore();
+    const invalid = {
+      kind: 'split',
+      children: [child({ localId: 'bad', type: 'anchored', scope: [] })],
+    } satisfies Extract<Decision, { kind: 'split' }>;
+    const valid = {
+      kind: 'split',
+      children: [child({ localId: 'fixed', type: 'anchored', scope: ['src/engine'] })],
+    } satisfies Extract<Decision, { kind: 'split' }>;
+
+    await acceptSplitDecision({
+      goal: makeGoal({ type: 'root' }),
+      typeDef: registry().get('root'),
+      decision: invalid,
+      decideUsage: undefined,
+      tier: 'mid',
+      registry: registry(),
+      brain: decidingBrain([valid], []),
+      store,
+      now: () => 3,
+      goldenCapture: false,
+      debitUsage: () => {},
+      hasReachedCeiling: () => false,
+    });
+
+    const verdicts = await store.list({ type: 'judge-verdict' });
+    expect(verdicts).toHaveLength(1);
+    const evt = verdicts[0] as Extract<(typeof verdicts)[number], { type: 'judge-verdict' }>;
+    expect(evt.judgeType).toBe('split-structure');
+    expect(evt.verdict.pass).toBe(false);
+    expect(evt.verdict.failureSignature).toContain('requires a non-empty scope');
+  });
+
+  it('blocks when a must-decompose goal answers satisfy twice (once corrected) after a rejected split', async () => {
+    const store = new MemoryEventStore();
+    const contexts: BrainContext[] = [];
     const invalid = {
       kind: 'split',
       children: [child({ localId: 'bad', type: 'anchored', scope: [] })],
@@ -142,7 +177,7 @@ describe('split acceptance policy', () => {
       decideUsage: undefined,
       tier: 'mid',
       registry: registry(),
-      brain: decidingBrain([{ kind: 'satisfy' }], []),
+      brain: decidingBrain([{ kind: 'satisfy' }, { kind: 'satisfy' }], contexts),
       store,
       now: () => 3,
       goldenCapture: false,
@@ -154,7 +189,86 @@ describe('split acceptance policy', () => {
     expect(result.kind === 'emitted' ? result.report.blockers[0] : '').toContain(
       'must decompose and cannot satisfy directly',
     );
-    expect(store.types()).toEqual(['decided', 'emitted']);
+    // The second decide is the explicitly-corrected retry, carrying the rejected split.
+    expect(contexts).toHaveLength(2);
+    expect(contexts[1]).toMatchObject({ mustDecompose: true });
+    expect(contexts[1]?.decideCorrection).toContain('Do NOT return satisfy again');
+    expect(contexts[1]?.priorAttempt).toBeDefined();
+    expect(store.types()).toEqual(['judge-verdict', 'decided', 'emitted']);
+  });
+
+  it('accepts when the corrected retry after a rejected-split satisfy produces a valid split', async () => {
+    const contexts: BrainContext[] = [];
+    const invalid = {
+      kind: 'split',
+      children: [child({ localId: 'bad', type: 'anchored', scope: [] })],
+    } satisfies Extract<Decision, { kind: 'split' }>;
+    const valid = {
+      kind: 'split',
+      children: [child({ localId: 'fixed', type: 'anchored', scope: ['src/engine'] })],
+    } satisfies Extract<Decision, { kind: 'split' }>;
+
+    const result = await acceptSplitDecision({
+      goal: makeGoal({ type: 'root' }),
+      typeDef: { ...registry().get('root'), mustDecompose: true },
+      decision: invalid,
+      decideUsage: undefined,
+      tier: 'mid',
+      registry: registry(),
+      brain: decidingBrain([{ kind: 'satisfy' }, valid], contexts),
+      store: new MemoryEventStore(),
+      now: () => 3,
+      goldenCapture: false,
+      debitUsage: () => {},
+      hasReachedCeiling: () => false,
+    });
+
+    expect(result.kind).toBe('accepted');
+    expect(result.kind === 'accepted' ? result.decision : undefined).toEqual(valid);
+  });
+
+  it('blocks a must-decompose goal that satisfies through the judge-rejection path instead of accepting it', async () => {
+    const decision = {
+      kind: 'split',
+      children: [child({ localId: 'build', type: 'child', scope: ['src/engine'] })],
+    } satisfies Extract<Decision, { kind: 'split' }>;
+    const decisions: Decision[] = [{ kind: 'satisfy' }, { kind: 'satisfy' }];
+    const brain: Brain = {
+      async decide() {
+        const next = decisions.shift();
+        if (next === undefined) throw new Error('no scripted decision');
+        return { value: next, usage: ZERO_USAGE };
+      },
+      async produce() { throw new Error('not used'); },
+      async judge() {
+        return {
+          value: { pass: false, findings: [], failureSignature: 'weak-split' } satisfies Verdict,
+          usage: ZERO_USAGE,
+        };
+      },
+      async repair() { throw new Error('not used'); },
+      async step() { throw new Error('not used'); },
+    };
+
+    const result = await acceptSplitDecision({
+      goal: makeGoal({ type: 'root' }),
+      typeDef: { ...registry(true).get('root'), mustDecompose: true },
+      decision,
+      decideUsage: undefined,
+      tier: 'mid',
+      registry: registry(true),
+      brain,
+      store: new MemoryEventStore(),
+      now: () => 6,
+      goldenCapture: false,
+      debitUsage: () => {},
+      hasReachedCeiling: () => false,
+    });
+
+    expect(result.kind).toBe('emitted');
+    expect(result.kind === 'emitted' ? result.report.blockers[0] : '').toContain(
+      'must decompose and cannot satisfy directly',
+    );
   });
 
   it('runs coverage augmentation before judge-split evaluates the graph', async () => {

@@ -1755,6 +1755,8 @@ describe('cannot-satisfy guard (mustDecompose types)', () => {
         ],
       })
       // Re-decide (split-rejection path): the model gives up and satisfies.
+      .queueDecide({ kind: 'satisfy' })
+      // The explicitly-corrected retry ("Do NOT return satisfy again"): still satisfy.
       .queueDecide({ kind: 'satisfy' });
 
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
