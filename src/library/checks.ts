@@ -5,7 +5,8 @@
  * (constitution rule 5: deterministic gates are always applied in full).
  */
 
-import { normalize, isAbsolute } from 'node:path';
+import { normalize, isAbsolute, join } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import type { DeterministicCheck, CheckContext } from '../contract/goal-type.js';
 import type { Goal } from '../contract/goal.js';
@@ -157,6 +158,45 @@ export function fileContains(path: string, needle: string): DeterministicCheck {
       }
       if (target.content.includes(needle)) {
         return { ok: true, detail: `File "${path}" contains "${needle}".` };
+      }
+      return { ok: false, detail: `File "${path}" does not contain "${needle}".` };
+    },
+  };
+}
+
+/**
+ * Worktree-aware file criterion (ADR-031 §4.3): a milestone round's `{file}`
+ * acceptance checks assess the SANDBOX WORKTREE — where write_file lands,
+ * including work salvaged from earlier attempts — not the emitted artifact's
+ * file list. An artifact-only check silently fails real, delivered files that
+ * no attempt happened to re-emit (observed: live-tail commission run,
+ * 2026-07-01 — the implementation sat in the worktree while acceptance
+ * reported "not found in artifact"). Without a sandbox in the context this
+ * falls back to {@link fileContains}, so artifact-only callers keep their
+ * behavior.
+ */
+export function sandboxFileContains(path: string, needle: string): DeterministicCheck {
+  const artifactCheck = fileContains(path, needle);
+  return {
+    name: `sandbox-file-contains:${path}:${needle}`,
+    async run(
+      goal: Goal,
+      artifact: Artifact | null,
+      ctx?: CheckContext,
+    ): Promise<{ ok: boolean; detail: string }> {
+      if (ctx?.sandboxRoot === undefined) return artifactCheck.run(goal, artifact, ctx);
+      if (isAbsolute(path) || normalize(path).split('/').includes('..')) {
+        return { ok: false, detail: `File path "${path}" must be a repo-relative path.` };
+      }
+      let content: string;
+      try {
+        content = await readFile(join(ctx.sandboxRoot, path), 'utf8');
+      } catch {
+        return { ok: false, detail: `File "${path}" not found in the worktree.` };
+      }
+      if (content.includes(needle)) {
+        const what = needle.length === 0 ? 'exists in the worktree' : `contains "${needle}"`;
+        return { ok: true, detail: `File "${path}" ${what}.` };
       }
       return { ok: false, detail: `File "${path}" does not contain "${needle}".` };
     },

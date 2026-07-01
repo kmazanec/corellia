@@ -218,6 +218,9 @@ const engine = buildLiveEngine({
       test: 'npm-script:test',
       typecheck: 'npm-script:typecheck',
       lint: 'npm-script:lint',
+      // Commission constraints routinely ask for code-shape evidence; leaving it
+      // undeclared makes every such run_script call an instant refusal.
+      'code-shape': 'npm-script:code-shape',
     },
     // prBoundary: wires push_branch + open_pr for improve-factory goal types.
     // For a deliver-intent root, open_pr is called via the improvement path only

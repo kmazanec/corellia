@@ -200,6 +200,14 @@ export interface SandboxAssembly {
 }
 
 /**
+ * Wall-clock ceiling for factory-initiated check scripts (deterministic checks
+ * and acceptance criteria). These run whole declared scripts — the full test
+ * suite — unlike a model's run_script call, which is expected to scope its
+ * target and keeps the runner's 30s default.
+ */
+const CHECK_SCRIPT_TIME_LIMIT_MS = 600_000;
+
+/**
  * Open the tree's worktree and compose the broker, the scrubbed-env script
  * runner, and the per-goal CheckContext factory. Called once, by the tree root,
  * when a SandboxConfig is present.
@@ -335,7 +343,14 @@ export async function openSandboxAssembly(
     const captures = config.declaredCaptures;
     return {
       sandboxRoot: root,
-      runScript: (name: string): Promise<ScriptResult> => perGoalRunner.run(name),
+      // Factory-initiated verification (deterministic checks, acceptance
+      // criteria) runs whole declared scripts — a full test suite, not a scoped
+      // model tool call — so it gets a realistic ceiling instead of the 30s
+      // run_script default sized for model-scoped runs. A 30s cap here made any
+      // `{script:"test"}` acceptance criterion structurally unpassable on a repo
+      // whose suite takes minutes (observed: live-tail commission run, 2026-07-01).
+      runScript: (name: string): Promise<ScriptResult> =>
+        perGoalRunner.run(name, undefined, CHECK_SCRIPT_TIME_LIMIT_MS),
       // A capture criterion runs its declared capture through a worktree-pinned,
       // env-scrubbed, time-bounded runner (ADR-042). The render/start scripts go
       // through the same per-goal logging script runner, so a capture's subprocess

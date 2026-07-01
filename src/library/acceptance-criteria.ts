@@ -14,7 +14,7 @@
 import type { DeterministicCheck } from '../contract/goal-type.js';
 import type { Artifact } from '../contract/report.js';
 import { extractArtifactPayload } from './knowledge-checks.js';
-import { runScriptCheck, fileContains, isInScope, captureSucceeded } from './checks.js';
+import { runScriptCheck, sandboxFileContains, isInScope, captureSucceeded } from './checks.js';
 
 /**
  * A repo-runnable predicate: a named script, a file (optionally anchor) assertion,
@@ -159,9 +159,12 @@ export function criteriaWellFormed(): DeterministicCheck {
 /**
  * Map one acceptance criterion to the existing {@link DeterministicCheck} that
  * runs it: a `{script}` check reuses `runScriptCheck`; a `{file, anchor?}` check
- * reuses `fileContains` (the anchor is the needle; a bare file assertion uses an
- * empty needle, which `fileContains` treats as "file exists"). This is how the
- * loop computes `passingCount` against the round's worktree (ADR-031 §4.3).
+ * uses `sandboxFileContains` (the anchor is the needle; a bare file assertion
+ * uses an empty needle, treated as "file exists"), which reads the round's
+ * WORKTREE when a sandbox is in context — the same working tree the script
+ * checks run against — and falls back to the artifact file list otherwise.
+ * This is how the loop computes `passingCount` against the round's worktree
+ * (ADR-031 §4.3).
  */
 export function criterionToCheck(criterion: AcceptanceCriterion): DeterministicCheck {
   const check = criterion.check;
@@ -171,7 +174,7 @@ export function criterionToCheck(criterion: AcceptanceCriterion): DeterministicC
   if ('capture' in check) {
     return captureSucceeded(check.capture);
   }
-  return fileContains(check.file, check.anchor ?? '');
+  return sandboxFileContains(check.file, check.anchor ?? '');
 }
 
 /** Re-export so callers building the criteria scope predicate share one definition. */

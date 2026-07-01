@@ -110,6 +110,9 @@ const declaredScripts: DeclaredScripts = commission.declaredScripts ?? {
   test: 'npm-script:test',
   typecheck: 'npm-script:typecheck',
   lint: 'npm-script:lint',
+  // Commission constraints routinely ask for code-shape evidence; leaving it
+  // undeclared makes every such run_script call an instant refusal.
+  'code-shape': 'npm-script:code-shape',
 };
 
 // One fresh log per run. A shared events.jsonl, appended across runs, would
@@ -153,22 +156,28 @@ try {
 }
 
 // ── Write any file artifacts the factory returned (scoped to OUT_DIR) ─────────────
+//
+// Artifact paths are repo-relative (e.g. docs/log.md); they are mirrored UNDER
+// OUT_DIR as a record of what the factory returned. The real delivery path is the
+// sandbox worktree / PR boundary — never a direct write into the repo from here.
 
-function safeResolve(filePath: string): string {
-  const abs = resolve(filePath);
+function safeResolve(filePath: string): string | null {
   const base = resolve(OUT_DIR);
-  if (!abs.startsWith(base + '/') && abs !== base) {
-    throw new Error(`Path traversal rejected: ${filePath} resolves outside ${OUT_DIR}`);
-  }
+  const abs = resolve(base, filePath);
+  if (!abs.startsWith(base + '/') && abs !== base) return null;
   return abs;
 }
 
 if (report.artifact?.kind === 'files' && report.artifact.files) {
   for (const file of report.artifact.files) {
     const abs = safeResolve(file.path);
+    if (abs === null) {
+      console.warn(`Skipped (escapes ${OUT_DIR}): ${file.path}`);
+      continue;
+    }
     mkdirSync(dirname(abs), { recursive: true });
     writeFileSync(abs, file.content, 'utf8');
-    console.log(`Wrote: ${file.path}`);
+    console.log(`Wrote: ${OUT_DIR}/${file.path}`);
   }
 } else if (report.artifact?.kind === 'text') {
   const textPath = `${OUT_DIR}/artifact.txt`;

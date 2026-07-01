@@ -11,6 +11,7 @@ import {
   artifactPresent,
   filesWithinScope,
   fileContains,
+  sandboxFileContains,
   processClean,
   runScriptCheck,
   captureSucceeded,
@@ -225,6 +226,87 @@ describe('fileContains', () => {
       filesArtifact([{ path: 'src/foo.ts', content: 'export const x = 1;' }]),
     );
     expect(r.ok).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sandboxFileContains
+// ---------------------------------------------------------------------------
+
+describe('sandboxFileContains', () => {
+  it('passes via the worktree even when the artifact does not list the file', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'corellia-sandboxfile-'));
+    try {
+      mkdirSync(join(root, 'src'), { recursive: true });
+      writeFileSync(join(root, 'src', 'foo.ts'), 'export const x = 1;\n');
+      const ctx: CheckContext = { sandboxRoot: root };
+      const check = sandboxFileContains('src/foo.ts', 'export const x');
+      // Artifact lists a DIFFERENT file — the worktree is the source of truth.
+      const r = await check.run(baseGoal, filesArtifact([{ path: 'docs/log.md', content: 'x' }]), ctx);
+      expect(r.ok).toBe(true);
+      expect(r.detail).toContain('src/foo.ts');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('treats an empty needle as a worktree existence check', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'corellia-sandboxfile-exists-'));
+    try {
+      writeFileSync(join(root, 'package.json'), '{}\n');
+      const ctx: CheckContext = { sandboxRoot: root };
+      const r = await sandboxFileContains('package.json', '').run(baseGoal, null, ctx);
+      expect(r.ok).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('fails when the file is absent from the worktree', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'corellia-sandboxfile-missing-'));
+    try {
+      const ctx: CheckContext = { sandboxRoot: root };
+      const r = await sandboxFileContains('src/missing.ts', 'needle').run(baseGoal, null, ctx);
+      expect(r.ok).toBe(false);
+      expect(r.detail).toContain('not found in the worktree');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('fails when the worktree file does not contain the needle', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'corellia-sandboxfile-noneedle-'));
+    try {
+      writeFileSync(join(root, 'a.ts'), 'no match\n');
+      const ctx: CheckContext = { sandboxRoot: root };
+      const r = await sandboxFileContains('a.ts', 'needle').run(baseGoal, null, ctx);
+      expect(r.ok).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a traversal path instead of reading outside the worktree', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'corellia-sandboxfile-traversal-'));
+    try {
+      const ctx: CheckContext = { sandboxRoot: root };
+      const r = await sandboxFileContains('../outside.ts', 'x').run(baseGoal, null, ctx);
+      expect(r.ok).toBe(false);
+      expect(r.detail).toContain('repo-relative');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to the artifact-based check when no sandbox is in context', async () => {
+    const check = sandboxFileContains('src/foo.ts', 'export const x');
+    const pass = await check.run(
+      baseGoal,
+      filesArtifact([{ path: 'src/foo.ts', content: 'export const x = 1;' }]),
+    );
+    expect(pass.ok).toBe(true);
+    const fail = await check.run(baseGoal, null);
+    expect(fail.ok).toBe(false);
   });
 });
 

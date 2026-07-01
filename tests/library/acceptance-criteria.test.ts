@@ -5,6 +5,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import {
   criteriaWellFormed,
   parseAcceptanceCriteria,
@@ -268,6 +271,26 @@ describe('criterionToCheck', () => {
     };
     const r = await criterionToCheck(criterion).run(goal, artifact);
     expect(r.ok).toBe(true);
+  });
+
+  it('a {file} criterion reads the worktree when a sandbox is in context, not just the artifact', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'corellia-criterion-worktree-'));
+    try {
+      mkdirSync(join(root, 'src'), { recursive: true });
+      writeFileSync(join(root, 'src', 'a.ts'), 'export const a = 1;\n');
+      const criterion: AcceptanceCriterion = {
+        id: 'c',
+        claim: 'x',
+        check: { file: 'src/a.ts', anchor: 'export const' },
+      };
+      // The artifact does NOT list src/a.ts — only the worktree has it (e.g.
+      // written by an earlier attempt and salvaged). The check must still pass.
+      const ctx: CheckContext = { sandboxRoot: root };
+      const r = await criterionToCheck(criterion).run(goal, null, ctx);
+      expect(r.ok).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('maps a {file, anchor} criterion to a failing check when the anchor is absent', async () => {
