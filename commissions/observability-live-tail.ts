@@ -61,16 +61,21 @@ const doc = {
     scope: [
       'scripts/',           // the operator-facing command surface
       'src/eventlog/',      // the readable-view rendering the live view reuses
+      'tests/',             // the constraints demand test coverage; the tests live here
       'package.json',       // the command entry point
       'docs/issues/',       // OKF close-out: update the issue (leave open)
       'docs/iterations/',   // OKF close-out: author the iteration record + index row
       'docs/log.md',        // OKF close-out: append the dated ship line
     ],
     budget: {
-      attempts: 3,
-      tokens: 400_000,
-      toolCalls: 250,
-      wallClockMs: 900_000, // 15 min — a focused slice graduating an existing readable view into a live one
+      attempts: 4,
+      tokens: 1_000_000,
+      toolCalls: 500,
+      // 40 min. The first run (2026-07-01) proved 15 min starves once the engine
+      // subdivides wall-clock across comprehension + implement children (the first
+      // characterize child was denied and cascade-blocked its siblings). Sized to
+      // match the sibling export commission; the ceilingUsd stays the primary bound.
+      wallClockMs: 2_400_000,
     },
     intent: 'production',
   },
