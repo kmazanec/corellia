@@ -14,6 +14,23 @@ the [iteration](iterations/index.md) or [ADR](adrs/index.md) that owns the detai
 This file replaces the former `STATUS.md`. Forward strategy is no longer a
 standalone roadmap — it lives as open issues.
 
+## 2026-07-01
+
+- **Iteration 20 — acceptance-floor fixes**
+  ([iteration 20](iterations/2026-07-01-16-live-tail-commission-fixes/index.md)).
+  Driving the `observability-live-tail` commission exposed four defects that made
+  its acceptance bar structurally unpassable and crashed the runner's report:
+  `{file}` acceptance criteria now read the round's worktree
+  (`sandboxFileContains`, per ADR-031 §4.3) instead of the emitted artifact list;
+  factory-initiated check scripts get a realistic 10-min ceiling instead of the
+  30s model-tool cap; `code-shape` joins the default declared scripts; and
+  `commission:run` mirrors returned artifacts under its out dir instead of
+  throwing on repo-relative paths. New issues:
+  `worktree-work-invisible-to-artifact-judges`,
+  `provider-timeout-isomorphic-block`; fresh starvation evidence appended to
+  `comprehension-region-wallclock-exhaustion`. The commission itself did not yet
+  ship its live view — re-run pending on these fixes.
+
 ## 2026-06-30
 
 - **Iteration 19 — runtime/visual verification rung**

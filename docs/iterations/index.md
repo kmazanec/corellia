@@ -37,5 +37,6 @@ Newest last (chronological).
 | [2026-06-27-21](2026-06-27-21-commission-run-fixes/index.md) | 17 — Commission-run fixes: per-commission ceiling, real broker, refusal floor | landed on main |
 | [2026-06-28-20](2026-06-28-20-make-leaf-progress/index.md) | 18 — Make-leaf progress: write-steering, non-isomorphic retry, worktree salvage, repair hints | landed on main |
 | [2026-06-30-17](2026-06-30-17-runtime-visual-verification/index.md) | 19 — Runtime/visual verification rung (ADR-042) + judge-input bound (ADR-043) + run observability | landed on main |
+| [2026-07-01-16](2026-07-01-16-live-tail-commission-fixes/index.md) | 20 — Acceptance-floor fixes from driving the live-tail commission | landed on main |
 
 Open follow-on work from these iterations lives in [../issues/](../issues/index.md).

@@ -43,6 +43,18 @@ severity: high
 > and below `tests/engine`. **Still open:** the per-dive wall-clock starvation above,
 > and the cascade half (a step-loop-failed dive still hard-blocks its dependents).
 
+> **Update (2026-07-01, commission run `observability-live-tail`).** Fresh
+> occurrence, now on the `characterize` family: the first comprehension child
+> (`c1`, "Map existing event-log reading, readable view generation, and CLI
+> command structure") exhausted its subdivided wallClockMs and was auto-denied;
+> serial dependents `c2`–`c7` all cascade-blocked ("dependency failed without
+> producing any usable artifact"), killing the entire comprehension phase. The
+> replanned `impl-live-view` goal then also ran out its slice mid-implementation.
+> The commission's own 15-min `wallClockMs` was authored for a "focused slice"
+> and was plainly too small once subdivided — but the starvation + cascade
+> mechanics are the same as documented below. Events under
+> `out/commission-observability-live-tail/`.
+
 ## Problem
 Two compounding failures, both real:
 
