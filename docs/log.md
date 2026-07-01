@@ -27,7 +27,8 @@ standalone roadmap — it lives as open issues.
   declared scripts. A `fixtures/runtime-capture/` fixture proves pass-on-correct /
   fail-on-defect with no human eyeball. Also bounds the split-integration judge
   input that crashed run 9b at the 8 MB provider ceiling
-  (`summarizeJudgeSubject` + degrade-on-terminal-error), and makes a live
+  ([ADR-043](adrs/ADR-043-bound-integration-judge-input.md):
+  `summarizeJudgeSubject` + degrade-on-terminal-error), and makes a live
   commission run observable (per-run event logs + `commission:watch`). Closed and
   deleted two issues: `visual-runtime-verification` and
   `judge-integration-input-size-blowout`.

@@ -1,6 +1,6 @@
 ---
 type: iteration
-title: "Iteration 19 — Runtime/visual verification rung (ADR-042) + judge-input bound + run observability"
+title: "Iteration 19 — Runtime/visual verification rung (ADR-042) + judge-input bound (ADR-043) + run observability"
 description: The factory can now verify an acceptance criterion the script runner cannot — a rendered document, a running UI, or a driven endpoint — via a third {capture} AcceptanceCheck arm backed by declared captures, with the same deterministic floor and safety discipline as declared scripts. Also bounds the split-integration judge input that had crashed a multi-round delivery at the 8MB provider ceiling, and makes a live commission run observable (per-run event logs + a live watcher).
 tags: [iteration, engine, verification, visual, runtime, capture, acceptance-criteria, safety, judge, observability, self-hosting]
 timestamp: 2026-06-30
@@ -59,14 +59,16 @@ looking: a document whose amount must land on the total line, and the SAME
 deliberately transposed one — the kind of error no unit test catches. Driven by
 `tests/library/runtime-capture-fixture.test.ts` against the real capture runner.
 
-### 3. Judge-input bound (the crash that stopped run 9b)
+### 3. Judge-input bound (the crash that stopped run 9b) — ADR-043
 The split-integration judge inlined every file of the merged child artifact with
 no size bound, so across milestone rounds the input grew past the provider's 8 MB
 text-input ceiling and a non-retryable 400 crashed the whole delivery.
 `summarizeJudgeSubject` bounds the judge's subject section to a byte budget (every
 file path still listed; content included greedily then reduced to excerpts), and
 `judgeSplitIntegration` degrades a terminal provider error to a blocker instead
-of throwing through the milestone loop.
+of throwing through the milestone loop. This is the ADR-036/041 "bound the
+context, not a proxy" posture applied to the one input path those ADRs did not
+cover — the integration judge; recorded as [ADR-043](../../adrs/ADR-043-bound-integration-judge-input.md).
 
 ### 4. Run observability
 A commission run appended its event log to a shared per-id `events.jsonl`, so
@@ -85,4 +87,4 @@ long run is watchable instead of a black box.
 ## Closed issues
 
 - `visual-runtime-verification` — implemented as ADR-042 + the rung + the fixture.
-- `judge-integration-input-size-blowout` — fixed by the judge-input bound + degrade.
+- `judge-integration-input-size-blowout` — fixed by the judge-input bound + degrade (ADR-043).
