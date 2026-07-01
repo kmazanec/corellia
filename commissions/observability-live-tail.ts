@@ -69,13 +69,15 @@ const doc = {
     ],
     budget: {
       attempts: 4,
-      tokens: 1_000_000,
+      tokens: 2_000_000,
       toolCalls: 500,
-      // 40 min. The first run (2026-07-01) proved 15 min starves once the engine
-      // subdivides wall-clock across comprehension + implement children (the first
-      // characterize child was denied and cascade-blocked its siblings). Sized to
-      // match the sibling export commission; the ceilingUsd stays the primary bound.
-      wallClockMs: 2_400_000,
+      // 4 h. Runs 1 and 3 (2026-07-01) both starved PRODUCTIVE goals via ADR-030
+      // wall-clock subdivision (run 3's implement was denied mid-build at 40 min
+      // total, with a committed round-0 implementation on the branch). Per
+      // ADR-033 budget is observability + runaway backstop, not a fan-out
+      // shaper — ceilingUsd stays the primary bound, so a generous wall clock
+      // costs nothing unless the tree actually stalls.
+      wallClockMs: 14_400_000,
     },
     intent: 'production',
   },

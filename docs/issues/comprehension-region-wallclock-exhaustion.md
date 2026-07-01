@@ -54,6 +54,14 @@ severity: high
 > and was plainly too small once subdivided — but the starvation + cascade
 > mechanics are the same as documented below. Events under
 > `out/commission-observability-live-tail/`.
+>
+> **Update (2026-07-01, third run, 40-min budget).** Recurred at 40 min: a
+> `research-external` dive starved, and the `implement` goal — mid-build, with
+> a committed round-0 implementation on the branch — exhausted its subdivided
+> slice (tokens twice, then wall-clock) and was denied; the close-out goal
+> cascade-blocked. Three runs, three wall-clock kills of *productive* goals:
+> the per-goal starvation fix (a floor, or progress-aware extension) is now the
+> single biggest blocker to a commission shipping end-to-end.
 
 ## Problem
 Two compounding failures, both real:

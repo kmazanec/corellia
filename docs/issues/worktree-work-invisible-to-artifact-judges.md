@@ -43,6 +43,16 @@ emission listed only its own docs work + one test file. Root merged artifact: 5
 files, none of the implementation. `judge-acceptance` FAIL on "missing" files
 that existed in the worktree.
 
+> **Update (2026-07-01, third live-tail run).** A sharper variant: worktree
+> salvage attaches only the UNCOMMITTED diff, so when the milestone loop has
+> already committed round work to the tree branch, a subsequently-blocked goal's
+> report carries `artifact: null` even though 1,089 lines (tailer, renderer,
+> tests, a round-0 `feat` commit) sit committed on the branch. Dependents then
+> block with "dependency failed without producing any usable artifact" — while
+> the usable artifact is one `git diff base..HEAD` away. The salvage/crediting
+> path must consider the branch diff against the tree's base sha, not just
+> `git status`.
+
 ## Proposed direction
 
 (Rough, not committed.) Make the worktree the source of truth for a sandboxed

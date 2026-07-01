@@ -67,6 +67,32 @@ post-run goal tree / stats / blockers summary after the paid run completed.
 a record; real delivery stays the worktree/PR path), genuine escapes are
 skipped with a warning, and the summary always prints.
 
+## Follow-on fixes from the re-runs (same day)
+
+The second run hard-blocked at the FIRST decide with an 8-event log that could
+not explain itself: the root's proposed split was structurally rejected (not
+evented), and the uncorrected re-decide answered "satisfy" → instant block.
+Three more fixes:
+
+5. **Structural split rejections are evented** — a `judge-verdict` with
+   `judgeType: "split-structure"` carries the validation error (the third run
+   promptly revealed the actual reason: `budgetShares sum to 5.0000`).
+6. **A satisfy after a rejected split gets one explicitly-corrected retry**
+   (shared `mustDecomposeCorrectionContext`, carrying the rejected split as the
+   prior attempt) before blocking — mirroring the must-decompose guard. The
+   same guard now also covers the judge-rejection branch, which previously let
+   a must-decompose goal's satisfy escape as "accepted".
+7. **Over-allocated budgetShares renormalize instead of rejecting** — models
+   return relative weights (five children at 1.0 each); the engine already owns
+   `renormalizeShares` (the coverage gate uses it), so the decide path now
+   renormalizes rather than bouncing a mechanically-repairable split.
+
+The third run then progressed genuinely deep: 2/3 comprehension dives ✓,
+design-arch ✓, and `implement` produced a committed round-0 implementation
+(tailer, live renderer, tests — 1,089 lines on the tree branch) before the
+known per-goal wall-clock starvation denied it. That recurrence, and the fact
+that salvage misses committed round work, are recorded on the two issues below.
+
 ## Recorded, not fixed here (issues)
 
 - [worktree-work-invisible-to-artifact-judges](../../issues/worktree-work-invisible-to-artifact-judges.md)
