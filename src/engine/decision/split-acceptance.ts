@@ -11,7 +11,7 @@ import {
 } from '../coverage/split-gate.js';
 import { debitAttempt } from '../budget-events.js';
 import { blockedReport } from '../reports.js';
-import { validateSplit } from '../split-validation.js';
+import { renormalizeShares, validateSplit } from '../split-validation.js';
 import {
   mustDecomposeCorrectionContext,
   rejectedSplitSatisfyReport,
@@ -65,6 +65,12 @@ export async function acceptSplitDecision(params: {
   let priorVerdict: Verdict | undefined;
 
   while (decision.kind === 'split') {
+    // Over-allocated budgetShares are mechanically repairable — models often
+    // return relative weights (e.g. five children at 1.0 each) rather than
+    // fractions of the whole. Renormalize before validating, exactly as the
+    // coverage gate does, instead of bouncing the split to a re-decide
+    // (observed: live-tail run 2026-07-01, "budgetShares sum to 5.0000").
+    decision = { ...decision, children: renormalizeShares(decision.children) };
     const structErr = validateSplit(
       decision.children,
       (type) => (params.registry.has(type) ? params.registry.get(type) : undefined),

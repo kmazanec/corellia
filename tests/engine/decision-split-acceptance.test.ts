@@ -128,6 +128,38 @@ describe('split acceptance policy', () => {
     });
   });
 
+  it('renormalizes over-allocated budgetShares instead of rejecting the split', async () => {
+    const decision = {
+      kind: 'split',
+      children: [
+        child({ localId: 'a', budgetShare: 1 }),
+        child({ localId: 'b', budgetShare: 1 }),
+        child({ localId: 'c', budgetShare: 3 }),
+      ],
+    } satisfies Extract<Decision, { kind: 'split' }>;
+
+    const result = await acceptSplitDecision({
+      goal: makeGoal({ type: 'root' }),
+      typeDef: registry().get('root'),
+      decision,
+      decideUsage: undefined,
+      tier: 'mid',
+      registry: registry(),
+      brain: decidingBrain([], []),
+      store: new MemoryEventStore(),
+      now: () => 1,
+      goldenCapture: false,
+      debitUsage: () => {},
+      hasReachedCeiling: () => false,
+    });
+
+    expect(result.kind).toBe('accepted');
+    const children = result.kind === 'accepted' && result.decision.kind === 'split'
+      ? result.decision.children
+      : [];
+    expect(children.map((c) => c.budgetShare)).toEqual([0.2, 0.2, 0.6]);
+  });
+
   it('events the structural rejection so the run record explains the re-decision', async () => {
     const store = new MemoryEventStore();
     const invalid = {
