@@ -62,6 +62,8 @@ export interface DeterministicCheck {
   ): Promise<{ ok: boolean; detail: string; prescription?: string }>;
 }
 
+export type InputValidator = (spec: unknown) => string | null;
+
 /**
  * The definition of one goal-type — the static, lintable shape the constitution
  * checks. Grants and tier ladders are exact and static per type; the only
@@ -131,6 +133,23 @@ export interface GoalTypeDef {
    * exactly as today — the deterministic gate remains the semantic check either way.
    */
   outputSchema?: Record<string, unknown>;
+  /**
+   * A JSON-Schema object describing this type's input `Goal.spec`. `deliver-intent`
+   * may accept raw commissioned text; lower goal types must receive structured
+   * input derived by the root.
+   */
+  inputSchema?: Record<string, unknown>;
+  /** Runtime validator for `Goal.spec`, used at goal entry and split validation. */
+  validateInput?: InputValidator;
+  /** True only for root intent parsing types that may accept raw free text. */
+  acceptsFreeText?: boolean;
+  /** Marks the small immutable core surface whose kind/role is constitution-checked. */
+  core?: boolean;
+  /**
+   * Declared human touchpoints for this type. The `onTimeout` values are linted
+   * against the same decision-brief policy used at runtime.
+   */
+  humanTouchpoints?: Array<{ name: string; onTimeout: 'deny' | 'park' | 'bounce' }>;
   /**
    * Whether a goal of this type MUST be spawned with a non-empty `scope` (ADR-039).
    * Scope is load-bearing for a region-anchored producing leaf: it is the region the

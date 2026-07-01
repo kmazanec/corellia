@@ -177,6 +177,7 @@ describe('ADR-029 — map-repo split merges children into ONE KnowledgeArtifact'
       store,
       memory: new NoopMemoryView(),
       knowledge: stubKnowledge(store),
+      sensitivity: [],
     });
 
     const goal = makeGoal({
@@ -430,6 +431,7 @@ describe('ADR-029 — deep-dive-region split merges children into ONE RegionFact
       store,
       memory: new NoopMemoryView(),
       knowledge: stubKnowledge(store),
+      sensitivity: [],
     });
 
     const goal = makeGoal({

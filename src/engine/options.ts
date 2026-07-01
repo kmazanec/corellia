@@ -52,10 +52,10 @@ export interface EngineOptions {
     brief: import('../contract/decision.js').DecisionBrief,
   ) => Promise<'deny' | 'park' | 'bounce' | 'answered'>;
   /**
-   * Project-specific sensitivity facts used to classify instance risk. Each
-   * SensitivityFact names a path pattern and the risk band touching it carries.
-   * Defaults to [] (no project-specific sensitivity; combine with
-   * DEFAULT_SENSITIVITY if desired).
+   * Sensitivity facts used to classify instance risk. Each SensitivityFact
+   * names a path pattern and the risk band touching it carries. Omit to use the
+   * built-in DEFAULT_SENSITIVITY. Pass an explicit array, including [], to
+   * replace the defaults.
    */
   sensitivity?: SensitivityFact[];
   /**

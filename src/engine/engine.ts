@@ -23,6 +23,7 @@ import type { RiskClass, SensitivityFact } from '../contract/risk.js';
 import type { PatternStore } from '../contract/pattern.js';
 import type { ToolBroker } from '../contract/tool.js';
 import { lintLibrary } from '../library/constitution.js';
+import { DEFAULT_SENSITIVITY } from '../library/risk.js';
 import { loadFamilySkill } from '../library/skills.js';
 import type { CheckContext } from '../contract/goal-type.js';
 import {
@@ -150,7 +151,7 @@ export class Engine {
     this.goldenCapture = opts.goldenCapture ?? false;
     this.enforceToolCallBudget = opts.enforceToolCallBudget ?? false;
     this.onBrief = opts.onBrief;
-    this.sensitivity = opts.sensitivity ?? [];
+    this.sensitivity = opts.sensitivity ?? DEFAULT_SENSITIVITY;
     this.onGate = opts.onGate;
     this.patterns = opts.patterns;
     this.broker = opts.broker;

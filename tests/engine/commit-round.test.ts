@@ -17,6 +17,7 @@ import {
   openTreeWorktree,
   commitRound,
   diffBodiesWithinScope,
+  treeDiffWithinScope,
   collectTree,
   type TreeWorktree,
 } from '../../src/engine/worktree.js';
@@ -41,8 +42,8 @@ function makeTempRepo(): string {
 /** Open a worktree and return the full TreeWorktree descriptor. */
 async function openWorktree(repo: string, goalId: string): Promise<TreeWorktree> {
   const store = new InMemoryEventStore();
-  const { treeId, branch, root } = await openTreeWorktree(repo, goalId, store);
-  return { treeId, branch, root, repoRoot: repo, goalId };
+  const { treeId, branch, root, baseSha } = await openTreeWorktree(repo, goalId, store);
+  return { treeId, branch, root, repoRoot: repo, goalId, baseSha };
 }
 
 /** HEAD sha in a worktree. */
@@ -149,6 +150,33 @@ describe('commitRound', () => {
     expect(log).toContain('feat(round 0): round zero');
     expect(log).toContain('feat(round 1): round one');
     expect(afterRounds).toBeGreaterThan(0);
+  });
+
+  it('does not commit a milestone round whose dirty work exceeds the declared scope', async () => {
+    const repo = makeTempRepo();
+    const wt = await openWorktree(repo, 'g-scope-round');
+    const before = head(wt.root);
+
+    writeAt(wt.root, 'docs/out.md', 'out of scope\n');
+    const sha = commitRound(wt, 0, 'round zero', ['src/']);
+
+    expect(sha).toBeNull();
+    expect(head(wt.root)).toBe(before);
+  });
+});
+
+describe('treeDiffWithinScope', () => {
+  it('catches an already committed out-of-scope path changed since the tree base', async () => {
+    const repo = makeTempRepo();
+    const wt = await openWorktree(repo, 'g-tree-diff');
+
+    writeAt(wt.root, 'docs/out.md', 'out of scope\n');
+    commitRound(wt, 0, 'round zero');
+
+    const diff = treeDiffWithinScope(wt.root, wt.baseSha, ['src/']);
+
+    expect(diff.ok).toBe(false);
+    expect(diff.scopeInsufficiency).toContain('docs/out.md');
   });
 });
 

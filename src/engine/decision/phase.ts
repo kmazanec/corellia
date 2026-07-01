@@ -6,6 +6,7 @@ import type { GoalTypeDef, Registry } from '../../contract/goal-type.js';
 import type { SplitMemo, PatternStore } from '../../contract/pattern.js';
 import type { Report } from '../../contract/report.js';
 import { specShape } from '../../flywheel/shape.js';
+import type { KnowledgeCoverageGateway } from '../coverage/split-gate.js';
 import {
   buildDecisionContext,
   memoStatus as deriveMemoStatus,
@@ -39,6 +40,8 @@ export async function resolveDecisionPhase(params: {
   brainConfig?: { modelByTier?: Record<string, string> };
   skillForGoalType: (goalType: string) => string | undefined;
   repoShapeForGoal: (goal: Goal) => string | undefined;
+  repoRoot?: string;
+  knowledge?: KnowledgeCoverageGateway;
   debitUsage: (usage: Usage) => void;
   hasReachedCeiling: () => boolean;
 }): Promise<DecisionPhaseResult> {
@@ -100,6 +103,8 @@ export async function resolveDecisionPhase(params: {
       brain: params.brain,
       store: params.store,
       now: params.now,
+      ...(params.repoRoot !== undefined ? { repoRoot: params.repoRoot } : {}),
+      ...(params.knowledge !== undefined ? { knowledge: params.knowledge } : {}),
       goldenCapture: params.goldenCapture,
       ...(params.brainConfig !== undefined ? { brainConfig: params.brainConfig } : {}),
       debitUsage: params.debitUsage,

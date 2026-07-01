@@ -6,6 +6,9 @@ import {
   makeGoal,
   MemoryEventStore,
 } from './stubs.js';
+import { createRegistry } from '../../src/library/registry.js';
+import { starterTypes } from '../../src/library/starter-types.js';
+import { structuredSpecInput } from '../../src/library/input-contracts.js';
 
 describe('enterGoal', () => {
   it('blocks and emits an unknown goal type without throwing', async () => {
@@ -102,5 +105,60 @@ describe('enterGoal', () => {
       deadline: 600,
     });
     expect(store.types()).toEqual(['goal-received', 'risk-classified']);
+  });
+
+  it('blocks free-text input for non-deliver goal types with input validators', async () => {
+    const store = new MemoryEventStore();
+    const goal = makeGoal({
+      id: 'root',
+      type: 'leaf',
+      spec: 'raw intent belongs at deliver-intent',
+    });
+
+    const result = await enterGoal({
+      goal,
+      registry: buildRegistry([
+        leafTypeDef({
+          name: 'leaf',
+          inputSchema: { type: 'object' },
+          validateInput: structuredSpecInput,
+        }),
+      ]),
+      store,
+      now: () => 1,
+      sensitivity: [],
+      onGate: undefined,
+      onBrief: undefined,
+      hasReachedCeiling: () => false,
+    });
+
+    expect(result).toMatchObject({
+      kind: 'emitted',
+      report: {
+        blockers: [expect.stringContaining('only deliver-intent accepts free-text input')],
+      },
+    });
+  });
+
+  it('accepts free-text input for deliver-intent', async () => {
+    const store = new MemoryEventStore();
+    const goal = makeGoal({
+      id: 'root',
+      type: 'deliver-intent',
+      spec: 'ship the feature',
+    });
+
+    const result = await enterGoal({
+      goal,
+      registry: createRegistry(starterTypes()),
+      store,
+      now: () => 1,
+      sensitivity: [],
+      onGate: undefined,
+      onBrief: undefined,
+      hasReachedCeiling: () => false,
+    });
+
+    expect(result).toMatchObject({ kind: 'ready' });
   });
 });

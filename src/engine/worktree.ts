@@ -310,6 +310,21 @@ export function treeChangedWithinScope(
   baseSha: string,
   scope: string[],
 ): number {
+  return treeDiffWithinScope(worktreeRoot, baseSha, scope).changedCount;
+}
+
+/**
+ * Check ALL tree changes since the worktree's BASE commit against scope. This is
+ * stricter than `diffWithinScope`: milestone rounds commit as they go, so by the
+ * time a parent emits, an out-of-scope file may be committed and invisible to
+ * `git diff HEAD`. This helper includes committed base..HEAD changes plus any
+ * remaining working-tree/untracked changes.
+ */
+export function treeDiffWithinScope(
+  worktreeRoot: string,
+  baseSha: string,
+  scope: string[],
+): { ok: boolean; scopeInsufficiency?: string; changedCount: number } {
   const gitLines = (args: string[]): string[] => {
     try {
       return execFileSync('git', ['-C', worktreeRoot, ...args], { stdio: 'pipe', encoding: 'utf-8' })
@@ -334,14 +349,31 @@ export function treeChangedWithinScope(
     // Genuinely no change. (If git errored on EVERY query we'd also land here;
     // that is acceptable — the gate treats 0 as hollow only for a make root that
     // ALSO reported success, and a totally broken git would have failed earlier.)
-    return 0;
+    return { ok: true, changedCount: 0 };
   }
-  if (scope.length === 0) return all.size;
+  if (scope.length === 0) return { ok: true, changedCount: all.size };
+
+  const offending: string[] = [];
   let inScope = 0;
   for (const p of all) {
-    if (!isAbsolute(p) && !normalize(p).startsWith('..') && isInScope(p, scope)) inScope++;
+    if (isAbsolute(p) || normalize(p).startsWith('..')) {
+      offending.push(p);
+    } else if (isInScope(p, scope)) {
+      inScope++;
+    } else {
+      offending.push(p);
+    }
   }
-  return inScope;
+
+  if (offending.length > 0) {
+    return {
+      ok: false,
+      scopeInsufficiency: `File(s) outside declared scope: ${offending.join(', ')}`,
+      changedCount: inScope,
+    };
+  }
+
+  return { ok: true, changedCount: inScope };
 }
 
 // ---------------------------------------------------------------------------
@@ -365,8 +397,16 @@ export function commitRound(
   worktree: TreeWorktree,
   roundIndex: number,
   title: string,
+  scope?: string[],
 ): string | null {
   const { root } = worktree;
+
+  if (scope !== undefined) {
+    const scopeCheck = diffWithinScope(root, scope);
+    if (!scopeCheck.ok) {
+      return null;
+    }
+  }
 
   // Stage all changes (respects .git/info/exclude, same trust posture as collectTree).
   execFileSync('git', ['-C', root, 'add', '--all'], { stdio: 'pipe' });

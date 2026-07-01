@@ -76,6 +76,30 @@ export function projectMemory(events: FactoryEvent[]): MemoryView {
 }
 
 // ──────────────────────────────────────────────
+// projectPatternTrust
+// ──────────────────────────────────────────────
+
+export type PatternTrustStatus = 'provisional' | 'trusted';
+
+export function projectPatternTrust(
+  events: FactoryEvent[],
+  opts: { upToIndex?: number } = {},
+): Map<string, PatternTrustStatus> {
+  const trust = new Map<string, PatternTrustStatus>();
+  const limit = opts.upToIndex ?? events.length;
+
+  for (const e of events.slice(0, limit)) {
+    if (e.type === 'pattern-recorded') {
+      if (!trust.has(e.shape)) trust.set(e.shape, 'provisional');
+    } else if (e.type === 'pattern-trust-signed') {
+      trust.set(e.shape, e.to);
+    }
+  }
+
+  return trust;
+}
+
+// ──────────────────────────────────────────────
 // traceStats
 // ──────────────────────────────────────────────
 
@@ -335,6 +359,7 @@ export function costSummary(events: FactoryEvent[]): CostSummary {
       case 'resumed':
       case 'pattern-consulted':
       case 'pattern-recorded':
+      case 'pattern-trust-signed':
       case 'tool-call':
       case 'script-ran':
       case 'capture-ran':
@@ -451,6 +476,7 @@ export function projectKnowledge(events: FactoryEvent[]): KnowledgeView {
       case 'resumed':
       case 'pattern-consulted':
       case 'pattern-recorded':
+      case 'pattern-trust-signed':
       case 'tool-call':
       case 'step':
       case 'script-ran':

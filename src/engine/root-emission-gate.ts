@@ -3,7 +3,7 @@ import type { Goal } from '../contract/goal.js';
 import type { Registry } from '../contract/goal-type.js';
 import type { Report } from '../contract/report.js';
 import { blockedReport } from './reports.js';
-import { diffWithinScope, treeChangedWithinScope } from './worktree.js';
+import { treeDiffWithinScope } from './worktree.js';
 
 export async function applyRootEmissionGate(params: {
   goal: Goal;
@@ -15,20 +15,19 @@ export async function applyRootEmissionGate(params: {
 }): Promise<Report> {
   if (params.report.blockers.length > 0) return params.report;
 
-  const diff = diffWithinScope(params.worktree.root, params.goal.scope);
-  const rootKind = params.registry.has(params.goal.type)
-    ? params.registry.get(params.goal.type).kind
-    : undefined;
-  const changedSinceBase = treeChangedWithinScope(
+  const diff = treeDiffWithinScope(
     params.worktree.root,
     params.worktree.baseSha,
     params.goal.scope,
   );
+  const rootKind = params.registry.has(params.goal.type)
+    ? params.registry.get(params.goal.type).kind
+    : undefined;
   const artifactHasFiles =
     params.report.artifact?.kind === 'files' &&
     (params.report.artifact.files?.length ?? 0) > 0;
 
-  if (diff.ok && rootKind === 'make' && changedSinceBase === 0 && !artifactHasFiles) {
+  if (diff.ok && rootKind === 'make' && diff.changedCount === 0 && !artifactHasFiles) {
     return blockRootEmission({
       goal: params.goal,
       store: params.store,

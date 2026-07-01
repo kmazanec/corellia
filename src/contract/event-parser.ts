@@ -24,6 +24,7 @@ const EVENT_TYPES = new Set([
   'resumed',
   'pattern-consulted',
   'pattern-recorded',
+  'pattern-trust-signed',
   'tool-call',
   'step',
   'script-ran',
@@ -53,6 +54,7 @@ const RISK_CLASSES = new Set(['low', 'medium', 'high']);
 const BRIEF_RESOLUTIONS = new Set(['deny', 'park', 'bounce', 'answered']);
 const GATE_RESOLUTIONS = new Set(['granted', 'denied']);
 const PATTERN_STATUSES = new Set(['none', 'provisional', 'trusted']);
+const TRUST_STATUSES = new Set(['provisional', 'trusted']);
 const OUTCOMES = new Set(['success', 'failure']);
 const TOOL_OUTCOMES = new Set(['ran', 'refused']);
 const STEP_OUTPUT_KINDS = new Set(['tool-calls', 'artifact']);
@@ -101,6 +103,12 @@ const EVENT_VALIDATORS = {
   resumed: (event) => hasString(event, 'answer'),
   'pattern-consulted': (event) => hasString(event, 'shape') && hasSetValue(event, 'status', PATTERN_STATUSES),
   'pattern-recorded': (event) => hasString(event, 'shape') && hasSetValue(event, 'outcome', OUTCOMES),
+  'pattern-trust-signed': (event) =>
+    hasString(event, 'shape') &&
+    hasSetValue(event, 'from', TRUST_STATUSES) &&
+    hasSetValue(event, 'to', TRUST_STATUSES) &&
+    hasString(event, 'signer') &&
+    hasString(event, 'rationale'),
   'tool-call': (event) =>
     hasString(event, 'tool') &&
     hasString(event, 'callId') &&

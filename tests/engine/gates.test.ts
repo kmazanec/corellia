@@ -232,6 +232,49 @@ describe('authority gate — high-risk scope at entry', () => {
     const gateEvents = await store.list({ type: 'gate-decision' });
     expect(gateEvents).toHaveLength(0);
   });
+
+  it('uses default sensitivity when sensitivity is omitted', async () => {
+    const store = new MemoryEventStore();
+    const brain = new ScriptedBrain();
+    const registry = buildRegistry([leafTypeDef({ name: 'impl' })]);
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+    });
+
+    const report = await engine.run(makeGoal({
+      type: 'impl',
+      scope: ['src/auth/session.ts'],
+    }));
+
+    expect(report.blockers[0]).toMatch(/authority gate denied/i);
+    const riskEvents = await store.list({ type: 'risk-classified' });
+    expect((riskEvents[0] as { risk: string }).risk).toBe('high');
+  });
+
+  it('allows explicit empty sensitivity to opt out of defaults', async () => {
+    const store = new MemoryEventStore();
+    const brain = new ScriptedBrain().queueProduce(textArtifact('ok'));
+    const registry = buildRegistry([leafTypeDef({ name: 'impl' })]);
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      sensitivity: [],
+    });
+
+    const report = await engine.run(makeGoal({
+      type: 'impl',
+      scope: ['src/auth/session.ts'],
+    }));
+
+    expect(report.blockers).toHaveLength(0);
+    const riskEvents = await store.list({ type: 'risk-classified' });
+    expect((riskEvents[0] as { risk: string }).risk).toBe('low');
+  });
 });
 
 // ── 5. Clean entry scope, artifact touches sensitive path → gate fires ─────

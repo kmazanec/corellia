@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { Brain, BrainContext } from '../../src/contract/brain.js';
 import type { ChildPlan, Decision } from '../../src/contract/decision.js';
 import { ZERO_USAGE } from '../../src/contract/goal.js';
+import type { Artifact } from '../../src/contract/report.js';
+import type { Verdict } from '../../src/contract/verdict.js';
 import { acceptSplitDecision } from '../../src/engine/decision/split-acceptance.js';
 import {
   buildRegistry,
@@ -21,11 +23,13 @@ const child = (overrides: Partial<ChildPlan> & Pick<ChildPlan, 'localId'>): Chil
   budgetShare: overrides.budgetShare ?? 0.5,
 });
 
-function registry() {
+function registry(includeSplitJudge = false) {
   return buildRegistry([
     nonLeafTypeDef({ name: 'root' }),
     leafTypeDef({ name: 'child' }),
+    leafTypeDef({ name: 'deep-dive-region', kind: 'learn', family: 'comprehend' }),
     leafTypeDef({ name: 'anchored', requiresScope: true }),
+    ...(includeSplitJudge ? [leafTypeDef({ name: 'judge-split', kind: 'judge', family: 'arbiter' })] : []),
   ]);
 }
 
@@ -39,6 +43,22 @@ function decidingBrain(decisions: Decision[], contexts: BrainContext[]): Brain {
     },
     async produce() { throw new Error('not used'); },
     async judge() { throw new Error('not used'); },
+    async repair() { throw new Error('not used'); },
+    async step() { throw new Error('not used'); },
+  };
+}
+
+function splitJudgeBrain(captured: Artifact[]): Brain {
+  return {
+    async decide() { throw new Error('not used'); },
+    async produce() { throw new Error('not used'); },
+    async judge(_goal, subject) {
+      captured.push(subject);
+      return {
+        value: { pass: true, findings: [] } satisfies Verdict,
+        usage: ZERO_USAGE,
+      };
+    },
     async repair() { throw new Error('not used'); },
     async step() { throw new Error('not used'); },
   };
@@ -135,5 +155,94 @@ describe('split acceptance policy', () => {
       'must decompose and cannot satisfy directly',
     );
     expect(store.types()).toEqual(['decided', 'emitted']);
+  });
+
+  it('runs coverage augmentation before judge-split evaluates the graph', async () => {
+    const capturedSubjects: Artifact[] = [];
+    const decision = {
+      kind: 'split',
+      children: [child({ localId: 'build', type: 'child', scope: ['src/engine'] })],
+    } satisfies Extract<Decision, { kind: 'split' }>;
+
+    const result = await acceptSplitDecision({
+      goal: makeGoal({ id: 'root', type: 'root', scope: ['src/'] }),
+      typeDef: registry(true).get('root'),
+      decision,
+      decideUsage: undefined,
+      tier: 'mid',
+      registry: registry(true),
+      brain: splitJudgeBrain(capturedSubjects),
+      store: new MemoryEventStore(),
+      now: () => 4,
+      repoRoot: '/repo',
+      knowledge: {
+        query: async () => ({ headSha: 'h1', artifacts: [], regionFacts: [] }),
+        validate: async () => true,
+        mintComprehension: () => [
+          child({
+            localId: 'dive-src',
+            type: 'deep-dive-region',
+            scope: ['src/'],
+            budgetShare: 0.2,
+          }),
+        ],
+      },
+      goldenCapture: false,
+      debitUsage: () => {},
+      hasReachedCeiling: () => false,
+    });
+
+    expect(result.kind).toBe('accepted');
+    const accepted = result.kind === 'accepted' && result.decision.kind === 'split'
+      ? result.decision.children
+      : [];
+    expect(accepted.map((c) => c.localId)).toContain('dive-src');
+    expect(accepted.find((c) => c.localId === 'build')?.dependsOn).toContain('dive-src');
+
+    expect(capturedSubjects).toHaveLength(1);
+    const judged = JSON.parse((capturedSubjects[0] as { kind: 'text'; text: string }).text) as ChildPlan[];
+    expect(judged.map((c) => c.localId)).toContain('dive-src');
+    expect(judged.find((c) => c.localId === 'build')?.dependsOn).toContain('dive-src');
+  });
+
+  it('blocks before judge-split when coverage injection creates an invalid graph', async () => {
+    const capturedSubjects: Artifact[] = [];
+    const store = new MemoryEventStore();
+    const decision = {
+      kind: 'split',
+      children: [child({ localId: 'build', type: 'child', scope: ['src/engine'] })],
+    } satisfies Extract<Decision, { kind: 'split' }>;
+
+    const result = await acceptSplitDecision({
+      goal: makeGoal({ id: 'root', type: 'root', scope: ['src/'] }),
+      typeDef: registry(true).get('root'),
+      decision,
+      decideUsage: undefined,
+      tier: 'mid',
+      registry: registry(true),
+      brain: splitJudgeBrain(capturedSubjects),
+      store,
+      now: () => 5,
+      repoRoot: '/repo',
+      knowledge: {
+        query: async () => ({ headSha: 'h1', artifacts: [], regionFacts: [] }),
+        validate: async () => true,
+        mintComprehension: () => [
+          child({
+            localId: 'build',
+            type: 'deep-dive-region',
+            scope: ['src/'],
+            budgetShare: 0.2,
+          }),
+        ],
+      },
+      goldenCapture: false,
+      debitUsage: () => {},
+      hasReachedCeiling: () => false,
+    });
+
+    expect(result.kind).toBe('emitted');
+    expect(result.kind === 'emitted' ? result.report.blockers[0] : '').toContain('coverage-gate-invalid-split');
+    expect(capturedSubjects).toHaveLength(0);
   });
 });

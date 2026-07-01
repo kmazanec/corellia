@@ -4,7 +4,6 @@ import type { Report } from '../../src/contract/report.js';
 import { runSplitDispatch } from '../../src/engine/split-dispatch.js';
 import { InMemoryPatternStore } from '../../src/substrate/memory-pattern-store.js';
 import {
-  buildRegistry,
   leafTypeDef,
   makeGoal,
   MemoryEventStore,
@@ -25,10 +24,7 @@ describe('runSplitDispatch', () => {
       decision,
       terracedLoserFindings: ['alternative considered'],
       goalShape: 'splitter|{}|test goal',
-      repoRoot: undefined,
-      knowledge: undefined,
       patterns,
-      registry: buildRegistry([nonLeafTypeDef({ name: 'splitter' }), leafTypeDef({ name: 'leaf' })]),
       store,
       now: () => 1,
       runMilestone: async () => {
@@ -62,10 +58,7 @@ describe('runSplitDispatch', () => {
       decision: splitDecision(),
       terracedLoserFindings: [],
       goalShape: 'deliver|{}|test goal',
-      repoRoot: undefined,
-      knowledge: undefined,
       patterns: undefined,
-      registry: buildRegistry([nonLeafTypeDef({ name: 'deliver' }), leafTypeDef({ name: 'leaf' })]),
       store,
       now: () => 1,
       runMilestone: async () => {

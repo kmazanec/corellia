@@ -52,6 +52,10 @@ function validateChildTypes(
     if (def.requiresScope && child.scope.length === 0) {
       return `Child "${child.localId}" (type "${child.type}") requires a non-empty scope — it must declare the region it touches (ADR-039)`;
     }
+    const inputViolation = def.validateInput?.(child.spec) ?? null;
+    if (inputViolation !== null) {
+      return `Child "${child.localId}" (type "${child.type}") has invalid input: ${inputViolation}`;
+    }
   }
 
   return null;

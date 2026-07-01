@@ -6,6 +6,12 @@
 import type { GoalTypeDef } from '../contract/goal-type.js';
 import { loadFamilySkill } from './skills.js';
 
+const CORE_TYPES: ReadonlyMap<string, GoalTypeDef['kind']> = new Map([
+  ['deliver-intent', 'make'],
+  ['judge-split', 'judge'],
+  ['judge-integration', 'judge'],
+]);
+
 /**
  * Options for lintLibrary.
  */
@@ -41,6 +47,42 @@ export function lintLibrary(defs: GoalTypeDef[], opts: LintOptions = {}): string
   }
 
   for (const def of defs) {
+    if (checkSkills && (def.validateInput === undefined || def.inputSchema === undefined)) {
+      violations.push(
+        `Type "${def.name}" does not declare an input contract`,
+      );
+    }
+    if (def.acceptsFreeText === true && def.name !== 'deliver-intent') {
+      violations.push(
+        `Type "${def.name}" accepts free-text input — only deliver-intent may accept unparsed intent text`,
+      );
+    }
+    if (checkSkills && def.name === 'deliver-intent' && def.acceptsFreeText !== true) {
+      violations.push(
+        `Core type "deliver-intent" must accept free-text input`,
+      );
+    }
+
+    const coreKind = CORE_TYPES.get(def.name);
+    if (coreKind !== undefined) {
+      if (checkSkills) {
+        if (def.core !== true) {
+          violations.push(
+            `Core type "${def.name}" must declare core: true`,
+          );
+        }
+        if (def.kind !== coreKind) {
+          violations.push(
+            `Core type "${def.name}" has kind "${def.kind}" (must be "${coreKind}")`,
+          );
+        }
+      }
+    } else if (def.core === true) {
+      violations.push(
+        `Type "${def.name}" declares core: true but is not a recognized core type`,
+      );
+    }
+
     // Judge-kind types must not carry write grants or spawn non-leaf trees
     if (def.kind === 'judge') {
       for (const grant of def.grants) {
@@ -55,6 +97,16 @@ export function lintLibrary(defs: GoalTypeDef[], opts: LintOptions = {}): string
           `Judge type "${def.name}" has leafOnly: false — judge types must be leaf-only`,
         );
       }
+    }
+
+    const grantViolation = kindGrantCeilingViolation(def);
+    if (grantViolation !== null) {
+      violations.push(grantViolation);
+    }
+
+    const touchpointViolation = humanTouchpointViolation(def);
+    if (touchpointViolation !== null) {
+      violations.push(touchpointViolation);
     }
 
     // memory.write grants belong only to the curate family
@@ -190,4 +242,31 @@ export function lintLibrary(defs: GoalTypeDef[], opts: LintOptions = {}): string
   }
 
   return violations;
+}
+
+function kindGrantCeilingViolation(def: GoalTypeDef): string | null {
+  if (def.kind === 'make') return null;
+
+  for (const grant of def.grants) {
+    if (grant === 'fs.write' || grant === 'fs.write_test_dirs') {
+      return `Type "${def.name}" kind "${def.kind}" exceeds grant ceiling with "${grant}"`;
+    }
+  }
+  return null;
+}
+
+function humanTouchpointViolation(def: GoalTypeDef): string | null {
+  if (def.humanTouchpoints === undefined) return null;
+  if (!Array.isArray(def.humanTouchpoints)) {
+    return `Type "${def.name}" humanTouchpoints must be an array`;
+  }
+  for (const touchpoint of def.humanTouchpoints) {
+    if (
+      typeof touchpoint.name !== 'string' ||
+      !['deny', 'park', 'bounce'].includes(touchpoint.onTimeout)
+    ) {
+      return `Type "${def.name}" has invalid human touchpoint declaration`;
+    }
+  }
+  return null;
 }

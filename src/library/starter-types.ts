@@ -23,6 +23,12 @@ import { authorTypes } from './types/author.js';
 import { researchTypes } from './types/research.js';
 import { diagnoseTypes } from './types/diagnose.js';
 import { improveTypes } from './types/improve.js';
+import {
+  ANY_STRUCTURED_SPEC_SCHEMA,
+  DELIVER_INTENT_SPEC_SCHEMA,
+  deliverIntentInput,
+  structuredSpecInput,
+} from './input-contracts.js';
 
 /**
  * The starter goal-types — the full GOAL-TYPES.md library. Each entry
@@ -43,7 +49,7 @@ import { improveTypes } from './types/improve.js';
  * combined starterTypes() surface unchanged.
  */
 export function starterTypes(): GoalTypeDef[] {
-  return [
+  return withInputContracts([
     ...deliverTypes(),
     ...buildTypes(),
     ...arbiterTypes(),
@@ -54,5 +60,32 @@ export function starterTypes(): GoalTypeDef[] {
     ...researchTypes(),
     ...diagnoseTypes(),
     ...improveTypes(),
-  ];
+  ]);
+}
+
+function withInputContracts(defs: GoalTypeDef[]): GoalTypeDef[] {
+  return defs.map((def) => {
+    if (def.name === 'deliver-intent') {
+      return {
+        ...def,
+        core: true,
+        acceptsFreeText: true,
+        inputSchema: DELIVER_INTENT_SPEC_SCHEMA,
+        validateInput: deliverIntentInput,
+      };
+    }
+    if (def.name === 'judge-split' || def.name === 'judge-integration') {
+      return {
+        ...def,
+        core: true,
+        inputSchema: def.inputSchema ?? ANY_STRUCTURED_SPEC_SCHEMA,
+        validateInput: def.validateInput ?? structuredSpecInput,
+      };
+    }
+    return {
+      ...def,
+      inputSchema: def.inputSchema ?? ANY_STRUCTURED_SPEC_SCHEMA,
+      validateInput: def.validateInput ?? structuredSpecInput,
+    };
+  });
 }

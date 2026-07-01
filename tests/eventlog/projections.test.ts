@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { projectMemory, traceStats, renderTree, costSummary, projectKnowledge, goldenCandidates } from '../../src/eventlog/projections.js';
+import { projectMemory, traceStats, renderTree, costSummary, projectKnowledge, goldenCandidates, projectPatternTrust } from '../../src/eventlog/projections.js';
 import { writeKnowledge, writeRegionFacts, recordKnowledgeCheck } from '../../src/library/knowledge.js';
 import { InMemoryEventStore } from '../../src/eventlog/memory-store.js';
 import type { FactoryEvent } from '../../src/contract/events.js';
@@ -154,6 +154,45 @@ describe('projectMemory', () => {
     ];
     const view = projectMemory(events);
     expect((await view.query('pattern', []))[0]?.provenance).toBe('provisional');
+  });
+});
+
+describe('projectPatternTrust', () => {
+  it('projects recorded patterns as provisional and signed patterns as trusted', () => {
+    const events: FactoryEvent[] = [
+      { type: 'pattern-recorded', at: 1, goalId: 'g1', shape: 'shape-a', outcome: 'success' },
+      {
+        type: 'pattern-trust-signed',
+        at: 2,
+        goalId: 'g1',
+        shape: 'shape-a',
+        from: 'provisional',
+        to: 'trusted',
+        signer: 'keith',
+        rationale: 'proved useful',
+      },
+    ];
+
+    expect(projectPatternTrust(events).get('shape-a')).toBe('trusted');
+  });
+
+  it('can project trust at an earlier replay prefix', () => {
+    const events: FactoryEvent[] = [
+      { type: 'pattern-recorded', at: 1, goalId: 'g1', shape: 'shape-a', outcome: 'success' },
+      {
+        type: 'pattern-trust-signed',
+        at: 2,
+        goalId: 'g1',
+        shape: 'shape-a',
+        from: 'provisional',
+        to: 'trusted',
+        signer: 'keith',
+        rationale: 'proved useful',
+      },
+    ];
+
+    expect(projectPatternTrust(events, { upToIndex: 1 }).get('shape-a')).toBe('provisional');
+    expect(projectPatternTrust(events, { upToIndex: 2 }).get('shape-a')).toBe('trusted');
   });
 });
 

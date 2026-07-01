@@ -5,6 +5,10 @@ import type { Goal, Tier, Usage } from '../../contract/goal.js';
 import type { GoalTypeDef, Registry } from '../../contract/goal-type.js';
 import type { Report } from '../../contract/report.js';
 import type { Verdict } from '../../contract/verdict.js';
+import {
+  runKnowledgeCoverageSplitGate,
+  type KnowledgeCoverageGateway,
+} from '../coverage/split-gate.js';
 import { debitAttempt } from '../budget-events.js';
 import { blockedReport } from '../reports.js';
 import { validateSplit } from '../split-validation.js';
@@ -33,6 +37,8 @@ export async function acceptSplitDecision(params: {
   brain: Brain;
   store: EventStore;
   now: () => number;
+  repoRoot?: string;
+  knowledge?: KnowledgeCoverageGateway;
   goldenCapture: boolean;
   brainConfig?: { modelByTier?: Record<string, string> };
   debitUsage: (usage: Usage) => void;
@@ -93,6 +99,12 @@ export async function acceptSplitDecision(params: {
       continue;
     }
 
+    const coverageResult = await augmentSplitForCoverage(params, decision);
+    if (coverageResult.kind === 'blocked') {
+      return { kind: 'emitted', report: coverageResult.report };
+    }
+    decision = coverageResult.decision;
+
     if (!params.registry.has('judge-split')) {
       break;
     }
@@ -145,6 +157,48 @@ export async function acceptSplitDecision(params: {
   }
 
   return { kind: 'accepted', decision, decideUsage };
+}
+
+async function augmentSplitForCoverage(
+  params: {
+    goal: Goal;
+    typeDef: GoalTypeDef;
+    decision: SplitDecision;
+    registry: Registry;
+    store: EventStore;
+    now: () => number;
+    repoRoot?: string;
+    knowledge?: KnowledgeCoverageGateway;
+  },
+  decision: SplitDecision,
+): Promise<{ kind: 'ready'; decision: SplitDecision } | { kind: 'blocked'; report: Report }> {
+  if (params.knowledge === undefined || params.repoRoot === undefined) {
+    return { kind: 'ready', decision };
+  }
+
+  try {
+    const children = await runKnowledgeCoverageSplitGate({
+      goal: params.goal,
+      kind: params.typeDef.kind,
+      children: decision.children,
+      repoRoot: params.repoRoot,
+      knowledge: params.knowledge,
+      registry: params.registry,
+      store: params.store,
+      now: params.now,
+    });
+    return { kind: 'ready', decision: { ...decision, children } };
+  } catch (gateErr) {
+    const msg = gateErr instanceof Error ? gateErr.message : String(gateErr);
+    const report = blockedReport(`Split structural validation failed after coverage injection: ${msg}`);
+    await params.store.append({
+      type: 'emitted',
+      at: params.now(),
+      goalId: params.goal.id,
+      report,
+    });
+    return { kind: 'blocked', report };
+  }
 }
 
 async function reDecideAfterSplitFailure(

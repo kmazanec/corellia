@@ -56,6 +56,8 @@ export type FactoryEvent =
   | { type: 'pattern-consulted'; at: number; goalId: string; shape: string; status: 'none' | 'provisional' | 'trusted' }
   /** A split's outcome was recorded against its shape — the flywheel's write. */
   | { type: 'pattern-recorded'; at: number; goalId: string; shape: string; outcome: 'success' | 'failure' }
+  /** A human-signoff changed a split memo's trust plane; replayable authority-gap ceremony. */
+  | { type: 'pattern-trust-signed'; at: number; goalId: string; shape: string; from: 'provisional' | 'trusted'; to: 'provisional' | 'trusted'; signer: string; rationale: string }
   /**
    * The broker mediated a tool call: it ran, or it was refused with a reason.
    * `args` is a bounded, structured summary of the salient call arguments (path,

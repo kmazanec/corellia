@@ -51,6 +51,28 @@ describe('starterTypes', () => {
     }
   });
 
+  it('every starter type declares an input contract', () => {
+    for (const def of starterTypes()) {
+      expect(def.inputSchema, def.name).toBeDefined();
+      expect(def.validateInput, def.name).toBeDefined();
+    }
+  });
+
+  it('only deliver-intent accepts free-text input', () => {
+    const freeTextTypes = starterTypes()
+      .filter((def) => def.acceptsFreeText === true)
+      .map((def) => def.name);
+    expect(freeTextTypes).toEqual(['deliver-intent']);
+  });
+
+  it('marks only the core recursive types as core', () => {
+    const coreTypes = starterTypes()
+      .filter((def) => def.core === true)
+      .map((def) => def.name)
+      .sort();
+    expect(coreTypes).toEqual(['deliver-intent', 'judge-integration', 'judge-split']);
+  });
+
   describe('deliver-intent', () => {
     it('has kind make and is NOT leafOnly', () => {
       const reg = createRegistry(starterTypes());

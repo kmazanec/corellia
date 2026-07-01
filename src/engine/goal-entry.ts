@@ -52,6 +52,18 @@ export async function enterGoal(params: {
   }
 
   const typeDef = params.registry.get(params.goal.type);
+  const inputViolation = typeDef.validateInput?.(params.goal.spec) ?? null;
+  if (inputViolation !== null) {
+    const report = blockedReport(`Invalid input for goal type "${params.goal.type}": ${inputViolation}`);
+    await params.store.append({
+      type: 'emitted',
+      at: params.now(),
+      goalId: params.goal.id,
+      report,
+    });
+    return { kind: 'emitted', report };
+  }
+
   const entryRisk = classifyRisk(params.goal.scope, [...params.sensitivity]);
   await params.store.append({
     type: 'risk-classified',

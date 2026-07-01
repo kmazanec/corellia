@@ -23,6 +23,8 @@ const baseLeaf: GoalTypeDef = {
   deterministic: [],
   judgeType: null,
   grants: [],
+  inputSchema: { type: 'object' },
+  validateInput: () => null,
 };
 
 describe('lintLibrary violations', () => {
@@ -209,5 +211,55 @@ describe('lintLibrary violations', () => {
     ];
     const violations = lintLibrary(defs, { checkSkills: false });
     expect(violations.filter((v) => v.includes('dangerous grant'))).toHaveLength(0);
+  });
+
+  it('reports a real library type missing an input contract', () => {
+    const defs: GoalTypeDef[] = [
+      {
+        ...baseLeaf,
+        name: 'implement',
+        family: 'build',
+        inputSchema: undefined,
+        validateInput: undefined,
+      },
+    ];
+    const violations = lintLibrary(defs);
+    expect(violations.some((v) => v.includes('input contract'))).toBe(true);
+  });
+
+  it('reports non-deliver types that accept free text', () => {
+    const defs: GoalTypeDef[] = [
+      { ...baseLeaf, name: 'implement', acceptsFreeText: true },
+    ];
+    const violations = lintLibrary(defs, { checkSkills: false });
+    expect(violations.some((v) => v.includes('free-text'))).toBe(true);
+  });
+
+  it('reports core types with the wrong kind', () => {
+    const defs: GoalTypeDef[] = [
+      { ...baseLeaf, name: 'judge-split', family: 'arbiter', core: true, kind: 'make' },
+    ];
+    const violations = lintLibrary(defs);
+    expect(violations.some((v) => v.includes('Core type "judge-split"') && v.includes('kind'))).toBe(true);
+  });
+
+  it('reports a learn type with a write grant above its kind ceiling', () => {
+    const defs: GoalTypeDef[] = [
+      { ...baseLeaf, name: 'rogue-learn', kind: 'learn', grants: ['fs.write'] },
+    ];
+    const violations = lintLibrary(defs, { checkSkills: false });
+    expect(violations.some((v) => v.includes('grant ceiling'))).toBe(true);
+  });
+
+  it('reports invalid human touchpoint timeout declarations', () => {
+    const defs: GoalTypeDef[] = [
+      {
+        ...baseLeaf,
+        name: 'touchy',
+        humanTouchpoints: [{ name: 'ask', onTimeout: 'wait' as 'deny' }],
+      },
+    ];
+    const violations = lintLibrary(defs, { checkSkills: false });
+    expect(violations.some((v) => v.includes('human touchpoint'))).toBe(true);
   });
 });

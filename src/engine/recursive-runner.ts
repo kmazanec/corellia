@@ -203,10 +203,7 @@ function runSplitDecision(
     decision: decision.decision,
     terracedLoserFindings: decision.terracedLoserFindings,
     goalShape: decision.goalShape,
-    repoRoot: deps.activeWorktree()?.repoRoot,
-    knowledge: deps.knowledge,
     patterns: deps.patterns,
-    registry: deps.registry,
     store: deps.store,
     now: deps.now,
     runMilestone: (children) => splitRunner.runMilestone(goal, children, treeState),
@@ -261,6 +258,10 @@ async function decideGoal(
     ...(brainConfig !== undefined ? { brainConfig } : {}),
     skillForGoalType: deps.decideSkillBlock,
     repoShapeForGoal: deps.repoShapeHint,
+    ...(deps.activeWorktree()?.repoRoot !== undefined
+      ? { repoRoot: deps.activeWorktree()!.repoRoot }
+      : {}),
+    ...(deps.knowledge !== undefined ? { knowledge: deps.knowledge } : {}),
     debitUsage: (usage: Usage) => debitTreeState(treeState, usage),
     hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
   });

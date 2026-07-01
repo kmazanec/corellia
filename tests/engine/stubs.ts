@@ -127,6 +127,8 @@ export function leafTypeDef(overrides: Partial<GoalTypeDef> = {}): GoalTypeDef {
     deterministic: [],
     judgeType: null,
     grants: [],
+    inputSchema: { type: 'object' },
+    validateInput: () => null,
     ...overrides,
   };
 }
@@ -141,6 +143,8 @@ export function nonLeafTypeDef(overrides: Partial<GoalTypeDef> = {}): GoalTypeDe
     deterministic: [],
     judgeType: null,
     grants: [],
+    inputSchema: { type: 'object' },
+    validateInput: () => null,
     ...overrides,
   };
 }

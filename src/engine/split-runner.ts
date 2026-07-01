@@ -137,7 +137,7 @@ export function createSplitRunner(deps: {
         reDecideRound: (priorAssessment, priorRoundRef) =>
           reDecideRound(goal, treeState, priorAssessment, priorRoundRef),
         persistCriteria: (artifact) => deps.persistLeafKnowledge(goal, artifact),
-        commitRound: (roundIndex) => commitRoundIfWorktree(deps.activeWorktree(), roundIndex, goal.title),
+        commitRound: (roundIndex) => commitRoundIfWorktree(deps.activeWorktree(), roundIndex, goal.title, goal.scope),
         assessRound: (criteriaArtifact, mergedArtifact) =>
           assessRound(goal, criteriaArtifact, mergedArtifact, treeState),
         ceilingReachedOnce: () => deps.ceilingReachedOnce(goal, treeState),
@@ -151,6 +151,7 @@ function commitRoundIfWorktree(
   worktree: TreeWorktree | undefined,
   roundIndex: number,
   title: string,
+  scope: string[],
 ): string | null {
-  return worktree === undefined ? null : commitRound(worktree, roundIndex, title);
+  return worktree === undefined ? null : commitRound(worktree, roundIndex, title, scope);
 }
