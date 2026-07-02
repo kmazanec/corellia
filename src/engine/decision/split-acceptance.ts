@@ -250,10 +250,15 @@ async function reDecideAfterSplitFailure(
     artifact: splitPlanArtifact(decision.children),
     verdict,
   };
+  // Carry mustDecompose into the re-decide: without it the prompt offers
+  // {"kind":"satisfy"} as a valid shape to a type that can never satisfy,
+  // inviting the model to burn its corrected retry on an invalid answer
+  // (observed: live-tail run 4, 2026-07-01).
   const reDecideResult = await params.brain.decide(params.goal, {
     tier: params.tier,
     memories: params.goal.memories,
     priorAttempt,
+    ...(params.typeDef.mustDecompose === true ? { mustDecompose: true } : {}),
   });
   params.debitUsage(reDecideResult.usage);
   if (reDecideResult.value.kind !== 'satisfy' || params.typeDef.mustDecompose !== true) {

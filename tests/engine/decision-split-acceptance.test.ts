@@ -221,8 +221,10 @@ describe('split acceptance policy', () => {
     expect(result.kind === 'emitted' ? result.report.blockers[0] : '').toContain(
       'must decompose and cannot satisfy directly',
     );
-    // The second decide is the explicitly-corrected retry, carrying the rejected split.
+    // Both decides tell a must-decompose type it cannot satisfy — the first
+    // re-decide must not offer the satisfy shape at all.
     expect(contexts).toHaveLength(2);
+    expect(contexts[0]).toMatchObject({ mustDecompose: true });
     expect(contexts[1]).toMatchObject({ mustDecompose: true });
     expect(contexts[1]?.decideCorrection).toContain('Do NOT return satisfy again');
     expect(contexts[1]?.priorAttempt).toBeDefined();
