@@ -966,32 +966,36 @@ function parseDecision(raw: string, mustDecompose = false): Decision {
 }
 
 function normalizeDecisionBrief(raw: unknown): DecisionBrief {
-  if (!isPlainObject(raw)) throw new Error('block decision missing brief');
+  if (!isPlainObject(raw)) {
+    throw new Error(
+      'block decision missing brief — a block must carry {"brief":{"question":str,...}} stating what it is blocked on',
+    );
+  }
 
+  // Only `question` is load-bearing: it is what a human (or the auto-resolution)
+  // reads. The remaining fields have natural defaults — the model routinely
+  // omits them (same posture as normalizeChild for split children), and failing
+  // the whole decide over a missing deadlineMs turns a meaningful "I am blocked
+  // because X" into an unparseable-decision block that says nothing.
   const question = stringField(raw, 'question');
   if (question.length === 0) throw new Error('block decision brief.question must be a non-empty string');
 
-  const options = stringArrayField(raw, 'options');
-  if (options.length === 0) throw new Error('block decision brief.options must contain at least one option');
-
-  const links = stringArrayField(raw, 'links');
+  const options = lenientStringArray(raw['options']);
+  const links = lenientStringArray(raw['links']);
   const deadlineMs = raw['deadlineMs'];
-  if (typeof deadlineMs !== 'number' || !Number.isFinite(deadlineMs) || deadlineMs < 0) {
-    throw new Error('block decision brief.deadlineMs must be a non-negative finite number');
-  }
-
   const onTimeout = raw['onTimeout'];
-  if (onTimeout !== 'deny' && onTimeout !== 'park' && onTimeout !== 'bounce') {
-    throw new Error('block decision brief.onTimeout must be deny, park, or bounce');
-  }
 
   const teaching = raw['teaching'];
   return {
     question,
-    options,
+    options: options.length > 0 ? options : ['deny', 'park', 'bounce'],
     links,
-    deadlineMs,
-    onTimeout,
+    deadlineMs:
+      typeof deadlineMs === 'number' && Number.isFinite(deadlineMs) && deadlineMs >= 0
+        ? deadlineMs
+        : 30_000,
+    onTimeout:
+      onTimeout === 'deny' || onTimeout === 'park' || onTimeout === 'bounce' ? onTimeout : 'deny',
     ...(teaching === undefined ? {} : { teaching: normalizeBriefTeaching(teaching) }),
   };
 }
@@ -1010,6 +1014,15 @@ function stringField(obj: Record<string, unknown>, key: string): string {
   const value = obj[key];
   if (typeof value !== 'string') throw new Error(`block decision brief.${key} must be a string`);
   return value.trim();
+}
+
+/** Absent/malformed list fields degrade to [] — they all have natural defaults. */
+function lenientStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is string => typeof entry === 'string')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
 }
 
 function stringArrayField(obj: Record<string, unknown>, key: string): string[] {
@@ -1346,8 +1359,8 @@ export class LlmBrain implements Brain {
     // killing every sibling. (Surfaced by a live:self run: the model returned a
     // decision with no valid `kind` twice, and brain.decide's throw was uncaught
     // at the engine's decide call sites.)
-    try {
-      const result = await this.callJson(
+    const attemptDecide = (): Promise<{ value: Decision; usage: Usage }> =>
+      this.callJson(
         model,
         messages,
         (raw) => parseDecision(raw, ctx.mustDecompose === true),
@@ -1357,8 +1370,25 @@ export class LlmBrain implements Brain {
         },
         ctx.tier,
       );
+    try {
+      const result = await attemptDecide();
       return { value: result.value, usage: result.usage };
     } catch (err) {
+      // One full fresh attempt before giving up. The decision schema requires
+      // only `kind` (strict-mode providers reject a oneOf union), so a
+      // schema-constrained decode can legally emit a payload-less decision —
+      // {"kind":"block"} with no brief, {"kind":"split"} with no children —
+      // and two such minimal responses in a row killed whole commissions at
+      // the ROOT decide (live-tail runs 4 and 5, 2026-07-01). A fresh call is
+      // pennies against a dead tree; a second consecutive double-failure is a
+      // real signal and still blocks below.
+      try {
+        const retried = await attemptDecide();
+        return { value: retried.value, usage: retried.usage };
+      } catch {
+        // fall through to the terminal block with the FIRST error (the second
+        // is usually the same signature and the first names the original sin).
+      }
       const reason = err instanceof Error ? err.message : String(err);
       const block: Decision = {
         kind: 'block',

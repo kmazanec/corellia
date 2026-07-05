@@ -180,12 +180,30 @@ describe('LlmBrain.decide', () => {
     expect(result.value.brief.onTimeout).toBe('park');
   });
 
-  it('re-asks when a block decision brief is malformed', async () => {
+  it('accepts a block brief with only a question, filling the defaultable fields', async () => {
     const { fetch, calls } = stubFetch(
       chatResponse(JSON.stringify({
         kind: 'block',
-        brief: { question: 'missing required fields', options: ['deny'], links: [], deadlineMs: 1000 },
+        brief: { question: 'What should happen with X?' },
       })),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(calls).toHaveLength(1);
+    expect(result.value.kind).toBe('block');
+    if (result.value.kind !== 'block') throw new Error('expected block');
+    expect(result.value.brief).toMatchObject({
+      question: 'What should happen with X?',
+      options: ['deny', 'park', 'bounce'],
+      links: [],
+      deadlineMs: 30_000,
+      onTimeout: 'deny',
+    });
+  });
+
+  it('re-asks when a block decision has no brief at all', async () => {
+    const { fetch, calls } = stubFetch(
+      chatResponse(JSON.stringify({ kind: 'block' })),
       chatResponse(JSON.stringify({
         kind: 'block',
         brief: {
@@ -203,6 +221,27 @@ describe('LlmBrain.decide', () => {
     expect(result.value.kind).toBe('block');
     if (result.value.kind !== 'block') throw new Error('expected block');
     expect(result.value.brief.question).toBe('Valid now?');
+  });
+
+  it('retries the whole decide once when both first-round responses are payload-less', async () => {
+    // Two schema-minimal responses in a row ({"kind":"block"} with no brief)
+    // exhaust callJson's parse+re-ask round; a single fresh attempt then
+    // recovers a real decision instead of killing the tree at the root decide
+    // (live-tail runs 4 and 5, 2026-07-01).
+    const { fetch, calls } = stubFetch(
+      chatResponse(JSON.stringify({ kind: 'block' })),
+      chatResponse(JSON.stringify({ kind: 'block' })),
+      chatResponse(JSON.stringify({
+        kind: 'block',
+        brief: { question: 'Recovered on the fresh attempt' },
+      })),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.decide(baseGoal, ctxSonnet);
+    expect(calls).toHaveLength(3);
+    expect(result.value.kind).toBe('block');
+    if (result.value.kind !== 'block') throw new Error('expected block');
+    expect(result.value.brief.question).toBe('Recovered on the fresh attempt');
   });
 
   it('treats a split with no children array as satisfy (not a hard error)', async () => {
