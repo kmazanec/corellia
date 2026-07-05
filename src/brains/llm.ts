@@ -1470,11 +1470,38 @@ export class LlmBrain implements Brain {
           `Set pass=false and add a gating finding whenever the artifact fails the rubric.`,
       },
     ];
-    const result = await this.callJson(model, messages, parseVerdict, {
-      schemaName: 'verdict',
-      schema: VERDICT_SCHEMA,
-    }, ctx.tier);
-    return { value: result.value, usage: result.usage };
+    // A judge that cannot produce a parseable verdict must FAIL the subject,
+    // not crash the tree — the same degrade posture as decide's block fallback.
+    // An uncaught throw here propagated through judgeSplitDecision → the
+    // recursive runner and killed a whole commission at the root (live-tail
+    // run 6, 2026-07-05: empty judge output → "Unexpected end of JSON input").
+    // A fail verdict is the safe direction: unverified work never passes, and
+    // the isomorphic-failure detector bounds repeated unparseable verdicts.
+    try {
+      const result = await this.callJson(model, messages, parseVerdict, {
+        schemaName: 'verdict',
+        schema: VERDICT_SCHEMA,
+      }, ctx.tier);
+      return { value: result.value, usage: result.usage };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      const verdict: Verdict = {
+        pass: false,
+        findings: [
+          {
+            title: 'Judge produced no parseable verdict',
+            dimension: 'spec',
+            severity: 'high',
+            gating: true,
+            prescription:
+              `The judge's output could not be parsed (${reason}); the subject was not evaluated. ` +
+              `Re-attempt or escalate — do not treat this as a judgement on the artifact's quality.`,
+          },
+        ],
+        failureSignature: 'judge-verdict-unparseable',
+      };
+      return { value: verdict, usage: ZERO_USAGE };
+    }
   }
 
   async repair(

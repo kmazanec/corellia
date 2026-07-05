@@ -827,6 +827,21 @@ describe('LlmBrain.judge', () => {
     expect(result.value.failureSignature).toBe('sig-abc');
   });
 
+  it('degrades to a gating FAIL verdict when the judge output never parses (no throw)', async () => {
+    // Regression (live-tail run 6, 2026-07-05): empty judge output on both the
+    // first call and the re-ask threw "Unexpected end of JSON input" out of
+    // brain.judge, which propagated uncaught through judgeSplitDecision and
+    // crashed the whole tree at the root decide.
+    const { fetch, calls } = stubFetch(chatResponse(''), chatResponse(''));
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.judge(baseGoal, subject, 'rubric', ctxSonnet);
+    expect(calls).toHaveLength(2);
+    expect(result.value.pass).toBe(false);
+    expect(result.value.failureSignature).toBe('judge-verdict-unparseable');
+    expect(result.value.findings[0]?.gating).toBe(true);
+    expect(result.value.findings[0]?.title).toContain('no parseable verdict');
+  });
+
   it('retries on parse failure and succeeds', async () => {
     const good = { pass: true, findings: [] };
     const { fetch, calls } = stubFetch(
@@ -839,10 +854,12 @@ describe('LlmBrain.judge', () => {
     expect(calls).toHaveLength(2);
   });
 
-  it('throws after two consecutive parse failures', async () => {
+  it('degrades (never throws) after two consecutive parse failures', async () => {
     const { fetch } = stubFetch(chatResponse('bad'), chatResponse('also bad'));
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
-    await expect(brain.judge(baseGoal, subject, 'rubric', ctxSonnet)).rejects.toThrow();
+    const result = await brain.judge(baseGoal, subject, 'rubric', ctxSonnet);
+    expect(result.value.pass).toBe(false);
+    expect(result.value.failureSignature).toBe('judge-verdict-unparseable');
   });
 
   it('includes the rubric in the request', async () => {
