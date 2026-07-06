@@ -75,6 +75,7 @@ describe('split round runner', () => {
       store,
       now: () => 42,
       activeRepoRoot: undefined,
+      worktree: undefined,
       factsForRegions: undefined,
       headSha: undefined,
       checkContext: undefined,
@@ -144,6 +145,7 @@ describe('split round runner', () => {
       store,
       now: () => 42,
       activeRepoRoot: undefined,
+      worktree: undefined,
       factsForRegions: undefined,
       headSha: undefined,
       checkContext: undefined,
@@ -153,5 +155,61 @@ describe('split round runner', () => {
 
     expect(round.report.blockers).toEqual(['Integration eval failed: missing integration']);
     expect(round.report.findings).toEqual(['Integration eval failed: missing integration']);
+  });
+});
+
+describe('worktree-derived merged artifact', () => {
+  it('derives the merged files artifact from the worktree state, not child emissions', async () => {
+    const { mkdtempSync, writeFileSync, mkdirSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { execFileSync } = await import('node:child_process');
+
+    const repo = mkdtempSync(join(tmpdir(), 'corellia-round-wt-'));
+    try {
+      execFileSync('git', ['init'], { cwd: repo, stdio: 'pipe' });
+      execFileSync('git', ['config', 'user.email', 't@t'], { cwd: repo, stdio: 'pipe' });
+      execFileSync('git', ['config', 'user.name', 't'], { cwd: repo, stdio: 'pipe' });
+      writeFileSync(join(repo, 'README.md'), '# base\n');
+      execFileSync('git', ['add', '--all'], { cwd: repo, stdio: 'pipe' });
+      execFileSync('git', ['commit', '-m', 'init'], { cwd: repo, stdio: 'pipe' });
+      const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, stdio: 'pipe', encoding: 'utf-8' }).trim();
+
+      // The tree's ACTUAL state: one authoritative version of the file.
+      mkdirSync(join(repo, 'src'), { recursive: true });
+      writeFileSync(join(repo, 'src', 'tool.ts'), 'export const CURRENT = true;\n');
+
+      const store = new MemoryEventStore();
+      const registry = buildRegistry([nonLeafTypeDef({ name: 'splitter' })]);
+
+      const round = await runSplitRound({
+        goal: makeGoal({ id: 'root', type: 'splitter' }),
+        children: [child({ localId: 'a' })],
+        memory: new NoopMemoryView(),
+        registry,
+        brain: unusedBrain,
+        goldenCapture: false,
+        store,
+        now: () => 42,
+        activeRepoRoot: repo,
+        worktree: { treeId: 't1', branch: 'tree/t1', root: repo, repoRoot: repo, goalId: 'root', baseSha },
+        factsForRegions: undefined,
+        headSha: undefined,
+        checkContext: undefined,
+        persist: async () => {},
+        // The child emitted a STALE version of the same file — the worktree wins.
+        runChild: async () => report({
+          artifact: { kind: 'files', files: [{ path: 'src/tool.ts', content: 'export const STALE = true;\n' }] },
+        }),
+      });
+
+      expect(round.mergedArtifact?.kind).toBe('files');
+      const byPath = new Map((round.mergedArtifact?.files ?? []).map((f) => [f.path, f.content]));
+      expect(byPath.get('src/tool.ts')).toBe('export const CURRENT = true;\n');
+      // Exactly one version per path — no conflicting duplicates.
+      expect((round.mergedArtifact?.files ?? []).filter((f) => f.path === 'src/tool.ts')).toHaveLength(1);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });

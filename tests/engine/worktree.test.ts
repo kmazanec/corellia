@@ -18,6 +18,7 @@ import {
   collectTree,
   preserveTree,
   sanitizeTreeId,
+  worktreeFilesArtifact,
 } from '../../src/engine/worktree.js';
 
 // ---------------------------------------------------------------------------
@@ -707,5 +708,44 @@ describe('rename-out-of-scope', () => {
       { treeId: wt.treeId, branch: wt.branch, root: wt.root, repoRoot: repo, goalId: 'rename-goal' },
       store,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// worktreeFilesArtifact — the tree's delivered state as a files artifact
+// ---------------------------------------------------------------------------
+
+describe('worktreeFilesArtifact', () => {
+  it('returns committed, uncommitted, and untracked changes at their CURRENT content', () => {
+    const repo = makeTempRepo();
+    const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, stdio: 'pipe', encoding: 'utf-8' }).trim();
+
+    // Committed round work.
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    writeFileSync(join(repo, 'src', 'a.ts'), 'export const a = 1;\n');
+    execFileSync('git', ['add', '--all'], { cwd: repo, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'round 0'], { cwd: repo, stdio: 'pipe' });
+    // Then edited again WITHOUT committing — current content must win.
+    writeFileSync(join(repo, 'src', 'a.ts'), 'export const a = 2;\n');
+    // Untracked salvage-style work.
+    writeFileSync(join(repo, 'src', 'b.ts'), 'export const b = 1;\n');
+
+    const artifact = worktreeFilesArtifact(repo, baseSha);
+    expect(artifact?.kind).toBe('files');
+    const byPath = new Map((artifact?.files ?? []).map((f) => [f.path, f.content]));
+    expect(byPath.get('src/a.ts')).toBe('export const a = 2;\n');
+    expect(byPath.get('src/b.ts')).toBe('export const b = 1;\n');
+    expect(byPath.has('README.md')).toBe(false); // unchanged since base
+  });
+
+  it('returns null for a clean tree and skips deleted files', () => {
+    const repo = makeTempRepo();
+    const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, stdio: 'pipe', encoding: 'utf-8' }).trim();
+    expect(worktreeFilesArtifact(repo, baseSha)).toBeNull();
+
+    // A deletion committed since base cannot appear in a files artifact.
+    execFileSync('git', ['rm', 'README.md'], { cwd: repo, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'delete readme'], { cwd: repo, stdio: 'pipe' });
+    expect(worktreeFilesArtifact(repo, baseSha)).toBeNull();
   });
 });

@@ -21,6 +21,7 @@ import {
   mergeComprehendChildArtifacts,
   mergeGenericChildArtifacts,
 } from './split-integration.js';
+import { worktreeFilesArtifact, type TreeWorktree } from './worktree.js';
 
 export interface SplitRoundResult {
   report: Report;
@@ -40,6 +41,7 @@ export async function runSplitRound(params: {
   store: EventStore;
   now: () => number;
   activeRepoRoot: string | undefined;
+  worktree: TreeWorktree | undefined;
   factsForRegions: FactsForRegions | undefined;
   headSha: ((repoRoot: string) => Promise<string>) | undefined;
   checkContext: CheckContext | undefined;
@@ -85,10 +87,21 @@ export async function runSplitRound(params: {
     now: params.now,
     persist: params.persist,
   });
+  // For a sandboxed tree the WORKTREE is the delivered state: rounds commit as
+  // they go and salvage preserves partial work, so child emissions understate
+  // (and can double-ship) what the branch actually carries. Derive the merged
+  // files artifact from the tree's changed files — one content per path — so
+  // the integration/acceptance judges assess what was actually delivered.
+  // Comprehend merges (knowledge artifacts) and worktree-less trees keep the
+  // emission-derived merge.
+  const worktreeDerived =
+    comprehendMerge.kind === 'skipped' && params.worktree !== undefined
+      ? worktreeFilesArtifact(params.worktree.root, params.worktree.baseSha)
+      : null;
   const mergedArtifact =
     comprehendMerge.kind === 'handled'
       ? comprehendMerge.mergedArtifact
-      : mergeGenericChildArtifacts(childReports);
+      : worktreeDerived ?? mergeGenericChildArtifacts(childReports);
   const comprehendFindings =
     comprehendMerge.kind === 'handled' ? comprehendMerge.findings : [];
   const comprehendBlockers =

@@ -67,6 +67,7 @@ export function createSplitRunner(deps: {
       store: deps.store,
       now: deps.now,
       activeRepoRoot: deps.activeWorktree()?.repoRoot,
+      worktree: deps.activeWorktree(),
       factsForRegions: deps.factsForRegions,
       headSha: deps.headSha,
       checkContext: deps.checkContextFor(goal.id),

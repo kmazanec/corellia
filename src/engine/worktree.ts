@@ -13,6 +13,7 @@ import { existsSync, symlinkSync, readFileSync, writeFileSync, mkdirSync, statSy
 import { join, normalize, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { EventStore } from '../contract/events.js';
+import type { Artifact } from '../contract/report.js';
 import { isInScope } from './tools.js';
 
 // ---------------------------------------------------------------------------
@@ -374,6 +375,58 @@ export function treeDiffWithinScope(
   }
 
   return { ok: true, changedCount: inScope };
+}
+
+/**
+ * Derive a `files` artifact from the tree's ACTUAL delivered state: every file
+ * changed since the worktree's base sha (committed rounds, uncommitted edits,
+ * and untracked files), each read once at its current content.
+ *
+ * This is the fix for the worktree-invisible-to-judges gap: milestone rounds
+ * commit as they go and salvage preserves partial work, so the emitted
+ * artifacts stop reflecting the branch — the integration/acceptance judges
+ * then fail real, delivered files as "missing" (live-tail run 7: the branch
+ * carried the complete deliverable while the judge read a stale artifact), and
+ * a naive concatenation of child emissions ships conflicting versions of the
+ * same path. One content per path, from the working tree, is authoritative.
+ *
+ * Deleted files cannot be represented in a `files` artifact and are skipped;
+ * dependency links are excluded as in `treeDiffWithinScope`. Returns null when
+ * nothing changed since base (callers fall back to the emission-derived merge).
+ */
+export function worktreeFilesArtifact(worktreeRoot: string, baseSha: string): Artifact | null {
+  const gitLines = (args: string[]): string[] => {
+    try {
+      return execFileSync('git', ['-C', worktreeRoot, ...args], { stdio: 'pipe', encoding: 'utf-8' })
+        .trim().split('\n').map((s) => s.trim()).filter(Boolean);
+    } catch {
+      return [];
+    }
+  };
+  const DEP_LINKS = ['node_modules', '.venv'];
+  const isDepLink = (p: string): boolean =>
+    DEP_LINKS.some((d) => p === d || p.startsWith(`${d}/`));
+
+  const committed = baseSha ? gitLines(['diff', '--name-only', `${baseSha}..HEAD`]) : [];
+  const uncommittedTracked = gitLines(['diff', '--name-only', 'HEAD']);
+  const untracked = gitLines(['ls-files', '--others', '--exclude-standard']);
+
+  const paths = new Set<string>();
+  for (const p of [...committed, ...uncommittedTracked, ...untracked]) {
+    if (!isDepLink(p) && !isAbsolute(p) && !normalize(p).startsWith('..')) paths.add(p);
+  }
+
+  const files: { path: string; content: string }[] = [];
+  for (const path of [...paths].sort()) {
+    try {
+      files.push({ path, content: readFileSync(join(worktreeRoot, path), 'utf-8') });
+    } catch {
+      // Deleted (or unreadable) since base — a files artifact cannot carry a
+      // deletion; the scope gate polices the diff itself.
+    }
+  }
+
+  return files.length > 0 ? { kind: 'files', files } : null;
 }
 
 // ---------------------------------------------------------------------------
