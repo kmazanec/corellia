@@ -35,7 +35,8 @@ import { fileIssueTool } from './issue-tools.js';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
-import { openTreeWorktree, type TreeWorktree } from './worktree.js';
+import { openTreeWorktree, sanitizeTreeId, type TreeWorktree } from './worktree.js';
+import { reapTreeWorktrees } from './worktree-reaper.js';
 import { retrievalTools, type RetrievalDeps } from '../library/retrieval.js';
 import { scanImports } from '../library/imports.js';
 import { projectKnowledge } from '../eventlog/projections.js';
@@ -223,6 +224,21 @@ export async function openSandboxAssembly(
   store: EventStore,
   now: () => number = () => Date.now(),
 ): Promise<SandboxAssembly> {
+  // Reap stale tree worktrees before opening this run's. The default pass removes
+  // only worktrees whose branch is fully merged into the current branch (their
+  // commits are already in history) and never touches uncommitted salvage;
+  // CORELLIA_REAP_WORKTREES=1 additionally clears clean-but-unmerged trees. The
+  // worktree about to be opened is marked active so it is never a target.
+  const reapAll = process.env['CORELLIA_REAP_WORKTREES'] === '1';
+  const activePath = join(config.repoRoot, '.corellia', 'worktrees', sanitizeTreeId(rootGoalId));
+  const reaped = await reapTreeWorktrees(config.repoRoot, store, { reapAll, activePath, now });
+  if (reaped.reaped.length > 0 || reaped.skipped.length > 0) {
+    console.log(
+      `[corellia] worktree reaper: removed ${reaped.reaped.length}, kept ${reaped.skipped.length}` +
+        (reaped.skipped.length > 0 ? ` (kept: ${reaped.skipped.map((s) => s.reason).join('; ')})` : ''),
+    );
+  }
+
   const { treeId, branch, root, baseSha } = await openTreeWorktree(config.repoRoot, rootGoalId, store);
 
   const worktree: TreeWorktree = {

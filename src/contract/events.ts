@@ -77,6 +77,13 @@ export type FactoryEvent =
   | { type: 'worktree-collected'; at: number; goalId: string; treeId: string; branch: string; commits: string[] }
   /** A tree's worktree was preserved (not torn down) for the stated reason. */
   | { type: 'worktree-preserved'; at: number; goalId: string; treeId: string; branch: string; path: string; reason: string }
+  /**
+   * A stale tree worktree was reaped (removed) by the maintenance reaper (D4).
+   * `goalId` is the synthetic maintenance actor 'worktree-reaper' — the reaper
+   * works from `git worktree list`, not a live goal. `branch` is absent when the
+   * worktree had no branch checked out.
+   */
+  | { type: 'worktree-reaped'; at: number; goalId: string; path: string; branch?: string; reason: string }
   /** A produce call completed, carrying its provider-reported usage. */
   | { type: 'produced'; at: number; goalId: string; usage: Usage }
   /** Measured tree spend reached the dollar ceiling — the tree halts. */

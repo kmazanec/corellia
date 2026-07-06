@@ -32,6 +32,7 @@ const EVENT_TYPES = new Set([
   'worktree-created',
   'worktree-collected',
   'worktree-preserved',
+  'worktree-reaped',
   'produced',
   'ceiling-reached',
   'transport-retry',
@@ -137,6 +138,8 @@ const EVENT_VALIDATORS = {
     hasString(event, 'branch') &&
     hasString(event, 'path') &&
     hasString(event, 'reason'),
+  'worktree-reaped': (event) =>
+    hasString(event, 'path') && hasOptionalString(event, 'branch') && hasString(event, 'reason'),
   produced: (event) => hasObject(event, 'usage'),
   'ceiling-reached': (event) => hasFiniteNumber(event, 'spentUsd') && hasFiniteNumber(event, 'ceilingUsd'),
   'transport-retry': hasDetail,
