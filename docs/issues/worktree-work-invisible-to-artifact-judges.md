@@ -4,7 +4,7 @@ title: "work delivered in the worktree is invisible to artifact-reading judges a
 description: An attempt's write_file output (including work salvaged from a wall-clock-denied sibling) lives in the tree worktree, but the merged files artifact only carries what a later attempt happened to re-emit — so judge-acceptance failed a run for "missing" files that were sitting, real and correct, in the worktree.
 tags: [engine, artifact, worktree, salvage, judge, acceptance, milestone-loop, integrate-merge]
 timestamp: 2026-07-01
-status: open
+status: fixed-pending-live-proof
 kind: bug
 severity: high
 ---
@@ -63,6 +63,13 @@ that existed in the worktree.
 > The deterministic floor and the judge now read DIFFERENT worlds; the judge
 > must be given the branch diff (or a worktree-derived artifact), same
 > direction as proposed below.
+
+> **Fixed (2026-07-06, commit 2fe149c) — pending live proof.** For a sandboxed
+> tree the merged files artifact is now derived from the worktree's changed
+> files vs the base sha (committed rounds + uncommitted + untracked, one
+> authoritative content per path) in `runSplitRound`, so the integration and
+> acceptance judges assess the delivered state. Run 9's judge-integration
+> passed on exactly this input.
 
 ## Proposed direction
 

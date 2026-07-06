@@ -14,6 +14,21 @@ the [iteration](iterations/index.md) or [ADR](adrs/index.md) that owns the detai
 This file replaces the former `STATUS.md`. Forward strategy is no longer a
 standalone roadmap — it lives as open issues.
 
+## 2026-07-06
+
+- **Live-tail commission runs 8–9 + the transport-failure fix wave.** The
+  judge-input fix landed (judges now assess the worktree's delivered state —
+  the merged files artifact derives from the branch diff, one authoritative
+  content per path). Run 9 validated it: characterize, implement,
+  judge-integration ("finished-run view unchanged"), and open-pr all passed;
+  what killed the root was provider flakiness — step-loop timeouts and empty
+  judge responses isomorphic-blocking. Fixed:
+  `provider-timeout-isomorphic-block` (transport failures classify as
+  `transport`, never isomorphic-block, and non-convergence blocks carry their
+  cause), plus empty LLM responses fall back to the mid model. The
+  worktree-invisible issue's judge half is now closed in code; both issues are
+  pending live re-proof.
+
 ## 2026-07-05
 
 - **Live-tail commission runs 4–7** (folded into

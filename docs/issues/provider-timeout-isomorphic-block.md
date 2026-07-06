@@ -4,7 +4,7 @@ title: "a transient provider timeout repeats the same failure signature and is e
 description: A step-loop LLM request that aborts on timeout produces the identical failure signature ("step-loop:failed") on retry, so the isomorphic-failure detector reads a transient infrastructure fault as "the model keeps making the same mistake" and blocks the goal instead of backing off and retrying.
 tags: [engine, brain, retry, isomorphic-failure, timeout, robustness, step-loop]
 timestamp: 2026-07-01
-status: open
+status: fixed-pending-live-proof
 kind: bug
 severity: medium
 ---
@@ -37,6 +37,16 @@ and `pr`. Events under `out/commission-observability-live-tail/`.
 > hard-blocked, cascading into three dependent blockers on the root report —
 > in a run that was otherwise one flaky test away from passing its acceptance
 > bar.
+>
+> **Fixed (2026-07-06, commit cd0d24a) — pending live proof.** Three changes:
+> raw abort/timeout errors escaping unwrapped paths now classify as
+> `transport`; `step-loop:transport` is exempt from the isomorphic check (the
+> attempt budget and tier ladder bound the retries — each rung is a different
+> model, which IS the retry-on-a-different-endpoint); and the non-convergence
+> block carries the last verdict's findings so a timeout-caused block names
+> its cause. Related same-day fix: an EMPTY LLM response now falls back to the
+> mid model in `callJson` (run 8: four consecutive empty judge responses from
+> the high tier isomorphic-blocked the tree).
 
 ## Proposed direction
 
