@@ -24,7 +24,7 @@ import { ZERO_USAGE } from '../contract/goal.js';
 import type { Tier } from '../contract/goal.js';
 import type { MemoryPointer } from '../contract/goal.js';
 import type { ModelSpec } from './model-catalog.js';
-import { resolveModel } from './model-catalog.js';
+import { resolveModel, satisfiesNeeds } from './model-catalog.js';
 import type { Decision, ChildPlan, DecisionBrief } from '../contract/decision.js';
 import type { Artifact } from '../contract/report.js';
 import type { ToolDef, ToolCall } from '../contract/tool.js';
@@ -1195,14 +1195,24 @@ export class LlmBrain implements Brain {
 
   /**
    * Resolve a call's concrete {@link ResolvedModel} from its tier band and needs.
-   * The catalog picks the model ({@link resolveModel}); the resolved spec's
-   * optional `endpoint`, `provider`, and `requestTimeoutMs` override the brain's
-   * defaults. `provider` falls back to the legacy per-tier `providerByTier`, and
-   * the timeout falls back to {@link requestTimeoutMsForTier} — so a spec that
-   * pins nothing behaves exactly as the pre-catalog config did.
+   *
+   * Pin precedence: `modelByTier[tier]` is the band's PIN (`CORELLIA_MODEL_<BAND>`,
+   * or the banded-default that `openRouterConfig` fills for an unset band). When
+   * that pinned id is a catalog entry AND satisfies the call's needs, it wins
+   * outright — an operator's explicit pin is authoritative, not a mere ranking
+   * input. Only when the pin is absent from the catalog or FAILS the needs (e.g.
+   * a vision call against a non-vision pin) does resolution fall through to
+   * {@link resolveModel} (cheapest satisfying in band, upward fallback). Because
+   * an unset band's pin already IS its cheapest-in-band default, no-pin behaviour
+   * is unchanged.
+   *
+   * The chosen spec's optional `endpoint`, `provider`, and `requestTimeoutMs`
+   * override the brain's defaults; `provider` falls back to the legacy per-tier
+   * `providerByTier`, and the timeout to {@link requestTimeoutMsForTier} — so a
+   * spec that pins nothing behaves exactly as the pre-catalog config did.
    */
   private resolve(tier: Tier, needs: ModelNeeds | undefined): ResolvedModel {
-    const spec = resolveModel(tier, needs, this.modelCatalog);
+    const spec = this.pickSpec(tier, needs);
     const baseUrl = spec.endpoint?.baseUrl ?? this.config.baseUrl;
     // A per-model endpoint may carry its own key env var (a local model usually
     // needs none). Fall back to the brain's default key for the default endpoint.
@@ -1213,6 +1223,18 @@ export class LlmBrain implements Brain {
     const provider = spec.provider ?? this.config.providerByTier?.[tier];
     const requestTimeoutMs = spec.requestTimeoutMs ?? requestTimeoutMsForTier(this.config, tier);
     return { model: spec.id, baseUrl, apiKey, provider, requestTimeoutMs };
+  }
+
+  /**
+   * Choose the {@link ModelSpec} for a band, honouring the pin first. Returns the
+   * pinned spec when it exists in the catalog and satisfies the needs; otherwise
+   * defers to {@link resolveModel}. See {@link resolve} for the precedence rationale.
+   */
+  private pickSpec(tier: Tier, needs: ModelNeeds | undefined): ModelSpec {
+    const pinnedId = this.config.modelByTier[tier];
+    const pinned = this.modelCatalog.find((s) => s.id === pinnedId);
+    if (pinned && satisfiesNeeds(pinned, needs)) return pinned;
+    return resolveModel(tier, needs, this.modelCatalog);
   }
 
   // -------------------------------------------------------------------------

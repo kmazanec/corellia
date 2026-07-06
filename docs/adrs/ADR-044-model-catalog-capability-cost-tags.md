@@ -64,6 +64,16 @@ is never served by a lower band — and throws when nothing from the demanded ba
 up satisfies, rather than silently degrading. Ties break by higher capability then
 id, so resolution is fully deterministic.
 
+**Pin precedence in the brain.** Before consulting `resolveModel`, `LlmBrain`
+honours the band's PIN (`modelByTier[tier]` — a `CORELLIA_MODEL_<BAND>` value, or
+the banded-default `openRouterConfig` fills for an unset band): when the pinned id
+is a catalog entry AND satisfies the call's needs, it wins outright. An operator's
+explicit pin is authoritative — it must not lose to a cheaper model on ranking.
+Only an absent-from-catalog or needs-violating pin (e.g. a vision call against a
+non-vision pin) falls through to `resolveModel`, so needs-driven rerouting still
+works. Because an unset band's pin already *is* its cheapest-in-band default,
+no-pin behaviour is identical either way.
+
 **4. `needs` flows through `BrainContext`.** `ModelNeeds` lives in the contract
 (`src/contract/goal.ts`) beside `Tier`; `BrainContext.needs` is optional and
 default-absent. The brain resolves `(ctx.tier, ctx.needs)` per call. The vision

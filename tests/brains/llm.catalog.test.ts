@@ -75,24 +75,64 @@ const cfg = (over: Partial<LlmBrainConfig>): LlmBrainConfig => ({
   ...over,
 });
 
-describe('LlmBrain catalog resolution — model id on the wire', () => {
-  it('produce uses the catalog-resolved model id for the tier band, not modelByTier', async () => {
+describe('LlmBrain catalog resolution — pin precedence', () => {
+  it('a pin present in the catalog and satisfying needs wins over cheapest-in-band', async () => {
     const { fetch, calls } = stubFetch(chatResponse('done'));
     const brain = new LlmBrain(
       cfg({
         fetchImpl: fetch,
+        // modelByTier.mid pins 'mid/dear'; 'mid/cheap' is cheaper in the same band.
+        modelByTier: { low: 'legacy-low', mid: 'mid/dear', high: 'legacy-high' },
+        catalog: catalog(
+          baseSpec({ id: 'mid/cheap', capability: 5, costInPerMtok: 0.1, costOutPerMtok: 0.1 }),
+          baseSpec({ id: 'mid/dear', capability: 5, costInPerMtok: 9, costOutPerMtok: 9 }),
+        ),
+      }),
+    );
+    await brain.produce(baseGoal, { tier: 'mid', memories: [] });
+    const body = JSON.parse(calls[0]!.options.body as string);
+    expect(body.model).toBe('mid/dear'); // the pin, not the cheaper model
+  });
+
+  it('a needs-violating pin falls through to catalog resolution', async () => {
+    const { fetch, calls } = stubFetch(chatResponse(JSON.stringify({ pass: true, findings: [] })));
+    const brain = new LlmBrain(
+      cfg({
+        fetchImpl: fetch,
+        // Pin a NON-vision model; a vision need must bypass it, not honour it.
+        modelByTier: { low: 'legacy-low', mid: 'mid/blind-pin', high: 'legacy-high' },
+        catalog: catalog(
+          baseSpec({ id: 'mid/blind-pin', capability: 5, vision: false }),
+          baseSpec({ id: 'high/sees', capability: 8, vision: true }),
+        ),
+      }),
+    );
+    const ctx: BrainContext = { tier: 'mid', memories: [], needs: { vision: true } };
+    const artifact = { kind: 'files' as const, files: [{ path: 'x', content: 'y' }] };
+    await brain.judge(baseGoal, artifact, 'rubric', ctx);
+    const body = JSON.parse(calls[0]!.options.body as string);
+    expect(body.model).toBe('high/sees'); // pin failed needs → resolveModel took over
+  });
+
+  it('falls through to cheapest-in-band when the pin is not a catalog entry', async () => {
+    const { fetch, calls } = stubFetch(chatResponse('done'));
+    const brain = new LlmBrain(
+      cfg({
+        fetchImpl: fetch,
+        // modelByTier.mid ('legacy-mid') is absent from the catalog → no pin to honour.
         catalog: catalog(
           baseSpec({ id: 'mid/pick', capability: 5 }),
           baseSpec({ id: 'high/pick', capability: 9 }),
         ),
       }),
     );
-    const ctx: BrainContext = { tier: 'mid', memories: [] };
-    await brain.produce(baseGoal, ctx);
+    await brain.produce(baseGoal, { tier: 'mid', memories: [] });
     const body = JSON.parse(calls[0]!.options.body as string);
     expect(body.model).toBe('mid/pick');
   });
+});
 
+describe('LlmBrain catalog resolution — model id on the wire', () => {
   it('routes a vision need to the vision-capable model even when it bands above', async () => {
     const { fetch, calls } = stubFetch(chatResponse(JSON.stringify({ pass: true, findings: [] })));
     const brain = new LlmBrain(
