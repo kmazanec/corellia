@@ -114,6 +114,12 @@ export function describeEvent(e: FactoryEvent): string | null {
       return `produced (${e.usage.promptTokens}+${e.usage.completionTokens} tok)`;
     case 'golden-candidate':
       return `golden-candidate: ${e.judgeType} (${e.verdictPass ? 'pass' : 'fail'})`;
+    case 'worktree-reaped':
+      return `worktree-reaped: ${e.path}${e.branch ? ` (${e.branch})` : ''} — ${e.reason}`;
+    case 'files-touched': {
+      const out = e.files.filter((f) => !f.inScope).length;
+      return `files-touched: ${e.files.length} file(s)${out > 0 ? `, ${out} OUT OF SCOPE` : ', all in scope'}`;
+    }
   }
 }
 
