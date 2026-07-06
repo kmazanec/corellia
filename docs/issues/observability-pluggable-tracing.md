@@ -4,10 +4,55 @@ title: "Pluggable observability: an EventSink fan-out (LangSmith-first) + a `cor
 description: Fan the event log out to external tracing backends via a thin EventSink interface (LangSmith first, OTLP/generic as follow-ons), and add a `corellia logs --follow` CLI for local ergonomics — both reading the existing event log without changing it as the source of truth.
 tags: [observability, eventlog, daemon, cli, tracing, langsmith, otel, dx]
 timestamp: 2026-06-25
-status: open
+status: partially-fixed
 kind: idea
 severity: medium
 ---
+
+## Update 2026-07-06 — Part 2 shipped, Part 1 seam shipped, vendor adapters open
+
+Built on `feat/observability` (off `feat/cloud-ready`). Status: **partially-fixed**.
+
+**Shipped — Part 2, the `corellia logs` CLI (in full).**
+- A `corellia` CLI binary + dispatcher: `package.json` `bin.corellia` →
+  `scripts/corellia.ts`, a tiny subcommand router (each subcommand owns its
+  behavior in a `src/` module). Scripts: `npm run corellia`, `npm run logs`.
+- `corellia logs [path]` — replay: goal tree + per-goal detail (+ `--cost`),
+  reusing the projections (`renderTree`/`costSummary`); `scripts/trace.ts` is now
+  a thin adapter over the shared `src/eventlog/render.ts` (no duplicated describe
+  logic).
+- `corellia logs --follow` / `-f` — the live tail: `src/eventlog/tail.ts` does
+  offset-tracked incremental JSONL reads with `fs.watch` + a polling fallback and
+  partial-line carry (a half-written append is reassembled, never dropped;
+  a shrunk file resets to offset 0). Renders compact one-liners
+  (`HH:MM:SS  <goal>  <detail>` carrying tier / tool / verdict / block reason)
+  with an optional `--tree` snapshot on each new goal. Honors
+  `CORELLIA_EVENTS_PATH`. PG follow is declined honestly when `DATABASE_URL` is
+  set ("requires the JSONL store").
+- Filters: `--goal <substr>`, `--type <evt>` — dependency-free parsing (no yargs).
+
+**Shipped — Part 1, the EventSink fan-out *seam* (not the vendor adapters).**
+- `interface EventSink { emit(event); flush?() }` in `src/contract/events.ts`
+  beside `EventStore`.
+- `SinkFanoutStore` (`src/eventlog/sink-fanout-store.ts`): a thin store decorator
+  — appends to the inner store, then calls each sink's `emit` inside `try/catch`.
+  A throwing sink NEVER breaks the append (durability held; ADR-003). Zero change
+  to `JsonlEventStore`/`PgEventStore`.
+- Wired in `src/daemon/config.ts` `buildStore()`: reads env, wraps the concrete
+  store only when ≥1 sink is registered (no behavior change when none).
+- ONE concrete sink ships: `StdoutSink` (ndjson) behind `CORELLIA_SINK_STDOUT=1`,
+  proving the seam end-to-end with no vendor dep.
+- The neutral **event → span mapping** (goal = span/run, child-spawned = child,
+  tool-call/decided/judge-verdict = step events, usage = tokens, blocked = error)
+  is specified in `docs/observability.md`, enough that the LangSmith and OTLP
+  adapters are mechanical.
+
+**Still open (vendor adapters).** The LangSmith adapter (gated on
+`LANGSMITH_API_KEY`) and the OTLP/generic adapter are specified in
+`docs/observability.md` but NOT implemented — no SDK deps were added (ADR-001).
+They register in `buildStore()` the same way `StdoutSink` does. The acceptance
+hint's "a daemon run with `LANGSMITH_API_KEY` produces a LangSmith trace" remains
+to be built and proven against a live backend.
 
 # Pluggable observability: an EventSink fan-out (LangSmith-first) + a `corellia logs` CLI
 

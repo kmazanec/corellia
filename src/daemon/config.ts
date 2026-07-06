@@ -14,7 +14,9 @@
 import { join } from 'node:path';
 import { JsonlEventStore } from '../eventlog/jsonl-store.js';
 import { PgEventStore } from '../substrate/pg-event-store.js';
-import type { EventStore } from '../contract/events.js';
+import { SinkFanoutStore } from '../eventlog/sink-fanout-store.js';
+import { StdoutSink } from '../eventlog/stdout-sink.js';
+import type { EventSink, EventStore } from '../contract/events.js';
 import type { StandingEnvelope } from '../contract/brief.js';
 
 // ── Substrate ──────────────────────────────────────────────────────────────
@@ -34,11 +36,13 @@ export interface StoreHandle {
  * F-67 seam: import buildStore() here instead of from daemon.ts.
  */
 export function buildStore(): StoreHandle {
+  const sinks = buildSinks();
+
   const dbUrl = process.env['DATABASE_URL'];
   if (dbUrl) {
     const pg = new PgEventStore(dbUrl);
     return {
-      store: pg,
+      store: wrapWithSinks(pg, sinks),
       close: () => pg.close(),
     };
   }
@@ -47,9 +51,32 @@ export function buildStore(): StoreHandle {
     process.env['CORELLIA_EVENTS_PATH'] ?? join(process.cwd(), 'out', 'events.jsonl');
   const jsonl = new JsonlEventStore(eventsPath);
   return {
-    store: jsonl,
+    store: wrapWithSinks(jsonl, sinks),
     close: () => Promise.resolve(),
   };
+}
+
+/**
+ * Register the optional export sinks from the environment. Ships one concrete
+ * sink — the ndjson debug sink (CORELLIA_SINK_STDOUT) — proving the fan-out seam;
+ * the LangSmith / OTLP adapters are the documented follow-ons (docs/observability.md)
+ * that register here behind their own env guards without touching the core.
+ */
+function buildSinks(): EventSink[] {
+  const sinks: EventSink[] = [];
+  if (isEnabled(process.env['CORELLIA_SINK_STDOUT'])) {
+    sinks.push(new StdoutSink());
+  }
+  return sinks;
+}
+
+/** Wrap the inner store in the fan-out only when at least one sink is registered. */
+function wrapWithSinks(inner: EventStore, sinks: readonly EventSink[]): EventStore {
+  return sinks.length > 0 ? new SinkFanoutStore(inner, sinks) : inner;
+}
+
+function isEnabled(value: string | undefined): boolean {
+  return value === '1' || value === 'true';
 }
 
 // ── Standing envelope (F-63 seam) ─────────────────────────────────────────

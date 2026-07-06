@@ -144,3 +144,20 @@ export interface EventStore {
    */
   list(filter?: { goalId?: string; type?: FactoryEvent['type'] }): Promise<FactoryEvent[]>;
 }
+
+/**
+ * A best-effort observer of the event stream, fanned out to *after* the store
+ * has durably appended an event. The seam that lets the log reach an external
+ * tracing backend (LangSmith, OTLP, …) without touching the store's durability
+ * or the dependency-free core (ADR-001, ADR-003): sinks are additive and live
+ * only in optional adapter modules wired at the daemon.
+ *
+ * `emit` must never throw into the store — a sink failure is caught and dropped
+ * by the fan-out so observability can never break the factory's durability.
+ */
+export interface EventSink {
+  /** Observe one event that was just persisted. Best-effort; must not throw. */
+  emit(event: FactoryEvent): void;
+  /** Flush any buffered output before shutdown. Optional. */
+  flush?(): Promise<void>;
+}
