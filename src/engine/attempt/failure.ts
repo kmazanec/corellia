@@ -73,31 +73,43 @@ export async function resolveAttemptFailure(params: {
 
   const prescriptions = prescribedRepairs(params.verdict);
   if (prescriptions.length > 0) {
-    const repairResult = await params.brain.repair(
-      params.goal,
-      params.artifact,
-      prescriptions,
-      { tier: params.tier, memories: params.goal.memories } satisfies BrainContext,
-    );
-
-    params.debitUsage(repairResult.usage);
-    await params.store.append({
-      type: 'repair-applied',
-      at: params.now(),
-      goalId: params.goal.id,
-      prescriptions,
-      usage: repairResult.usage,
-    });
-
-    if (params.hasReachedCeiling()) {
-      return { kind: 'blocked', report: await params.onCeilingReached() };
+    // repair is best-effort: a throw here (canonically a provider timeout —
+    // live-tail run 12: "child threw: The operation was aborted due to
+    // timeout" killed the tree from this exact call) must not propagate out
+    // of the attempt loop. On failure, fall through to the tier ladder — the
+    // next rung is a different model that can re-attempt from scratch.
+    let repairResult: Awaited<ReturnType<typeof params.brain.repair>> | null = null;
+    try {
+      repairResult = await params.brain.repair(
+        params.goal,
+        params.artifact,
+        prescriptions,
+        { tier: params.tier, memories: params.goal.memories } satisfies BrainContext,
+      );
+    } catch {
+      repairResult = null;
     }
 
-    return {
-      kind: 'repaired',
-      artifact: repairResult.value,
-      budget: params.budget,
-    };
+    if (repairResult !== null) {
+      params.debitUsage(repairResult.usage);
+      await params.store.append({
+        type: 'repair-applied',
+        at: params.now(),
+        goalId: params.goal.id,
+        prescriptions,
+        usage: repairResult.usage,
+      });
+
+      if (params.hasReachedCeiling()) {
+        return { kind: 'blocked', report: await params.onCeilingReached() };
+      }
+
+      return {
+        kind: 'repaired',
+        artifact: repairResult.value,
+        budget: params.budget,
+      };
+    }
   }
 
   const nextTier = params.tierLadder[params.tierIndex + 1];

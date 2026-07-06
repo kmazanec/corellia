@@ -254,3 +254,40 @@ describe('transport failures and isomorphism', () => {
     expect(result.kind === 'escalated' ? result.tier : undefined).toBe('mid');
   });
 });
+
+describe('repair robustness', () => {
+  it('falls through to tier escalation when the repair call throws (provider timeout)', async () => {
+    const store = new MemoryEventStore();
+    const brain = new ScriptedBrain();
+    brain.repair = async () => {
+      const err = new Error('The operation was aborted due to timeout');
+      err.name = 'TimeoutError';
+      throw err;
+    };
+
+    const result = await resolveAttemptFailure({
+      goal: makeGoal(),
+      artifact: textArtifact('bad'),
+      verdict: failVerdict('fixable', 'apply patch'),
+      budget,
+      tier: 'low',
+      tierIndex: 0,
+      tierLadder: ['low', 'mid'],
+      priorAttempt: undefined,
+      brain,
+      store,
+      now: () => 7,
+      onBrief: undefined,
+      debitUsage: () => {},
+      hasReachedCeiling: () => false,
+      onCeilingReached: async () => {
+        throw new Error('ceiling should not run');
+      },
+    });
+
+    // No throw out of the resolver; the ladder takes over.
+    expect(result.kind).toBe('escalated');
+    expect(result.kind === 'escalated' ? result.tier : undefined).toBe('mid');
+    expect(await store.list({ type: 'repair-applied' })).toHaveLength(0);
+  });
+});
