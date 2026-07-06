@@ -6,6 +6,7 @@ import type { CheckContext, Registry } from '../contract/goal-type.js';
 import type { MemoryView } from '../contract/memory.js';
 import type { Artifact, Report } from '../contract/report.js';
 import type { FactsForRegions } from './knowledge-memory.js';
+import type { RegionScanner } from './structural-floor.js';
 import {
   appendChildSpawnedEvents,
   buildSplitChildGoals,
@@ -44,6 +45,7 @@ export async function runSplitRound(params: {
   worktree: TreeWorktree | undefined;
   factsForRegions: FactsForRegions | undefined;
   headSha: ((repoRoot: string) => Promise<string>) | undefined;
+  regionScanner: RegionScanner | undefined;
   checkContext: CheckContext | undefined;
   persist: (goal: Goal, artifact: Artifact) => Promise<void>;
   runChild: (goal: Goal) => Promise<Report>;
@@ -73,6 +75,9 @@ export async function runSplitRound(params: {
     repoRoot: splitRoundRepoRoot(params.goal, params.activeRepoRoot),
     factsForRegions: params.factsForRegions,
     headSha: params.headSha,
+    regionScanner: params.regionScanner,
+    kindOf: (typeName: string) =>
+      params.registry.has(typeName) ? params.registry.get(typeName).kind : undefined,
     runChild: params.runChild,
   });
 

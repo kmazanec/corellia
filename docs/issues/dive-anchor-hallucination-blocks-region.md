@@ -11,6 +11,39 @@ severity: high
 
 # a deep-dive that hallucinates a line-anchor fails the dive-anchor check terminally and cascade-starves its dependent builder
 
+> **Update (2026-07-06) — structural-floor half fixed (pending live proof).** A
+> build leaf whose primary-region dive produced nothing is no longer hard-blocked
+> by the ADR-037 cascade: it proceeds on a **mechanically-derived structural floor**
+> for that region instead of re-surveying from scratch and blocking.
+>
+> - When a dependency that produced a null artifact is a comprehension **dive**
+>   (`kind: 'learn'` with a scope), its region is *floorable*: the engine
+>   synthesizes a structural floor — the region's file list (path + line/byte
+>   sizes) and a regex-grade export-symbol index (no LLM call) — and injects it as
+>   **provisional** memories clearly labeled as a floor ("dive produced no facts;
+>   raw structure pointers — read before trusting"). The null dive is carried
+>   forward as a finding and a `dependency-degraded` event, not silently swallowed.
+> - A null-producing **`make`** dependency (behavior the dependent consumes) still
+>   hard-blocks, unchanged — ADR-037's protection is intact; only floorable
+>   comprehension gaps are downgraded from block to floor.
+> - The file list is capped (default 300 entries) with an **explicit** truncation
+>   note in the memory text — no silent cap (DESIGN "Memory": provisional,
+>   mechanically-derived, labeled as such).
+> - New modules: `src/engine/structural-floor.ts` (pure floor synthesis),
+>   `src/engine/region-scanner.ts` (fs-backed scan, injectable), and
+>   `src/engine/dive-floor-handoff.ts` (the classify-and-inject seam), wired through
+>   `runSplitChildren` → `runOneSplitChild`. No ADR: it slots into the existing
+>   ADR-037/ADR-040 handoff without a new architectural decision.
+>
+> **Still open:** the **model-capability** half — escalation rolling into the same
+> hallucination wall — is tracked in
+> [model-capability-signal](model-capability-signal.md) and covered by the
+> capability-tagged model catalog landing separately in this same wave (ADR-044),
+> which lets tier selection pick a model by demonstrated reliability instead of a
+> fixed low→mid→high ladder. Live proof (a `live:self` run where a null `src/engine`
+> dive yields a floored builder that converges instead of blocking) is still to be
+> captured.
+
 > **Partially fixed (2026-06-26).** The repair-rung half is done: `diveAnchorCheck`
 > now returns a `prescription` on a bad anchor (the contract's `DeterministicCheck.run`
 > gained an optional `prescription` field), so the engine routes the failure through

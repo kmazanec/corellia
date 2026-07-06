@@ -6,6 +6,7 @@ import type { CheckContext, Registry } from '../contract/goal-type.js';
 import type { MemoryView } from '../contract/memory.js';
 import type { Artifact, Report } from '../contract/report.js';
 import type { FactsForRegions } from './knowledge-memory.js';
+import type { RegionScanner } from './structural-floor.js';
 import {
   runMilestoneLoop,
   type MilestoneRoundResult,
@@ -43,6 +44,7 @@ export function createSplitRunner(deps: {
   activeWorktree: () => TreeWorktree | undefined;
   factsForRegions: FactsForRegions | undefined;
   headSha: ((repoRoot: string) => Promise<string>) | undefined;
+  regionScanner: RegionScanner | undefined;
   checkContextFor: (goalId: string) => CheckContext | undefined;
   persistLeafKnowledge: (goal: Goal, artifact: Artifact) => Promise<void>;
   runChild: (goal: Goal, treeState: TreeState) => Promise<Report>;
@@ -70,6 +72,7 @@ export function createSplitRunner(deps: {
       worktree: deps.activeWorktree(),
       factsForRegions: deps.factsForRegions,
       headSha: deps.headSha,
+      regionScanner: deps.regionScanner,
       checkContext: deps.checkContextFor(goal.id),
       persist: deps.persistLeafKnowledge,
       runChild: (childGoal) => deps.runChild(childGoal, treeState),

@@ -78,6 +78,7 @@ describe('split round runner', () => {
       worktree: undefined,
       factsForRegions: undefined,
       headSha: undefined,
+      regionScanner: undefined,
       checkContext: undefined,
       persist: async () => {},
       async runChild(childGoal: Goal) {
@@ -148,6 +149,7 @@ describe('split round runner', () => {
       worktree: undefined,
       factsForRegions: undefined,
       headSha: undefined,
+      regionScanner: undefined,
       checkContext: undefined,
       persist: async () => {},
       runChild: async () => report(),
@@ -195,6 +197,7 @@ describe('worktree-derived merged artifact', () => {
         worktree: { treeId: 't1', branch: 'tree/t1', root: repo, repoRoot: repo, goalId: 'root', baseSha },
         factsForRegions: undefined,
         headSha: undefined,
+        regionScanner: undefined,
         checkContext: undefined,
         persist: async () => {},
         // The child emitted a STALE version of the same file — the worktree wins.

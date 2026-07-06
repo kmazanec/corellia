@@ -22,6 +22,7 @@ import { enterGoal } from './goal-entry.js';
 import type { EngineKnowledge } from './options.js';
 import { runSplitDispatch } from './split-dispatch.js';
 import { createSplitRunner } from './split-runner.js';
+import { fsRegionScanner } from './region-scanner.js';
 import {
   debitTreeState,
   hasReachedSpendCeiling,
@@ -222,6 +223,7 @@ function createSplitRunnerFor(deps: RecursiveRunnerDeps) {
     activeWorktree: deps.activeWorktree,
     factsForRegions: deps.knowledge?.factsForRegions,
     headSha: deps.knowledge?.headSha,
+    regionScanner: fsRegionScanner(),
     checkContextFor: deps.checkContextFor,
     persistLeafKnowledge: deps.persistLeafKnowledge,
     runChild: deps.runChild,
