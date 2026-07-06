@@ -117,12 +117,15 @@ describe('split round runner', () => {
     ]);
   });
 
-  it('runs integration judgment when the registry exposes judge-integration', async () => {
+  it('runs integration judgment, repairs once, and blocks when the re-judge still fails', async () => {
     const store = new MemoryEventStore();
     const registry = buildRegistry([
       nonLeafTypeDef({ name: 'splitter' }),
       nonLeafTypeDef({ name: 'judge-integration' }),
     ]);
+    // The integration judge fails with a gating, non-escalated finding both times:
+    // the repair rung (ADR-047) spawns one implement child and re-judges; the
+    // re-judge still fails, so the round blocks as it did before the rung existed.
     const brain: Brain = {
       ...unusedBrain,
       async judge() {
@@ -157,6 +160,9 @@ describe('split round runner', () => {
 
     expect(round.report.blockers).toEqual(['Integration eval failed: missing integration']);
     expect(round.report.findings).toEqual(['Integration eval failed: missing integration']);
+    // One repair child was spawned before the round blocked.
+    const spawned = await store.list({ type: 'child-spawned' });
+    expect(spawned.filter((e) => (e as { childType: string }).childType === 'implement')).toHaveLength(1);
   });
 });
 

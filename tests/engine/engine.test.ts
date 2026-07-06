@@ -1145,10 +1145,13 @@ describe('fix 5 — failing integration verdict produces non-empty blockers', ()
       budgetShare: 1.0,
     };
 
+    // An ESCALATED integration finding (frozen-contract change) skips the repair
+    // rung (ADR-047) and blocks directly — the single-judge-call path this test
+    // asserts. A non-escalated fail would instead spawn a repair child and re-judge.
     const brain = new ScriptedBrain()
       .queueDecide({ kind: 'split', children: [childA] })
       .queueProduce(textArtifact('output'))
-      .queueJudge(failVerdict('integration-fail'));   // judge-integration fails
+      .queueJudge(failVerdict('integration-fail', undefined, true));   // judge-integration fails (escalated)
 
     const engine = new Engine({ registry, brain, store, memory: new NoopMemoryView() });
     const goal = makeGoal({ type: 'splitter', id: 'root' });

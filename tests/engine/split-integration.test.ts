@@ -167,7 +167,7 @@ describe('split integration', () => {
       now: () => 5,
     });
 
-    expect(result).toEqual({ findings: [], blockers: [] });
+    expect(result).toEqual({ findings: [], blockers: [], verdict: passVerdict() });
     expect((await store.list()).map((event) => event.type)).toEqual([
       'judge-verdict',
       'golden-candidate',
@@ -243,6 +243,9 @@ describe('split integration', () => {
     expect(result).toEqual({
       findings: ['Integration eval failed: missing final output'],
       blockers: ['Integration eval failed: missing final output'],
+      // The structured verdict is now returned too, so the repair rung can read
+      // its findings' prescriptions and escalated flags (ADR-047).
+      verdict: failVerdict('missing final output'),
     });
   });
 });

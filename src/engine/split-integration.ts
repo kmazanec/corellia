@@ -23,6 +23,13 @@ export type ComprehendMergeResult = ComprehendMergeHandled | ComprehendMergeSkip
 export interface SplitIntegrationJudgment {
   findings: string[];
   blockers: string[];
+  /**
+   * The judge's structured verdict when one was rendered, so the repair rung can
+   * read its findings' prescriptions and `escalated` flags. Absent when the judge
+   * did not run (no `judge-integration` type, a null artifact, or a terminal
+   * provider error degraded to a blocker).
+   */
+  verdict?: Verdict;
 }
 
 /**
@@ -190,10 +197,10 @@ export async function judgeSplitIntegration(params: {
     });
   }
 
-  if (verdict.pass) return { findings: [], blockers: [] };
+  if (verdict.pass) return { findings: [], blockers: [], verdict };
 
   const msg = `Integration eval failed: ${verdict.findings.map((f) => f.title).join(', ')}`;
-  return { findings: [msg], blockers: [msg] };
+  return { findings: [msg], blockers: [msg], verdict };
 }
 
 function comprehendMergeType(

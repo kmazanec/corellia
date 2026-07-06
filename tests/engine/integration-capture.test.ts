@@ -122,10 +122,13 @@ describe('integration-capture: non-scripted run (goldenCapture: true)', () => {
 
   it('verdictPass is false when judge-integration fails (F-65 A11)', async () => {
     const store = new MemoryEventStore();
+    // An ESCALATED integration finding skips the repair rung (ADR-047) and blocks
+    // directly, so exactly one integration judge call — and one golden-candidate —
+    // is captured. A non-escalated fail would re-judge after repair, capturing two.
     const brain = new ScriptedBrain()
       .queueDecide({ kind: 'split', children: [childPlan] })
       .queueProduce(textArtifact('child-artifact'))
-      .queueJudge(failVerdict('integration failed'));
+      .queueJudge(failVerdict('integration failed', undefined, true));
 
     const engine = new Engine({
       registry: splitRegistry(),
