@@ -4,7 +4,12 @@
   "private": true,
   "type": "module",
   "description": "A recursive software factory — walking-skeleton prototype.",
+  "bin": {
+    "corellia": "./scripts/corellia.ts"
+  },
   "scripts": {
+    "corellia": "tsx scripts/corellia.ts",
+    "logs": "tsx scripts/corellia.ts logs",
     "lint": "tsx scripts/lint-library.ts && tsx scripts/lint-docs.ts",
     "test": "npm run lint && npm run typecheck && vitest run --exclude \"**/.corellia/**\"",
     "typecheck": "tsc --noEmit",
