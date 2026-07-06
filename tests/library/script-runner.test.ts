@@ -72,6 +72,9 @@ const baseGoal: Goal = {
 // ── Chunk 1: ScriptRunner core ───────────────────────────────────────────────
 
 describe('npm-script declared entries', () => {
+  // Two real npm invocations: cold npm startup under full-suite load can blow
+  // the 5s vitest default (observed: live-tail run 7's build-green criterion
+  // failed on exactly this test timing out while the suite ran in parallel).
   it('runs an npm-script:<name> entry via the package manager, shell-free', async () => {
     const repo = mkdtempSync(join(tmpdir(), 'runner-npm-'));
     writeFileSync(join(repo, 'package.json'), JSON.stringify({
@@ -84,7 +87,7 @@ describe('npm-script declared entries', () => {
     const red = await runner.run('bad', undefined, 60_000);
     expect(red.exitStatus).toBe(3);
     rmSync(repo, { recursive: true, force: true });
-  });
+  }, 120_000);
 
   it('appends a validated target to the args (echoed back by the script)', async () => {
     const repoRoot = makeTmp();
