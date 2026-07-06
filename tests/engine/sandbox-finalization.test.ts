@@ -107,6 +107,30 @@ describe('sandbox finalization', () => {
     expect(existsSync(worktree.root)).toBe(false);
   });
 
+  it('records a files-touched event marking each file in/out of declared scope (C1)', async () => {
+    const { worktree, store } = await openWorktree('scoped');
+    // In scope: public/. Out of scope: src/tax/engine.ts (the tiutni failure shape).
+    writeFileSync(join(worktree.root, 'public-page.txt'), 'ui\n');
+    const srcTax = join(worktree.root, 'src', 'tax');
+    execFileSync('mkdir', ['-p', srcTax], { stdio: 'pipe' });
+    writeFileSync(join(srcTax, 'engine.ts'), 'export const rate = 1;\n');
+
+    await finalizeSandboxedRun({
+      goal: makeGoal({ id: 'scoped', scope: ['public-page.txt'] }),
+      report: report(),
+      worktree,
+      store,
+      now: () => 1,
+    });
+
+    const touched = await store.list({ type: 'files-touched' });
+    expect(touched).toHaveLength(1);
+    const files = (touched[0] as { files: { path: string; inScope: boolean }[] }).files;
+    const byPath = new Map(files.map((f) => [f.path, f.inScope]));
+    expect(byPath.get('public-page.txt')).toBe(true);
+    expect(byPath.get('src/tax/engine.ts')).toBe(false);
+  });
+
   it('writes deliver-intent lifecycle files before collecting', async () => {
     const { repo, worktree, store } = await openWorktree('deliver');
     const now = () => new Date(2026, 5, 27, 12, 0, 0).getTime();

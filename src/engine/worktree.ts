@@ -377,6 +377,58 @@ export function treeDiffWithinScope(
   return { ok: true, changedCount: inScope };
 }
 
+/** One file the tree touched since base, marked in- or out-of-declared-scope. */
+export interface TouchedFile {
+  path: string;
+  inScope: boolean;
+}
+
+/**
+ * Enumerate EVERY file the tree changed since its base commit (committed rounds,
+ * uncommitted edits, untracked files), each marked in- or out-of-scope against
+ * the declared scope — the surface a reviewer needs to catch an out-of-scope edit
+ * (issue C1: the tiutni run silently altered tax math under a `public/`-scoped
+ * job, found only by reading `git show`). Dependency links are dropped, as in
+ * {@link treeDiffWithinScope}. Absolute paths and traversals are marked
+ * out-of-scope. An empty scope means everything is in scope (consistent with
+ * {@link isInScope}). Any git error yields an empty list (fail-open, like the
+ * sibling diff helpers).
+ */
+export function treeFilesTouchedVsScope(
+  worktreeRoot: string,
+  baseSha: string,
+  scope: string[],
+): TouchedFile[] {
+  const gitLines = (args: string[]): string[] => {
+    try {
+      return execFileSync('git', ['-C', worktreeRoot, ...args], { stdio: 'pipe', encoding: 'utf-8' })
+        .trim().split('\n').map((s) => s.trim()).filter(Boolean);
+    } catch {
+      return [];
+    }
+  };
+  const DEP_LINKS = ['node_modules', '.venv'];
+  const isDepLink = (p: string): boolean =>
+    DEP_LINKS.some((d) => p === d || p.startsWith(`${d}/`));
+
+  const committed = baseSha ? gitLines(['diff', '--name-only', `${baseSha}..HEAD`]) : [];
+  const uncommittedTracked = gitLines(['diff', '--name-only', 'HEAD']);
+  const untracked = gitLines(['ls-files', '--others', '--exclude-standard']);
+
+  const paths = new Set<string>();
+  for (const p of [...committed, ...uncommittedTracked, ...untracked]) {
+    if (!isDepLink(p)) paths.add(p);
+  }
+
+  const classify = (p: string): boolean => {
+    if (isAbsolute(p) || normalize(p).startsWith('..')) return false;
+    if (scope.length === 0) return true;
+    return isInScope(p, scope);
+  };
+
+  return [...paths].sort().map((path) => ({ path, inScope: classify(path) }));
+}
+
 /**
  * Derive a `files` artifact from the tree's ACTUAL delivered state: every file
  * changed since the worktree's base sha (committed rounds, uncommitted edits,

@@ -33,6 +33,7 @@ const EVENT_TYPES = new Set([
   'worktree-collected',
   'worktree-preserved',
   'worktree-reaped',
+  'files-touched',
   'produced',
   'ceiling-reached',
   'transport-retry',
@@ -140,6 +141,7 @@ const EVENT_VALIDATORS = {
     hasString(event, 'reason'),
   'worktree-reaped': (event) =>
     hasString(event, 'path') && hasOptionalString(event, 'branch') && hasString(event, 'reason'),
+  'files-touched': (event) => hasStringArray(event, 'scope') && hasTouchedFiles(event),
   produced: (event) => hasObject(event, 'usage'),
   'ceiling-reached': (event) => hasFiniteNumber(event, 'spentUsd') && hasFiniteNumber(event, 'ceilingUsd'),
   'transport-retry': hasDetail,
@@ -178,6 +180,20 @@ const EVENT_VALIDATORS = {
 
 function hasDetail(event: JsonObject): boolean {
   return hasString(event, 'detail');
+}
+
+/** Validate `files: { path: string; inScope: boolean }[]` on a files-touched event. */
+function hasTouchedFiles(event: JsonObject): boolean {
+  const files = event['files'];
+  return (
+    Array.isArray(files) &&
+    files.every(
+      (f) =>
+        isObject(f) &&
+        typeof (f as JsonObject)['path'] === 'string' &&
+        typeof (f as JsonObject)['inScope'] === 'boolean',
+    )
+  );
 }
 
 function baseEvent(value: unknown): EventEnvelope | null {

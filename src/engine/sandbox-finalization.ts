@@ -6,7 +6,12 @@ import {
   type ContributingGoal,
 } from './collect-commit-message.js';
 import { createIterationRecord, deleteProvenanceIssue } from './iteration-tools.js';
-import { collectTree, preserveTree, type TreeWorktree } from './worktree.js';
+import {
+  collectTree,
+  preserveTree,
+  treeFilesTouchedVsScope,
+  type TreeWorktree,
+} from './worktree.js';
 
 export async function finalizeSandboxedRun(params: {
   goal: Goal;
@@ -21,9 +26,37 @@ export async function finalizeSandboxedRun(params: {
   }
 
   integrateDeliveredIntent(params.goal, params.worktree.root, params.now);
+  await recordFilesTouched(params);
   const contributing = await gatherContributingGoals(params.store, params.goal.id);
   const commitMessage = deriveCollectCommitMessage(params.goal, contributing);
   await collectTree(params.worktree, params.store, commitMessage);
+}
+
+/**
+ * Record every file the tree touched vs its declared scope (C1). Computed while
+ * the worktree still exists (collectTree removes it) so the diff is available,
+ * and emitted as a `files-touched` event — the report surface a reviewer reads
+ * to catch an out-of-scope edit without running `git show`.
+ */
+async function recordFilesTouched(params: {
+  goal: Goal;
+  worktree: TreeWorktree;
+  store: EventStore;
+  now: () => number;
+}): Promise<void> {
+  const files = treeFilesTouchedVsScope(
+    params.worktree.root,
+    params.worktree.baseSha,
+    params.goal.scope,
+  );
+  if (files.length === 0) return;
+  await params.store.append({
+    type: 'files-touched',
+    at: params.now(),
+    goalId: params.goal.id,
+    scope: params.goal.scope,
+    files,
+  });
 }
 
 /**

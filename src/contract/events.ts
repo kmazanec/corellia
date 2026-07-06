@@ -84,6 +84,12 @@ export type FactoryEvent =
    * worktree had no branch checked out.
    */
   | { type: 'worktree-reaped'; at: number; goalId: string; path: string; branch?: string; reason: string }
+  /**
+   * The full set of files a collected tree touched vs its declared scope (C1).
+   * Emitted at collection so a reviewer sees every changed path and its
+   * in/out-of-scope marker in the report, without reading `git show`.
+   */
+  | { type: 'files-touched'; at: number; goalId: string; scope: string[]; files: { path: string; inScope: boolean }[] }
   /** A produce call completed, carrying its provider-reported usage. */
   | { type: 'produced'; at: number; goalId: string; usage: Usage }
   /** Measured tree spend reached the dollar ceiling — the tree halts. */

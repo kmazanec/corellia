@@ -15,6 +15,7 @@ import {
   openTreeWorktree,
   diffWithinScope,
   treeChangedWithinScope,
+  treeFilesTouchedVsScope,
   collectTree,
   preserveTree,
   sanitizeTreeId,
@@ -778,5 +779,40 @@ describe('worktreeFilesArtifact', () => {
     execFileSync('git', ['rm', 'README.md'], { cwd: repo, stdio: 'pipe' });
     execFileSync('git', ['commit', '-m', 'delete readme'], { cwd: repo, stdio: 'pipe' });
     expect(worktreeFilesArtifact(repo, baseSha)).toBeNull();
+  });
+});
+
+describe('treeFilesTouchedVsScope', () => {
+  it('marks each touched file in- or out-of declared scope (C1)', () => {
+    const repo = makeTempRepo();
+    const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, stdio: 'pipe', encoding: 'utf-8' }).trim();
+
+    // In scope (public/) — committed. Out of scope (src/tax/) — untracked.
+    mkdirSync(join(repo, 'public'), { recursive: true });
+    writeFileSync(join(repo, 'public', 'page.html'), '<h1>hi</h1>\n');
+    execFileSync('git', ['add', '--all'], { cwd: repo, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'ui'], { cwd: repo, stdio: 'pipe' });
+    mkdirSync(join(repo, 'src', 'tax'), { recursive: true });
+    writeFileSync(join(repo, 'src', 'tax', 'engine.ts'), 'export const rate = 1;\n');
+
+    const touched = treeFilesTouchedVsScope(repo, baseSha, ['public/']);
+    const byPath = new Map(touched.map((f) => [f.path, f.inScope]));
+    expect(byPath.get('public/page.html')).toBe(true);
+    expect(byPath.get('src/tax/engine.ts')).toBe(false);
+  });
+
+  it('marks everything in-scope when the declared scope is empty', () => {
+    const repo = makeTempRepo();
+    const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, stdio: 'pipe', encoding: 'utf-8' }).trim();
+    writeFileSync(join(repo, 'anything.ts'), 'x\n');
+
+    const touched = treeFilesTouchedVsScope(repo, baseSha, []);
+    expect(touched).toEqual([{ path: 'anything.ts', inScope: true }]);
+  });
+
+  it('drops dependency links and returns [] for a clean tree', () => {
+    const repo = makeTempRepo();
+    const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, stdio: 'pipe', encoding: 'utf-8' }).trim();
+    expect(treeFilesTouchedVsScope(repo, baseSha, ['src/'])).toEqual([]);
   });
 });
