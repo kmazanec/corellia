@@ -4,12 +4,34 @@ title: "Deploy the factory end-to-end: package, ship to a registry, and run it i
 description: F-66 gave the daemon an image + local compose, but there is no complete deployment path — no .dockerignore, no run scripts, no CI→registry build, no published-image deploy to a remote host, and no story for the operational lifecycle (state persistence, secrets provisioning, restart/upgrade/rollback, observability) needed to actually run the factory in the cloud.
 tags: [harness, daemon, deploy, docker, ci, ghcr, ops, lifecycle, dx]
 timestamp: 2026-06-26
-status: open
+status: fixed-pending-live-proof
 kind: future-work
 severity: medium
 ---
 
 # Deploy the factory end-to-end: package, ship to a registry, and run it in isolation anywhere
+
+> **Status: fixed-pending-live-proof (2026-07-06).** The deployment path shipped
+> on `feat/deploy-e2e` (see [ADR-045](../adrs/ADR-045-factory-deployment-path.md)
+> and the [`deploy.md`](../deploy.md) runbook):
+> - `.dockerignore` scopes the build context (excludes `.git`, `node_modules`,
+>   `out`, `media`, `docs`, `.env*` except `.env.example`, `.claude`, `.corellia`).
+> - `package.json` operator scripts `docker:build|up|down|logs` +
+>   `docker:up:dev-db`, encoding the `-f compose.yaml` selection.
+> - `.github/workflows/build-image.yml` — `npm test` (the repo's first CI) +
+>   buildx build of the `runtime` target pushed to `ghcr.io/<owner>/corellia`
+>   (`latest` on main, `sha-<short>`, semver on tags), gha layer caching.
+> - `compose.deploy.yaml` — standalone published-image stack
+>   (`image: ${CORELLIA_IMAGE}`, no `build:`) for a source-less host.
+> - `scripts/deploy.sh` — SSH pull → drain (SIGTERM/ADR-026) → recreate → verify
+>   `/status`, with `--rollback <tag>`; strict-mode, shellcheck-clean.
+> - `docs/deploy.md` — ops runbook: GHCR delivery, state placement +
+>   backup/restore, host secrets provisioning, restart/upgrade/rollback,
+>   target-repo landing, observability.
+>
+> **Live proof pending (operator):** a real CI push to GHCR and a clean-host
+> (Hetzner VPS) deploy proving `GET /status → 200` from a published image with no
+> source checkout, plus a state-survives-redeploy + rollback demonstration.
 
 ## Problem
 The factory must be **deployable as a running service** — in isolation, locally

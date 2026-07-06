@@ -187,6 +187,31 @@ const brain = new LlmBrain({ ..., fetchImpl: myStubFetch });
 
 ---
 
+## Deploy & operate
+
+Run the factory as a container, locally or in the cloud.
+
+```bash
+npm run docker:build      # build the daemon image (compose.yaml)
+npm run docker:up         # daemon + Postgres up (detached)
+npm run docker:logs       # tail the daemon
+npm run docker:down       # stop + remove (keeps the corellia-pgdata volume)
+npm run docker:up:dev-db  # dev-only Postgres helper (port 54329)
+```
+
+These wrap the `-f compose.yaml` selection so the Compose-v2 file-shadowing rule
+is never a footgun. Copy `.env.example` → `.env` and populate it first.
+
+- **[docs/container.md](docs/container.md)** — the local build → up → smoke →
+  down loop and the image internals.
+- **[docs/deploy.md](docs/deploy.md)** — running remotely and unattended: CI →
+  GHCR image delivery, one-command SSH deploy (`scripts/deploy.sh`), state
+  placement + backup/restore, host secrets provisioning, restart/upgrade/rollback,
+  and observability. Design and alternatives in
+  [ADR-045](docs/adrs/ADR-045-factory-deployment-path.md).
+
+---
+
 ## Deliberately deferred
 
 These are real features — they appear in DESIGN.md — but are not part of this

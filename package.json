@@ -18,7 +18,12 @@
     "live:foreign": "tsx examples/live-foreign.ts",
     "live:tiutni": "tsx examples/live-tiutni.ts",
     "commission:run": "tsx examples/run-commission.ts",
-    "commission:watch": "tsx examples/watch-commission.ts"
+    "commission:watch": "tsx examples/watch-commission.ts",
+    "docker:build": "docker compose -f compose.yaml build",
+    "docker:up": "docker compose -f compose.yaml up -d",
+    "docker:down": "docker compose -f compose.yaml down",
+    "docker:logs": "docker compose -f compose.yaml logs -f",
+    "docker:up:dev-db": "docker compose -f docker-compose.yml up -d postgres"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

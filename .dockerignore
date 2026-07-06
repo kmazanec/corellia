@@ -1,0 +1,51 @@
+# Docker build context exclusions.
+#
+# The Dockerfile COPYs exactly: package.json, package-lock.json, tsconfig.json,
+# and src/. Everything else is noise in the build context — excluding it keeps
+# the context small and prevents secrets (.env) or bulky artifacts (media/,
+# out/, node_modules/) from ever entering an image layer, even if a future
+# `COPY . .` lands. Anything the build genuinely needs is allow-listed at the
+# bottom of this file.
+
+# ── Version control ──────────────────────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+
+# ── Dependencies & build output (reinstalled/rebuilt inside the image) ───────
+node_modules
+dist
+out
+coverage
+*.tsbuildinfo
+
+# ── Secrets — never in an image layer (ADR-012) ──────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Heavy / irrelevant assets ────────────────────────────────────────────────
+media
+docs
+
+# ── Harness, factory sandbox, and local scratch ──────────────────────────────
+.claude
+.corellia
+.cookbook-memory
+conversation
+.playwright-mcp
+
+# ── Editor / OS cruft ────────────────────────────────────────────────────────
+.DS_Store
+*.log
+.vscode
+.idea
+
+# ── Container/CI files themselves (not needed inside the runtime image) ──────
+Dockerfile
+.dockerignore
+compose.yaml
+compose.deploy.yaml
+docker-compose.yml
+.github
+scripts/deploy.sh
