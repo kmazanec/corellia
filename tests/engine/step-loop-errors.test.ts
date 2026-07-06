@@ -111,3 +111,30 @@ describe('step-loop step error handling', () => {
     });
   });
 });
+
+describe('raw timeout classification', () => {
+  it('classifies a raw TimeoutError (unwrapped abort) as a transport failure', async () => {
+    // Regression (live-tail runs 1/7/9): AbortSignal.timeout aborts escaping
+    // paths outside fetchStepResponse arrived as plain TimeoutError and were
+    // classified 'failed' — feeding the step-loop:failed isomorphic signature.
+    const timeoutErr = new Error('The operation was aborted due to timeout');
+    timeoutErr.name = 'TimeoutError';
+
+    const result = await handleStepLoopStepError({
+      err: timeoutErr,
+      goal: makeGoal(),
+      budget,
+      remainingToolCalls: 2,
+      transcript: [],
+      scratchpad: newScratchpad(),
+      store: new MemoryEventStore(),
+      now: () => 5,
+      seenCalls: new Set(),
+      callKeyByCallId: new Map(),
+      malformRecoveryUsed: false,
+    });
+
+    expect(result.kind).toBe('failed');
+    expect(result.kind === 'failed' ? result.result.failKind : undefined).toBe('transport');
+  });
+});

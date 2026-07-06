@@ -221,3 +221,36 @@ describe('attempt failure resolver', () => {
     expect(store.types()).toEqual(['blocked', 'emitted']);
   });
 });
+
+describe('transport failures and isomorphism', () => {
+  it('does NOT isomorphic-block two consecutive step-loop:transport failures', async () => {
+    // A transport failure says nothing about the subject; two in a row is a
+    // flaky provider window. The tier ladder retries instead of blocking.
+    const store = new MemoryEventStore();
+    const verdict = failVerdict('Step loop failed: timeout', undefined, undefined, 'step-loop:transport');
+
+    const result = await resolveAttemptFailure({
+      goal: makeGoal(),
+      artifact: textArtifact('partial'),
+      verdict,
+      budget,
+      tier: 'low',
+      tierIndex: 0,
+      tierLadder: ['low', 'mid', 'high'],
+      priorAttempt: { artifact: textArtifact('prior'), verdict },
+      brain: new ScriptedBrain(),
+      store,
+      now: () => 3,
+      onBrief: undefined,
+      debitUsage: () => {},
+      hasReachedCeiling: () => false,
+      onCeilingReached: async () => {
+        throw new Error('ceiling should not run');
+      },
+    });
+
+    // Escalates to the next tier (a different model) rather than blocking.
+    expect(result.kind).toBe('escalated');
+    expect(result.kind === 'escalated' ? result.tier : undefined).toBe('mid');
+  });
+});

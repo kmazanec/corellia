@@ -118,7 +118,13 @@ export async function resolveAttemptFailure(params: {
     store: params.store,
     now: params.now,
     onBrief: params.onBrief,
-    report: blockedReport(brief.question, [], params.salvagedArtifact),
+    // Carry the last verdict's findings: a bare "cannot converge" hides WHY
+    // (run 9's blocker gave no hint the cause was a provider timeout).
+    report: blockedReport(
+      brief.question,
+      params.verdict.findings.map((finding) => finding.title),
+      params.salvagedArtifact,
+    ),
     brief,
   });
 }
@@ -127,6 +133,12 @@ function isomorphicFailure(
   priorAttempt: { artifact: Artifact | null; verdict: Verdict } | undefined,
   verdict: Verdict,
 ): boolean {
+  // A transport failure (provider timeout/unreachable, surviving the adapter's
+  // retries) says nothing about the SUBJECT — two in a row is a flaky provider
+  // window, not the model repeating a mistake. Exempt it from isomorphism; the
+  // attempt budget and the tier ladder (a different model per rung) bound the
+  // retries instead. (provider-timeout-isomorphic-block; live-tail runs 1/7/9.)
+  if (verdict.failureSignature === 'step-loop:transport') return false;
   return priorAttempt !== undefined
     && verdict.failureSignature !== undefined
     && priorAttempt.verdict.failureSignature === verdict.failureSignature;

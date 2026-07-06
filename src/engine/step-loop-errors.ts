@@ -80,5 +80,17 @@ async function recoverMalformedStep(
 function stepFailureKind(err: unknown): 'failed' | 'malformed' | 'transport' {
   if (err instanceof MalformedStepError) return 'malformed';
   if (err instanceof StepTransportError) return 'transport';
+  // A raw abort/timeout that escaped the adapter's own wrapping (paths outside
+  // fetchStepResponse: the malformed-step reprompt, the eviction summarizer)
+  // is still a transport incident, not non-convergence. Left as 'failed' it
+  // produced the step-loop:failed signature that isomorphic-blocked goals on
+  // flaky provider windows (live-tail runs 1, 7, 9: "The operation was
+  // aborted due to timeout").
+  if (
+    err instanceof Error &&
+    (err.name === 'AbortError' || err.name === 'TimeoutError' || err.message.includes('timeout'))
+  ) {
+    return 'transport';
+  }
   return 'failed';
 }
