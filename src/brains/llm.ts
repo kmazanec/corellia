@@ -499,9 +499,15 @@ function parseStepResponseBody(bodyText: string): StepResponse {
   try {
     return JSON.parse(bodyText) as StepResponse;
   } catch {
-    throw new Error(
-      `LLM step response was truncated or invalid JSON (likely output-length ` +
-        `truncation under a large context — ADR-036). Body length: ${bodyText.length}.`,
+    // The HTTP RESPONSE ENVELOPE (not model output) failed to parse — a proxy
+    // error page, a cut stream, provider garbage. That is a transport incident:
+    // the leaf's work is fine, the endpoint misbehaved. Typed so the engine
+    // classifies it 'transport' (no isomorphic block; the attempt ladder
+    // retries on a different model) instead of 'failed' (live-tail run 11:
+    // a characterize leaf died through every tier on invalid 3.8KB bodies).
+    throw new StepTransportError(
+      `LLM step response envelope was not valid JSON (proxy error page or cut ` +
+        `stream). Body length: ${bodyText.length}.`,
     );
   }
 }
