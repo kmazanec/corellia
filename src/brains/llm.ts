@@ -393,8 +393,8 @@ function buildStepRequest(
     },
   }));
 
-  // Apply the strict json_schema response_format ONLY on a tool-less step (the
-  // dedicated emit call). Sending a strict output-schema grammar AND tools on the
+  // Apply the json_schema response_format ONLY on a tool-less step (the
+  // dedicated emit call). Sending an output-schema grammar AND tools on the
   // same request is a contradiction — "your message must match the criteria
   // schema" vs "call a tool" — which providers handle inconsistently and which
   // wedges/hangs the request, so an outputSchema leaf never produces a clean
@@ -402,9 +402,18 @@ function buildStepRequest(
   // every attempt, criteriaTotal stayed 0). During exploration the model is free
   // to call tools or return a plain message; the schema is enforced on the
   // tool-less emit step that runStructuredArtifactEmit issues.
+  //
+  // strict is FALSE deliberately: grammar-constrained decode over a long
+  // step-loop prefill hangs these providers outright — the emit timed out at
+  // EVERY tier after ~19 exploration steps while the short-context decide/judge
+  // strict calls worked (live-tail run 13; runs 1–12 died the same way before
+  // the cause was isolated). The schema still travels with the request as
+  // guidance; the deterministic gate (e.g. criteriaWellFormed) remains the
+  // real validator, and a malformed emit takes the normal retry path instead
+  // of a provider hang.
   const responseFormat: StepRequest['response_format'] =
     outputSchema !== undefined && wireTools.length === 0
-      ? { type: 'json_schema', json_schema: { name: 'artifact', strict: true, schema: outputSchema } }
+      ? { type: 'json_schema', json_schema: { name: 'artifact', strict: false, schema: outputSchema } }
       : undefined;
 
   return {

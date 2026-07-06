@@ -1014,7 +1014,10 @@ describe('step response_format: json_schema when ctx.outputSchema present', () =
     expect(body.response_format).toBeDefined();
     expect(body.response_format.type).toBe('json_schema');
     expect(body.response_format.json_schema.name).toBe('artifact');
-    expect(body.response_format.json_schema.strict).toBe(true);
+    // strict must be FALSE: grammar-constrained decode over a long step-loop
+    // prefill hangs providers (live-tail run 13 — the emit timed out at every
+    // tier). The schema travels as guidance; deterministic gates validate.
+    expect(body.response_format.json_schema.strict).toBe(false);
     expect(body.response_format.json_schema.schema).toEqual(schema);
   });
 
