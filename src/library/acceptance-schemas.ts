@@ -16,6 +16,17 @@
  *
  * The schema fixes packaging; `criteriaWellFormed` (checks.ts) remains the
  * semantic gate.
+ *
+ * `check` is deliberately a FLAT object with all variant keys optional — NOT a
+ * `oneOf` union. This is the same posture as `DECISION_SCHEMA` (llm.ts): many
+ * providers reject or wedge on `oneOf` under `strict` json_schema decoding, and
+ * this was the only step-emitted schema carrying one — the
+ * `author-acceptance-criteria` emit hung at EVERY tier, every run (live-tail
+ * runs 1, 9, 10: "aborted due to timeout" at 120s/180s/360s), while the
+ * union-free schemas emitted fine. Variant exclusivity (exactly one of
+ * script/file/capture, no stray keys) is enforced semantically by
+ * `isRunnableCheck` inside `criteriaWellFormed`, exactly as `parseDecision`
+ * polices the decision variants.
  */
 export const ACCEPTANCE_CRITERIA_SCHEMA: Record<string, unknown> = {
   type: 'object',
@@ -28,29 +39,14 @@ export const ACCEPTANCE_CRITERIA_SCHEMA: Record<string, unknown> = {
           id: { type: 'string' },
           claim: { type: 'string' },
           check: {
-            oneOf: [
-              {
-                type: 'object',
-                properties: { script: { type: 'string' } },
-                required: ['script'],
-                additionalProperties: false,
-              },
-              {
-                type: 'object',
-                properties: {
-                  file: { type: 'string' },
-                  anchor: { type: 'string' },
-                },
-                required: ['file'],
-                additionalProperties: false,
-              },
-              {
-                type: 'object',
-                properties: { capture: { type: 'string' } },
-                required: ['capture'],
-                additionalProperties: false,
-              },
-            ],
+            type: 'object',
+            properties: {
+              script: { type: 'string' },
+              file: { type: 'string' },
+              anchor: { type: 'string' },
+              capture: { type: 'string' },
+            },
+            additionalProperties: false,
           },
         },
         required: ['id', 'claim', 'check'],
