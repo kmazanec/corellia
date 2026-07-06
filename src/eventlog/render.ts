@@ -9,7 +9,8 @@
  */
 
 import type { FactoryEvent } from '../contract/events.js';
-import { renderTree, costSummary } from './projections.js';
+import type { SignalTier, TierToolCallStats } from './projections.js';
+import { renderTree, costSummary, toolCallSignal } from './projections.js';
 
 /** A verdict's pass/fail plus its gating findings, condensed to one clause. */
 function verdictLine(v: {
@@ -156,6 +157,12 @@ export function renderReplay(
   out.push(renderTree(events));
   out.push('');
 
+  const signal = renderToolCallSignal(events);
+  if (signal !== '') {
+    out.push(signal);
+    out.push('');
+  }
+
   // Index goal metadata (id → title/type) from goal-received events, in first-seen order.
   const meta = new Map<string, { title: string; type: string }>();
   const order: string[] = [];
@@ -193,4 +200,46 @@ export function renderReplay(
   }
 
   return out.join('\n');
+}
+
+/**
+ * The per-tier model-capability signal (ADR-044): a tier whose steps routinely
+ * emit unparseable tool calls is failing tool calls, and the fix is to re-tag or
+ * replace that tier's catalog model. Returns '' when the log holds nothing
+ * tool-loop-shaped, so replay output stays clean for non-agentic logs. The
+ * events carry no model id — the operator maps tier → model via the run config.
+ */
+export function renderToolCallSignal(events: FactoryEvent[]): string {
+  const MALFORMATION_FLAG_THRESHOLD = 0.2;
+  const signal = toolCallSignal(events);
+  const order: SignalTier[] = ['low', 'mid', 'high', 'unknown'];
+  const active = order.filter((tier) => {
+    const s = signal.byTier[tier];
+    return s.steps > 0 || s.malformations > 0 || s.transportRetries > 0 || s.escalationsFrom > 0;
+  });
+  if (active.length === 0) return '';
+
+  const out: string[] = [];
+  out.push('── per-tier tool-call signal ──────────────────────────────────────────────');
+  for (const tier of active) {
+    const s = signal.byTier[tier];
+    out.push(`  ${tier.padEnd(8)} ${describeTierSignal(s)}`);
+    if (s.malformationRate !== undefined && s.malformationRate >= MALFORMATION_FLAG_THRESHOLD) {
+      out.push(
+        `           ⚠ this tier is failing tool calls ` +
+          `(${(s.malformationRate * 100).toFixed(0)}% of steps malformed) — ` +
+          `consider re-tagging or replacing its model in the catalog.`,
+      );
+    }
+  }
+  return out.join('\n');
+}
+
+function describeTierSignal(s: TierToolCallStats): string {
+  const rate = s.malformationRate !== undefined ? `${(s.malformationRate * 100).toFixed(0)}%` : '—';
+  return (
+    `steps=${s.steps} malformed=${s.malformations} (${rate}) ` +
+    `retries=${s.transportRetries} tools=${s.toolCallsRan}/${s.toolCallsRan + s.toolCallsRefused} ` +
+    `escalated-from=${s.escalationsFrom}`
+  );
 }

@@ -68,17 +68,22 @@ describe('openRouterConfig', () => {
     expect(cfg.baseUrl).toBe('https://openrouter.ai/api/v1');
   });
 
-  it('uses default low model when override is absent', () => {
+  // With no pin set, a band resolves to its CHEAPEST satisfying default (ADR-044
+  // banding), which is the qwen flash / qwen 235b entries — cheaper than the
+  // deepseek entries that were the hardwired defaults before the catalog. The
+  // high band's cheapest default remains glm-5.2. A `CORELLIA_MODEL_<BAND>` pin
+  // still forces an exact model (covered by the override tests below).
+  it('uses the cheapest low-band model when no low pin is set', () => {
     const cfg = openRouterConfig({ OPENROUTER_API_KEY: 'k' });
-    expect(cfg.modelByTier['low']).toBe('deepseek/deepseek-v4-flash');
+    expect(cfg.modelByTier['low']).toBe('qwen/qwen3-30b-a3b');
   });
 
-  it('uses default mid model when override is absent', () => {
+  it('uses the cheapest mid-band model when no mid pin is set', () => {
     const cfg = openRouterConfig({ OPENROUTER_API_KEY: 'k' });
-    expect(cfg.modelByTier['mid']).toBe('deepseek/deepseek-v4-pro');
+    expect(cfg.modelByTier['mid']).toBe('qwen/qwen3-235b-a22b');
   });
 
-  it('uses default high model when override is absent', () => {
+  it('uses the cheapest high-band model when no high pin is set', () => {
     const cfg = openRouterConfig({ OPENROUTER_API_KEY: 'k' });
     expect(cfg.modelByTier['high']).toBe('z-ai/glm-5.2');
   });

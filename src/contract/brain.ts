@@ -5,7 +5,7 @@
  * goal-type bound to the work, never the brain.
  */
 
-import type { Goal, MemoryPointer, Tier, Metered, Usage, TransportIncident } from './goal.js';
+import type { Goal, MemoryPointer, ModelNeeds, Tier, Metered, Usage, TransportIncident } from './goal.js';
 import type { Decision } from './decision.js';
 import type { Artifact } from './report.js';
 import type { Verdict } from './verdict.js';
@@ -21,6 +21,13 @@ import type { ToolCall, ToolDef } from './tool.js';
 export interface BrainContext {
   /** The model tier this call runs at; the control loop bumps it on failure. */
   tier: Tier;
+  /**
+   * The call's hard model requirements, resolved against the catalog on top of
+   * the tier band (a screenshot judge sets `{ vision: true }` so it lands on a
+   * vision-capable model regardless of band). Absent → no extra constraint: the
+   * band's cheapest model serves the call, exactly as a tier-only lookup did.
+   */
+  needs?: ModelNeeds;
   /** The provenance-labeled memory pointers the spawner injected for this goal. */
   memories: MemoryPointer[];
   /**

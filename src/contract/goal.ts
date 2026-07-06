@@ -40,6 +40,24 @@ export type Intent = 'production' | 'spike' | 'characterization';
 export type Tier = 'low' | 'mid' | 'high';
 
 /**
+ * A call's hard requirements on the concrete model that serves its {@link Tier}
+ * demand band. The tier is the abstract capability-demand band; `needs` is the
+ * per-call capability floor the resolved model must clear regardless of band —
+ * canonically a screenshot judge that must run on a vision-capable model. The
+ * model catalog (`src/brains/model-catalog.ts`) filters by these before banding.
+ * All fields optional; an absent need does not constrain (the common case is no
+ * needs at all).
+ */
+export interface ModelNeeds {
+  /** Require image input support (a screenshot-ui judge sets this). */
+  vision?: boolean;
+  /** Require at least this many context tokens. */
+  minContext?: number;
+  /** Require at least this tool-calling reliability ('ok' or 'strong'). */
+  minToolCalling?: 'ok' | 'strong';
+}
+
+/**
  * A backstop against runaway recursion and spend. Budget never influences what
  * or how anything is built: a goal plans, splits, and builds identically at any
  * budget. The only hard bounds are the ones tied to real runaway cost — the

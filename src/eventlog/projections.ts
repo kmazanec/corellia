@@ -5,7 +5,7 @@
  */
 
 import type { FactoryEvent } from '../contract/events.js';
-import type { MemoryPointer, Usage } from '../contract/goal.js';
+import type { MemoryPointer, Tier, Usage } from '../contract/goal.js';
 import type { MemoryView } from '../contract/memory.js';
 import type { KnowledgeArtifact, KnowledgeCategory, RegionFacts } from '../contract/knowledge.js';
 
@@ -211,6 +211,166 @@ export function traceStats(events: FactoryEvent[]): Record<string, GoalTypeStats
   }
 
   return result;
+}
+
+// ──────────────────────────────────────────────
+// toolCallSignal — per-tier model-capability signal (ADR-044, issue D2)
+// ──────────────────────────────────────────────
+
+/** The tier band a goal's events are attributed to, or 'unknown' when unobservable. */
+export type SignalTier = Tier | 'unknown';
+
+/**
+ * Per-tier tool-calling health, folded from the event log. The fields are exactly
+ * what the events genuinely support (no invented model id per event):
+ *
+ * - `steps`         — `step` events attributed to the tier (the denominator).
+ * - `malformations` — `malformation-reprompt` events: a step whose tool-call
+ *   arguments could not be parsed and needed a corrective re-prompt. This is the
+ *   honest per-tier tool-calling-weakness signal — a model that keeps emitting
+ *   unparseable tool calls is failing tool calls.
+ * - `transportRetries` — `transport-retry` events (endpoint flakiness, not a model
+ *   capability signal; reported for context, never as the flag reason).
+ * - `toolCallsRan` / `toolCallsRefused` — broker outcomes; refusals are governance
+ *   (out-of-scope, denied), NOT tool-calling weakness, so they inform but do not
+ *   trigger the flag.
+ * - `escalationsFrom` — `tier-escalated` events leaving this tier (a tier a goal
+ *   routinely escalates OUT of is one whose model under-served the band).
+ */
+export interface TierToolCallStats {
+  steps: number;
+  malformations: number;
+  transportRetries: number;
+  toolCallsRan: number;
+  toolCallsRefused: number;
+  escalationsFrom: number;
+  /**
+   * malformations / steps when steps > 0, else undefined. The flag threshold is
+   * applied to THIS rate — a tier whose steps routinely produce malformed tool
+   * calls should have its catalog model re-tagged (weaker toolCalling) or replaced.
+   */
+  malformationRate: number | undefined;
+}
+
+/** The full per-tier signal plus the tier→resolved-model mapping at run config. */
+export interface ToolCallSignal {
+  byTier: Record<SignalTier, TierToolCallStats>;
+  /**
+   * The tier→model mapping in force for the run, if the caller supplies it (from
+   * the brain config's `modelByTier`). The events do NOT carry the model id per
+   * step, so this mapping is how a reader connects a failing tier to a concrete
+   * model to re-tag. Absent when the caller has no config to hand.
+   */
+  modelByTier: Record<Tier, string> | undefined;
+}
+
+function emptyTierStats(): TierToolCallStats {
+  return {
+    steps: 0,
+    malformations: 0,
+    transportRetries: 0,
+    toolCallsRan: 0,
+    toolCallsRefused: 0,
+    escalationsFrom: 0,
+    malformationRate: undefined,
+  };
+}
+
+/**
+ * Fold per-tier tool-calling health from the event log (ADR-044; covers issue
+ * D2, "no model-capability signal").
+ *
+ * ATTRIBUTION: the events do not stamp a tier on `step` / `tool-call` /
+ * `malformation-reprompt`, so each goal's current tier is reconstructed by
+ * replay: a goal's tier is seeded the first time it is observable — the `from` of
+ * its first `tier-escalated`, or a `judge-verdict.tier` — and advanced by each
+ * subsequent `tier-escalated`. Events for a goal whose tier is never observable
+ * are attributed to `'unknown'` (honest: the log genuinely does not say). This is
+ * why `modelByTier` is reported alongside — it is the only bridge from a flagged
+ * tier to a concrete model id, since no event carries the model.
+ *
+ * @param events - the event log.
+ * @param modelByTier - optional tier→model map (the run's brain config) so a
+ *   reader can name the model behind a flagged tier.
+ */
+export function toolCallSignal(
+  events: FactoryEvent[],
+  modelByTier?: Record<Tier, string>,
+): ToolCallSignal {
+  // First pass: reconstruct each goal's tier trajectory as an ordered list of
+  // (eventIndex, tier) so a later event attributes to the tier in force at its time.
+  const tierAt = new Map<string, { index: number; tier: Tier }[]>();
+  const noteTier = (goalId: string, index: number, tier: Tier): void => {
+    const seq = tierAt.get(goalId);
+    if (!seq) {
+      tierAt.set(goalId, [{ index, tier }]);
+    } else {
+      seq.push({ index, tier });
+    }
+  };
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i]!;
+    if (e.type === 'tier-escalated') {
+      // The first escalation reveals BOTH the pre-escalation tier (from) and the
+      // post (to): seed with `from` at its own index if the goal has no earlier
+      // anchor, then record `to` from this point on.
+      if (!tierAt.has(e.goalId)) noteTier(e.goalId, i, e.from);
+      noteTier(e.goalId, i, e.to);
+    } else if (e.type === 'judge-verdict') {
+      if (!tierAt.has(e.goalId)) noteTier(e.goalId, i, e.tier);
+    }
+  }
+
+  const tierForEvent = (goalId: string, index: number): SignalTier => {
+    const seq = tierAt.get(goalId);
+    if (!seq) return 'unknown';
+    // The tier in force at `index` is the last anchor at or before it; if the
+    // event precedes the first anchor, use the earliest known tier (the goal ran
+    // at some tier before it was first observable — the earliest is the best guess).
+    let current: Tier = seq[0]!.tier;
+    for (const anchor of seq) {
+      if (anchor.index <= index) current = anchor.tier;
+      else break;
+    }
+    return current;
+  };
+
+  const byTier: Record<SignalTier, TierToolCallStats> = {
+    low: emptyTierStats(),
+    mid: emptyTierStats(),
+    high: emptyTierStats(),
+    unknown: emptyTierStats(),
+  };
+
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i]!;
+    switch (e.type) {
+      case 'step':
+        byTier[tierForEvent(e.goalId, i)].steps += 1;
+        break;
+      case 'malformation-reprompt':
+        byTier[tierForEvent(e.goalId, i)].malformations += 1;
+        break;
+      case 'transport-retry':
+        byTier[tierForEvent(e.goalId, i)].transportRetries += 1;
+        break;
+      case 'tool-call':
+        if (e.outcome === 'ran') byTier[tierForEvent(e.goalId, i)].toolCallsRan += 1;
+        else byTier[tierForEvent(e.goalId, i)].toolCallsRefused += 1;
+        break;
+      case 'tier-escalated':
+        byTier[e.from].escalationsFrom += 1;
+        break;
+      default:
+        break;
+    }
+  }
+
+  for (const stats of Object.values(byTier)) {
+    stats.malformationRate = stats.steps > 0 ? stats.malformations / stats.steps : undefined;
+  }
+
+  return { byTier, modelByTier };
 }
 
 // ──────────────────────────────────────────────

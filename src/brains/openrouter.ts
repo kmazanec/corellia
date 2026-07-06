@@ -1,18 +1,19 @@
 /**
- * OpenRouter config for LlmBrain. Per-tier model comes from the env; a default
- * is used only with a warning if a var is unset.
+ * OpenRouter config for LlmBrain. The concrete model per call comes from the
+ * capability/cost-tagged catalog (ADR-044), assembled from the default catalog
+ * plus the env override surface:
  *   OPENROUTER_API_KEY  — required
- *   CORELLIA_MODEL_LOW / _MID / _HIGH — model ID per tier
+ *   CORELLIA_MODELS_JSON — inline JSON array or a path to a JSON file; entries
+ *     merge into the default catalog by id (extend or replace). This is where a
+ *     local-model `endpoint` override lives.
+ *   CORELLIA_MODEL_LOW / _MID / _HIGH — legacy per-band pins: each names the
+ *     preferred model id for that band (backward compatible). Also populates
+ *     `modelByTier`, read by engine sites reporting the resolved model on events.
  */
 
+import { readFileSync } from 'node:fs';
 import type { LlmBrainConfig } from './llm.js';
-
-/** Fallback model per tier, used only when the matching env var is unset. */
-const DEFAULT_MODELS = {
-  low: 'deepseek/deepseek-v4-flash',
-  mid: 'deepseek/deepseek-v4-pro',
-  high: 'z-ai/glm-5.2',
-} as const;
+import { assembleCatalog } from './model-catalog.js';
 
 /**
  * Build an LlmBrainConfig pointed at OpenRouter.
@@ -29,23 +30,19 @@ export function openRouterConfig(env: NodeJS.ProcessEnv = process.env): LlmBrain
     );
   }
 
-  // .env is the source of truth; fall back to a default only with a loud warning.
-  const resolveTier = (tier: 'low' | 'mid' | 'high', envVar: string): string => {
-    const fromEnv = env[envVar];
-    if (fromEnv !== undefined && fromEnv.length > 0) return fromEnv;
-    const fallback = DEFAULT_MODELS[tier];
-    console.warn(`[corellia] ${envVar} unset — using default ${tier} model "${fallback}".`);
-    return fallback;
-  };
+  // Assemble the catalog and per-band pins from the env. A missing pin resolves to
+  // the banded default silently — the catalog always has an entry per band, so
+  // there is nothing to warn about (unlike the old one-model-per-var scheme, an
+  // unset var is not a "missing model", just "use the band's cheapest default").
+  const { catalog, pins } = assembleCatalog(env, (path) => readFileSync(path, 'utf8'));
 
   return {
     baseUrl: 'https://openrouter.ai/api/v1',
     apiKey,
-    modelByTier: {
-      low: resolveTier('low', 'CORELLIA_MODEL_LOW'),
-      mid: resolveTier('mid', 'CORELLIA_MODEL_MID'),
-      high: resolveTier('high', 'CORELLIA_MODEL_HIGH'),
-    },
+    catalog,
+    // The pins double as the legacy `modelByTier` map: the band's preferred model
+    // id, read by engine sites that report the resolved model on events.
+    modelByTier: pins,
     // OpenRouter requires the HTTP-Referer header to attribute traffic; the
     // site-url is optional but recommended for rate-limit visibility.
     headers: {

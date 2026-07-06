@@ -19,10 +19,12 @@
 
 import type { Brain, BrainContext, StepOutput, StepTranscript } from '../contract/brain.js';
 import { MalformedStepError, StepTransportError } from '../contract/brain.js';
-import type { Goal, Metered, TransportIncident, Usage } from '../contract/goal.js';
+import type { Goal, Metered, ModelNeeds, TransportIncident, Usage } from '../contract/goal.js';
 import { ZERO_USAGE } from '../contract/goal.js';
 import type { Tier } from '../contract/goal.js';
 import type { MemoryPointer } from '../contract/goal.js';
+import type { ModelSpec } from './model-catalog.js';
+import { resolveModel } from './model-catalog.js';
 import type { Decision, ChildPlan, DecisionBrief } from '../contract/decision.js';
 import type { Artifact } from '../contract/report.js';
 import type { ToolDef, ToolCall } from '../contract/tool.js';
@@ -39,7 +41,24 @@ export interface LlmBrainConfig {
   baseUrl: string;
   /** The API key to pass as a Bearer token. */
   apiKey: string;
-  /** Which model to call for each tier. */
+  /**
+   * The capability/cost-tagged model catalog (ADR-044). When present, every call
+   * resolves `(tier, needs) → ModelSpec` against it via {@link resolveModel}:
+   * the resolved spec's `id` is the model, and its optional `endpoint`, `provider`,
+   * and `requestTimeoutMs` override the defaults below. When absent, resolution
+   * falls back to {@link modelByTier} — a synthetic single-entry-per-band catalog
+   * is built from it so tier-only behaviour is byte-identical to the pre-catalog
+   * path. `openRouterConfig` always supplies a catalog; a test may omit it and rely
+   * on `modelByTier` alone.
+   */
+  catalog?: ModelSpec[];
+  /**
+   * The model to call for each tier. With a {@link catalog} present, this is a
+   * LEGACY PIN surface: each entry names the band's preferred model id, and is
+   * also read by engine sites that report the resolved model on events
+   * (golden-candidate provenance). Without a catalog, it is the sole resolution
+   * source — `modelByTier[tier]` is called directly.
+   */
   modelByTier: Record<Tier, string>;
   /**
    * Optional per-tier provider routing config (ADR-005 / F-64).
@@ -111,6 +130,46 @@ export function requestTimeoutMsForTier(
   return DEFAULT_REQUEST_TIMEOUT_MS;
 }
 const STEP_MAX_RETRIES = 3;
+
+/**
+ * A concrete call target resolved from `(tier, needs)`: the model id and the
+ * effective endpoint, provider pin, and timeout after applying the resolved
+ * {@link ModelSpec}'s overrides on top of the brain's defaults. Every fetch site
+ * reads its endpoint from here, so a catalog entry with its own `endpoint`
+ * (a local Ollama model, an alternate provider) is reached correctly without the
+ * fetch code knowing anything about the catalog.
+ */
+interface ResolvedModel {
+  model: string;
+  baseUrl: string;
+  apiKey: string;
+  provider: ProviderRoutingConfig | undefined;
+  requestTimeoutMs: number;
+}
+
+/**
+ * Build the synthetic single-entry-per-band catalog from a legacy `modelByTier`
+ * map, so a config without an explicit catalog resolves through the same code
+ * path with byte-identical results: tier `t` resolves to `modelByTier[t]`, with a
+ * capability planted squarely in band `t` and no needs it can fail (so a needs
+ * filter would only ever exclude it, surfacing a clear "catalog cannot serve
+ * this need" error rather than silently mis-routing).
+ */
+function syntheticCatalogFromModelByTier(modelByTier: Record<Tier, string>): ModelSpec[] {
+  const capabilityForBand: Record<Tier, number> = { low: 2, mid: 5, high: 8 };
+  return (Object.keys(modelByTier) as Tier[]).map((tier) => ({
+    id: modelByTier[tier],
+    capability: capabilityForBand[tier],
+    // Permissive tags: a legacy pin carries no capability metadata, so assume it
+    // can serve any need. If it genuinely cannot (e.g. a needs.vision on a
+    // non-vision legacy model), the operator should move to a real catalog.
+    costInPerMtok: 0,
+    costOutPerMtok: 0,
+    context: Number.MAX_SAFE_INTEGER,
+    vision: true,
+    toolCalling: 'strong' as const,
+  }));
+}
 
 // ---------------------------------------------------------------------------
 // Internal types for the OpenAI-compatible shape
@@ -251,20 +310,16 @@ type SleepFn = (ms: number) => Promise<void>;
 interface StepFetchParams {
   transcript: StepTranscript;
   tools: ToolDef[];
-  model: string;
-  tier: Tier;
+  target: ResolvedModel;
   outputSchema: Record<string, unknown> | undefined;
-  providerConfig: ProviderRoutingConfig | undefined;
   transportIncidents: TransportIncident[];
 }
 
 interface MalformedStepRetryParams {
   transcript: StepTranscript;
   tools: ToolDef[];
-  model: string;
-  tier: Tier;
+  target: ResolvedModel;
   outputSchema: Record<string, unknown> | undefined;
-  providerConfig: ProviderRoutingConfig | undefined;
   incidents: TransportIncident[];
   firstResponse: StepResponse;
 }
@@ -1122,10 +1177,42 @@ export class LlmBrain implements Brain {
    * these names and every `dependsOn` entry must reference a sibling `localId`.
    */
   private readonly typeCatalog: string[];
+  /**
+   * The resolved model catalog: the config's `catalog` when present, else a
+   * synthetic single-entry-per-band catalog built from `modelByTier` so both
+   * paths resolve through {@link resolveModel} identically.
+   */
+  private readonly modelCatalog: ModelSpec[];
 
   constructor(config: LlmBrainConfig, typeCatalog?: string[]) {
     this.config = config;
     this.typeCatalog = typeCatalog ?? [];
+    this.modelCatalog =
+      config.catalog && config.catalog.length > 0
+        ? config.catalog
+        : syntheticCatalogFromModelByTier(config.modelByTier);
+  }
+
+  /**
+   * Resolve a call's concrete {@link ResolvedModel} from its tier band and needs.
+   * The catalog picks the model ({@link resolveModel}); the resolved spec's
+   * optional `endpoint`, `provider`, and `requestTimeoutMs` override the brain's
+   * defaults. `provider` falls back to the legacy per-tier `providerByTier`, and
+   * the timeout falls back to {@link requestTimeoutMsForTier} — so a spec that
+   * pins nothing behaves exactly as the pre-catalog config did.
+   */
+  private resolve(tier: Tier, needs: ModelNeeds | undefined): ResolvedModel {
+    const spec = resolveModel(tier, needs, this.modelCatalog);
+    const baseUrl = spec.endpoint?.baseUrl ?? this.config.baseUrl;
+    // A per-model endpoint may carry its own key env var (a local model usually
+    // needs none). Fall back to the brain's default key for the default endpoint.
+    const apiKey =
+      spec.endpoint !== undefined
+        ? (spec.endpoint.apiKeyEnv !== undefined ? process.env[spec.endpoint.apiKeyEnv] ?? '' : '')
+        : this.config.apiKey;
+    const provider = spec.provider ?? this.config.providerByTier?.[tier];
+    const requestTimeoutMs = spec.requestTimeoutMs ?? requestTimeoutMsForTier(this.config, tier);
+    return { model: spec.id, baseUrl, apiKey, provider, requestTimeoutMs };
   }
 
   // -------------------------------------------------------------------------
@@ -1133,7 +1220,7 @@ export class LlmBrain implements Brain {
   // -------------------------------------------------------------------------
 
   private async callCompletions(
-    model: string,
+    target: ResolvedModel,
     messages: ChatMessage[],
     /**
      * `false` → no response_format (free-form text, e.g. produce/repair).
@@ -1144,7 +1231,6 @@ export class LlmBrain implements Brain {
      *   `kind`), which `json_object` mode does nothing to prevent.
      */
     jsonMode: boolean | { schemaName: string; schema: Record<string, unknown> },
-    tier?: Tier,
   ): Promise<{ content: string; usage: Usage; truncated?: boolean }> {
     const fetchFn = this.config.fetchImpl ?? globalThis.fetch;
     const responseFormat: ChatRequest['response_format'] =
@@ -1154,7 +1240,7 @@ export class LlmBrain implements Brain {
           ? { type: 'json_object' }
           : { type: 'json_schema', json_schema: { name: jsonMode.schemaName, strict: false, schema: jsonMode.schema } };
     const body: ChatRequest = {
-      model,
+      model: target.model,
       messages,
       ...(responseFormat !== undefined ? { response_format: responseFormat } : {}),
     };
@@ -1169,16 +1255,16 @@ export class LlmBrain implements Brain {
     let attempt = 0;
     while (true) {
       try {
-        const response = await fetchFn(`${this.config.baseUrl}/chat/completions`, {
+        const response = await fetchFn(`${target.baseUrl}/chat/completions`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${this.config.apiKey}`,
+            Authorization: `Bearer ${target.apiKey}`,
             ...this.config.headers,
           },
           body: JSON.stringify(body),
           // Abort a hung request → falls into the retry below.
-          signal: AbortSignal.timeout(requestTimeoutMsForTier(this.config, tier)),
+          signal: AbortSignal.timeout(target.requestTimeoutMs),
         });
         if (!response.ok) {
           const text = await response.text();
@@ -1220,14 +1306,15 @@ export class LlmBrain implements Brain {
    * wrong-shape-JSON class for decide and judge.
    */
   private async callJson<T>(
-    model: string,
+    target: ResolvedModel,
     messages: ChatMessage[],
     parse: (raw: string) => T,
-    schema?: { schemaName: string; schema: Record<string, unknown> },
-    tier?: Tier,
+    schema: { schemaName: string; schema: Record<string, unknown> } | undefined,
+    tier: Tier,
+    needs: ModelNeeds | undefined,
   ): Promise<{ value: T; usage: Usage }> {
     const mode = schema ?? true;
-    const first = await this.callCompletions(model, messages, mode, tier);
+    const first = await this.callCompletions(target, messages, mode);
     try {
       return { value: parse(first.content), usage: first.usage };
     } catch (firstErr) {
@@ -1271,20 +1358,21 @@ export class LlmBrain implements Brain {
             `no prose, no markdown fences. Include every required field.`,
         },
       ];
-      // On a TRUNCATION or an EMPTY response, retry on the MID model. Truncation:
-      // the mid model has a far larger output budget than the high model (GLM-5.2's
-      // 33K cap is what cut the decide off mid-string; DeepSeek V4 Pro at mid allows
-      // ~384K), so the same response fits. Empty: the model returned nothing at all —
-      // a provider/model fault, not a correctable near-miss; re-asking the SAME model
-      // returned empty again and again (live-tail run 8: four consecutive empty
-      // judge-split responses → isomorphic block), so a different model is the only
-      // move with a chance. For an ordinary parse error, retry on the same model.
-      // Never "downgrade" a mid/low call to mid — only a higher-than-mid model falls back.
-      const retryModel =
-        (first.truncated || empty) && model !== this.config.modelByTier.mid
-          ? this.config.modelByTier.mid
-          : model;
-      const second = await this.callCompletions(retryModel, correctionMessages, mode, tier);
+      // On a TRUNCATION or an EMPTY response, retry on the MID BAND's model (same
+      // needs preserved). Truncation: the mid model has a far larger output budget
+      // than the high model (GLM-5.2's 33K cap is what cut the decide off mid-string;
+      // DeepSeek V4 Pro at mid allows ~384K), so the same response fits. Empty: the
+      // model returned nothing at all — a provider/model fault, not a correctable
+      // near-miss; re-asking the SAME model returned empty again and again (live-tail
+      // run 8: four consecutive empty judge-split responses → isomorphic block), so a
+      // different model is the only move with a chance. For an ordinary parse error,
+      // retry on the same model. The mid-band model is resolved through the registry,
+      // so the fallback honours the same catalog/needs; only a model that is not
+      // already the mid resolution falls back (never a lateral no-op).
+      const midTarget = this.resolve('mid', needs);
+      const retryTarget =
+        (first.truncated || empty) && target.model !== midTarget.model ? midTarget : target;
+      const second = await this.callCompletions(retryTarget, correctionMessages, mode);
       const usage: Usage = {
         promptTokens: first.usage.promptTokens + second.usage.promptTokens,
         completionTokens: first.usage.completionTokens + second.usage.completionTokens,
@@ -1340,7 +1428,7 @@ export class LlmBrain implements Brain {
   // -------------------------------------------------------------------------
 
   async decide(goal: Goal, ctx: BrainContext): Promise<Metered<Decision>> {
-    const model = this.config.modelByTier[ctx.tier];
+    const target = this.resolve(ctx.tier, ctx.needs);
     // When a type catalog is available, inject it so the model can name real
     // goal-types in a split rather than inventing names the registry will reject.
     const catalogSection =
@@ -1407,7 +1495,7 @@ export class LlmBrain implements Brain {
     // at the engine's decide call sites.)
     const attemptDecide = (): Promise<{ value: Decision; usage: Usage }> =>
       this.callJson(
-        model,
+        target,
         messages,
         (raw) => parseDecision(raw, ctx.mustDecompose === true),
         {
@@ -1415,6 +1503,7 @@ export class LlmBrain implements Brain {
           schema: DECISION_SCHEMA,
         },
         ctx.tier,
+        ctx.needs,
       );
     try {
       const result = await attemptDecide();
@@ -1451,7 +1540,7 @@ export class LlmBrain implements Brain {
   }
 
   async produce(goal: Goal, ctx: BrainContext): Promise<Metered<Artifact>> {
-    const model = this.config.modelByTier[ctx.tier];
+    const target = this.resolve(ctx.tier, ctx.needs);
     const messages: ChatMessage[] = [
       {
         role: 'system',
@@ -1472,7 +1561,7 @@ export class LlmBrain implements Brain {
           `Do not truncate or summarize file content — emit every line.`,
       },
     ];
-    const result = await this.callCompletions(model, messages, false, ctx.tier);
+    const result = await this.callCompletions(target, messages, false);
     const files = parseFileBlocks(result.content);
     const value: Artifact = files.length > 0 ? { kind: 'files', files } : { kind: 'text', text: result.content };
     return { value, usage: result.usage };
@@ -1484,7 +1573,7 @@ export class LlmBrain implements Brain {
     rubric: string,
     ctx: BrainContext,
   ): Promise<Metered<Verdict>> {
-    const model = this.config.modelByTier[ctx.tier];
+    const target = this.resolve(ctx.tier, ctx.needs);
     const subjectSummary = summarizeJudgeSubject(subject);
     const messages: ChatMessage[] = [
       {
@@ -1524,10 +1613,10 @@ export class LlmBrain implements Brain {
     // A fail verdict is the safe direction: unverified work never passes, and
     // the isomorphic-failure detector bounds repeated unparseable verdicts.
     try {
-      const result = await this.callJson(model, messages, parseVerdict, {
+      const result = await this.callJson(target, messages, parseVerdict, {
         schemaName: 'verdict',
         schema: VERDICT_SCHEMA,
-      }, ctx.tier);
+      }, ctx.tier, ctx.needs);
       return { value: result.value, usage: result.usage };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
@@ -1556,7 +1645,7 @@ export class LlmBrain implements Brain {
     prescriptions: string[],
     ctx: BrainContext,
   ): Promise<Metered<Artifact>> {
-    const model = this.config.modelByTier[ctx.tier];
+    const target = this.resolve(ctx.tier, ctx.needs);
     const artifactDesc =
       artifact.kind === 'files'
         ? (artifact.files ?? []).map((f) => `\`\`\`${f.path}\n${f.content}\n\`\`\``).join('\n\n')
@@ -1581,7 +1670,7 @@ export class LlmBrain implements Brain {
           `Return ALL files in full — do not truncate, summarize, or omit unchanged files.`,
       },
     ];
-    const result = await this.callCompletions(model, messages, false, ctx.tier);
+    const result = await this.callCompletions(target, messages, false);
     const files = parseFileBlocks(result.content);
     const value: Artifact = files.length > 0 ? { kind: 'files', files } : { kind: 'text', text: result.content };
     return { value, usage: result.usage };
@@ -1596,7 +1685,9 @@ export class LlmBrain implements Brain {
    * orientation without re-reading.
    */
   async summarize(text: string, _ctx: BrainContext): Promise<Metered<string>> {
-    const model = this.config.modelByTier['low'];
+    // Eviction summarization is a frequent, low-stakes compression: always the
+    // LOW band, and never image-bearing, so it carries no needs.
+    const target = this.resolve('low', undefined);
     const messages: ChatMessage[] = [
       {
         role: 'system',
@@ -1615,7 +1706,7 @@ export class LlmBrain implements Brain {
           `READ CONTENT:\n${text}`,
       },
     ];
-    const result = await this.callCompletions(model, messages, false);
+    const result = await this.callCompletions(target, messages, false);
     return { value: result.content.trim(), usage: result.usage };
   }
 
@@ -1625,20 +1716,18 @@ export class LlmBrain implements Brain {
     tools: ToolDef[],
     ctx: BrainContext,
   ): Promise<StepOutput> {
-    const model = this.config.modelByTier[ctx.tier];
+    // Resolve the concrete model/endpoint/provider/timeout for this step from the
+    // catalog. The resolved spec's `provider` (or the legacy per-tier
+    // `providerByTier` fallback inside resolve) becomes the wire `provider` field;
+    // absent → buildStepRequest omits it (wire-compatible, F-64 / ADR-005).
+    const target = this.resolve(ctx.tier, ctx.needs);
     const transportIncidents: TransportIncident[] = [];
-    // Per-tier provider routing config (F-64 / ADR-005): sourced from
-    // LlmBrainConfig.providerByTier[ctx.tier]; absent entry → undefined →
-    // buildStepRequest omits the provider field entirely (wire-compatible).
-    const providerConfig = this.config.providerByTier?.[ctx.tier];
 
     const wireResponse = await this.fetchStepResponse({
       transcript,
       tools,
-      model,
-      tier: ctx.tier,
+      target,
       outputSchema: ctx.outputSchema,
-      providerConfig,
       transportIncidents,
     });
     const incidents = transportIncidents.slice();
@@ -1651,10 +1740,8 @@ export class LlmBrain implements Brain {
     return this.retryMalformedStep({
       transcript,
       tools,
-      model,
-      tier: ctx.tier,
+      target,
       outputSchema: ctx.outputSchema,
-      providerConfig,
       incidents,
       firstResponse: wireResponse,
     });
@@ -1671,16 +1758,16 @@ export class LlmBrain implements Brain {
     const requestBody = buildStepRequest(
       params.transcript,
       params.tools,
-      params.model,
+      params.target.model,
       params.outputSchema,
-      params.providerConfig,
+      params.target.provider,
     );
     let attempt = 0;
 
     while (true) {
       let response: Response;
       try {
-        response = await this.postStepRequest(requestBody, params.tier);
+        response = await this.postStepRequest(requestBody, params.target);
       } catch (networkErr) {
         const isTimeout = isTimeoutError(networkErr);
         if (await retryNetworkStepRequest(params.transportIncidents, sleepFn, attempt, networkErr, isTimeout)) {
@@ -1730,11 +1817,11 @@ export class LlmBrain implements Brain {
     const repromptBody = buildStepRequest(
       correctedTranscript,
       params.tools,
-      params.model,
+      params.target.model,
       params.outputSchema,
-      params.providerConfig,
+      params.target.provider,
     );
-    const repromptResponse = await this.postStepRequest(repromptBody, params.tier);
+    const repromptResponse = await this.postStepRequest(repromptBody, params.target);
 
     if (!repromptResponse.ok) {
       const errorText = await repromptResponse.text();
@@ -1760,17 +1847,17 @@ export class LlmBrain implements Brain {
     return mergeMalformedStepRetry(params.firstResponse, repromptWire, repromptUsage, repromptResult, params.incidents);
   }
 
-  private async postStepRequest(requestBody: StepRequest, tier: Tier): Promise<Response> {
+  private async postStepRequest(requestBody: StepRequest, target: ResolvedModel): Promise<Response> {
     const fetchFn = this.config.fetchImpl ?? globalThis.fetch;
-    return fetchFn(`${this.config.baseUrl}/chat/completions`, {
+    return fetchFn(`${target.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.config.apiKey}`,
+        Authorization: `Bearer ${target.apiKey}`,
         ...this.config.headers,
       },
       body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(requestTimeoutMsForTier(this.config, tier)),
+      signal: AbortSignal.timeout(target.requestTimeoutMs),
     });
   }
 }
