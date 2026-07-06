@@ -54,6 +54,7 @@ describe('step-loop transcript helpers', () => {
     const store = new CapturingStore();
     const seenCalls = new Set(['guard-key']);
     const callKeyByCallId = new Map([['c1', 'guard-key']]);
+    const readOutputCache = new Map([['guard-key', 'x'.repeat(1000)]]);
     const usages: Usage[] = [];
 
     await boundStepLoopTranscript({
@@ -64,6 +65,7 @@ describe('step-loop transcript helpers', () => {
       now: () => 123,
       seenCalls,
       callKeyByCallId,
+      readOutputCache,
       summarizeRead: async () => ({
         value: 'important gist',
         usage: { promptTokens: 1, completionTokens: 2 },
@@ -74,6 +76,7 @@ describe('step-loop transcript helpers', () => {
 
     expect(transcript[1]?.content).toContain('important gist');
     expect(seenCalls.has('guard-key')).toBe(false);
+    expect(readOutputCache.has('guard-key')).toBe(false);
     expect(usages).toEqual([{ promptTokens: 1, completionTokens: 2 }]);
     expect(store.events[0]).toMatchObject({
       type: 'context-evicted',
@@ -98,6 +101,7 @@ describe('step-loop transcript helpers', () => {
       now: () => 456,
       seenCalls: new Set(),
       callKeyByCallId: new Map(),
+      readOutputCache: new Map(),
       cap: 10,
     });
 

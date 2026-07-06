@@ -3,6 +3,7 @@ import { MalformedStepError, isTransportErrorLike } from '../contract/brain.js';
 import type { EventStore } from '../contract/events.js';
 import type { Budget, Goal } from '../contract/goal.js';
 import type { Scratchpad } from './scratchpad.js';
+import type { ReadOutputCache } from './step-loop-guards.js';
 import { type StepLoopResult } from './step-loop-result.js';
 import { evictTranscriptAfterTruncation } from './step-loop-transcript.js';
 
@@ -21,6 +22,7 @@ export async function handleStepLoopStepError(params: {
   now: () => number;
   seenCalls: Set<string>;
   callKeyByCallId: Map<string, string>;
+  readOutputCache: ReadOutputCache;
   malformRecoveryUsed: boolean;
   truncationEvictionCap?: number;
 }): Promise<StepLoopStepErrorResult> {
@@ -76,6 +78,7 @@ async function recoverMalformedStep(
       now: params.now,
       seenCalls: params.seenCalls,
       callKeyByCallId: params.callKeyByCallId,
+      readOutputCache: params.readOutputCache,
       ...(params.truncationEvictionCap !== undefined ? { cap: params.truncationEvictionCap } : {}),
     });
   }

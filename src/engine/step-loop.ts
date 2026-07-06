@@ -48,6 +48,7 @@ export async function runStepLoop(params: {
     scratchpad,
     seenCalls,
     callKeyByCallId,
+    readOutputCache,
     isExploreThenEmit,
     hardToolCallCap,
   } = session;
@@ -125,6 +126,7 @@ export async function runStepLoop(params: {
       now: params.now,
       seenCalls,
       callKeyByCallId,
+      readOutputCache,
       summarizeRead: params.brain.summarize !== undefined
         ? (text) => params.brain.summarize!(text, params.ctx)
         : undefined,
@@ -146,6 +148,7 @@ export async function runStepLoop(params: {
         now: params.now,
         seenCalls,
         callKeyByCallId,
+        readOutputCache,
         malformRecoveryUsed,
       });
       if (stepError.kind === 'recover') {
@@ -233,6 +236,7 @@ export async function runStepLoop(params: {
       typeDef: params.typeDef,
       seenCalls,
       callKeyByCallId,
+      readOutputCache,
       state: {
         remainingToolCalls,
         toolCallsMade,

@@ -41,6 +41,15 @@ export function dupKey(name: string, args: Record<string, unknown>): string {
 }
 
 /**
+ * Cache of prior read-only tool outputs, keyed by dupKey. A refused duplicate
+ * read hands the cached output back inline (prefixed) so the leaf proceeds
+ * instead of reasoning around a bare refusal. The cache is released in lockstep
+ * with the dedup guard: an evicted or write-invalidated entry drops both, so a
+ * re-read is allowed and no stale content is served.
+ */
+export type ReadOutputCache = Map<string, string>;
+
+/**
  * Release the duplicate-read guard for a call whose result was evicted from the
  * transcript. The read is no longer in context, so the model may re-read it.
  */
@@ -48,9 +57,13 @@ export function releaseGuardForCallId(
   seenCalls: Set<string>,
   callKeyByCallId: Map<string, string>,
   callId: string,
+  readOutputCache?: ReadOutputCache,
 ): void {
   const key = callKeyByCallId.get(callId);
-  if (key !== undefined) seenCalls.delete(key);
+  if (key !== undefined) {
+    seenCalls.delete(key);
+    readOutputCache?.delete(key);
+  }
 }
 
 /**
@@ -60,6 +73,7 @@ export function releaseGuardForCallId(
 export function invalidateReadGuardForPath(
   seenCalls: Set<string>,
   writtenPath: string,
+  readOutputCache?: ReadOutputCache,
 ): void {
   for (const readTool of READ_ONLY_TOOL_NAMES) {
     const candidateKeys = [
@@ -69,6 +83,7 @@ export function invalidateReadGuardForPath(
     ];
     for (const key of candidateKeys) {
       seenCalls.delete(key);
+      readOutputCache?.delete(key);
     }
   }
 }

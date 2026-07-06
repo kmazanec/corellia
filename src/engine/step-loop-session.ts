@@ -5,7 +5,7 @@ import type { ToolDef } from '../contract/tool.js';
 import { newScratchpad, type Scratchpad } from './scratchpad.js';
 import { stepLoopHardToolCallCap } from './step-loop-budget.js';
 import { buildStepLoopInitialTranscript } from './step-loop-context.js';
-import { isExploreThenEmitLeaf } from './step-loop-guards.js';
+import { isExploreThenEmitLeaf, type ReadOutputCache } from './step-loop-guards.js';
 import { NOTE_TOOL_DEF, deriveToolDefs } from './step-loop-tools.js';
 
 export interface StepLoopCounters {
@@ -28,6 +28,7 @@ export interface StepLoopSession {
   scratchpad: Scratchpad;
   seenCalls: Set<string>;
   callKeyByCallId: Map<string, string>;
+  readOutputCache: ReadOutputCache;
   isExploreThenEmit: boolean;
   hardToolCallCap: number;
   counters: StepLoopCounters;
@@ -60,6 +61,7 @@ export function createStepLoopSession(params: {
     scratchpad: newScratchpad(),
     seenCalls: new Set<string>(),
     callKeyByCallId: new Map<string, string>(),
+    readOutputCache: new Map<string, string>(),
     isExploreThenEmit,
     hardToolCallCap: stepLoopHardToolCallCap(params.budget.toolCalls),
     counters: {

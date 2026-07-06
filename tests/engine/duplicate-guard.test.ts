@@ -190,6 +190,46 @@ describe('duplicate guard — read-only call refused on repeat (AC 3)', () => {
     expect(broker.calls[0]?.call.id).toBe('r1');
   });
 
+  it('serves the prior read result inline (prefixed) so the leaf proceeds', async () => {
+    const store = new MemoryEventStore();
+    const goal = makeGoalWithBudget(10);
+    const broker = new FakeBroker([successResult('r1', 'the file body')], store);
+    const capturedTranscripts: import('../../src/contract/brain.js').StepTranscript[] = [];
+    let callCount = 0;
+
+    const brain: Brain = {
+      async decide() { throw new Error('not used'); },
+      async produce() { throw new Error('not used'); },
+      async judge() { throw new Error('not used'); },
+      async repair() { throw new Error('not used'); },
+      async step(_goal, transcript) {
+        capturedTranscripts.push([...transcript]);
+        callCount++;
+        if (callCount === 1) {
+          return toolCallsStep(readCall('r1', 'src/y.ts'), readCall('r2', 'src/y.ts'));
+        }
+        return artifactStep();
+      },
+    };
+
+    const engine = new Engine({
+      registry: buildRegistry([toolGrantedType()]),
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      broker,
+    });
+    await engine.run(goal);
+
+    const secondTranscript = capturedTranscripts[1] ?? [];
+    const toolMessages = secondTranscript.filter((m) => m.role === 'tool');
+    const dupMsg = toolMessages[1];
+    const content = dupMsg && 'content' in dupMsg ? dupMsg.content : '';
+    // The cached body is handed back inline behind a clear prefix.
+    expect(content).toContain('[duplicate read');
+    expect(content).toContain('the file body');
+  });
+
   it('refused result is appended to transcript so brain can see why it was denied', async () => {
     const store = new MemoryEventStore();
     const goal = makeGoalWithBudget(10);

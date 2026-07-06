@@ -12,6 +12,7 @@ import {
   READ_ONLY_TOOL_NAMES,
   dupKey,
   invalidateReadGuardForPath,
+  type ReadOutputCache,
 } from './step-loop-guards.js';
 import { summarizeToolArgs } from './tool-call-summary.js';
 
@@ -45,6 +46,7 @@ export interface StepToolRoutingParams {
   typeDef: GoalTypeDef;
   seenCalls: Set<string>;
   callKeyByCallId: Map<string, string>;
+  readOutputCache: ReadOutputCache;
   state: StepToolRoutingState;
 }
 
@@ -82,13 +84,16 @@ export async function routeStepToolCalls(params: StepToolRoutingParams): Promise
     if (READ_ONLY_TOOL_NAMES.has(call.name)) {
       state.readCalls++;
       if (params.isExploreThenEmit) state.exploreReadCalls++;
+      if (result.ok) {
+        params.readOutputCache.set(params.callKeyByCallId.get(call.id) ?? dupKey(call.name, call.args), result.output);
+      }
     }
     const isWrite = call.name === 'write_file' || call.name === 'edit_file';
     if (isWrite && result.ok) {
       state.writeCalls++;
       const writtenPath = typeof call.args['path'] === 'string' ? call.args['path'] : undefined;
       if (writtenPath !== undefined) {
-        invalidateReadGuardForPath(params.seenCalls, writtenPath);
+        invalidateReadGuardForPath(params.seenCalls, writtenPath, params.readOutputCache);
       }
     }
 
@@ -147,10 +152,19 @@ async function refuseDuplicateRead(params: StepToolRoutingParams, call: ToolCall
     return false;
   }
 
-  const refusalReason =
-    `Duplicate read refused (F-64): an identical call to ${call.name} with the ` +
-    `same arguments was already executed this attempt. Use the earlier result ` +
-    `already in the transcript instead of re-reading.`;
+  // The read was already executed this attempt. Rather than refuse and make the
+  // model reason around a bare error, hand back the prior result's cached output
+  // (prefixed) so the leaf proceeds. Re-costing those tokens is exactly what
+  // scratchpad eviction already manages. If the cache has since been released
+  // (evicted / write-invalidated), the guard would have been released too and
+  // we'd never reach here — so a miss falls back to a plain refusal.
+  const cached = params.readOutputCache.get(key);
+  const content =
+    cached !== undefined
+      ? `[duplicate read — cached result of an identical ${call.name} call earlier this attempt]\n${cached}`
+      : `Duplicate read (F-64): an identical call to ${call.name} with the same ` +
+        `arguments was already executed this attempt. Use the earlier result ` +
+        `already in the transcript instead of re-reading.`;
   const summary = summarizeToolArgs(call.args);
   await params.store.append({
     type: 'tool-call',
@@ -159,13 +173,16 @@ async function refuseDuplicateRead(params: StepToolRoutingParams, call: ToolCall
     tool: call.name,
     callId: call.id,
     outcome: 'refused',
-    reason: refusalReason,
+    reason:
+      cached !== undefined
+        ? `Duplicate read (F-64): served cached result of an identical ${call.name} call earlier this attempt`
+        : `Duplicate read (F-64): identical ${call.name} already executed this attempt (no cached result available)`,
     ...(summary !== undefined ? { args: summary } : {}),
   });
   params.transcript.push({
     role: 'tool',
     callId: call.id,
-    content: refusalReason,
+    content,
   });
   return true;
 }

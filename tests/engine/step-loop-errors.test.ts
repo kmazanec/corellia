@@ -23,6 +23,7 @@ describe('step-loop step error handling', () => {
       now: () => 1,
       seenCalls: new Set(),
       callKeyByCallId: new Map(),
+      readOutputCache: new Map(),
       malformRecoveryUsed: false,
     });
 
@@ -53,6 +54,7 @@ describe('step-loop step error handling', () => {
       now: () => 2,
       seenCalls: new Set(['read_file:{"path":"big.ts"}']),
       callKeyByCallId: new Map([['r1', 'read_file:{"path":"big.ts"}']]),
+      readOutputCache: new Map([['read_file:{"path":"big.ts"}', 'A'.repeat(2_000)]]),
       malformRecoveryUsed: false,
       truncationEvictionCap: 20,
     });
@@ -77,6 +79,7 @@ describe('step-loop step error handling', () => {
       now: () => 3,
       seenCalls: new Set(),
       callKeyByCallId: new Map(),
+      readOutputCache: new Map(),
       malformRecoveryUsed: true,
     });
 
@@ -100,6 +103,7 @@ describe('step-loop step error handling', () => {
       now: () => 4,
       seenCalls: new Set(),
       callKeyByCallId: new Map(),
+      readOutputCache: new Map(),
       // recovery already burned: the classification is what's under test
       malformRecoveryUsed: true,
     });
@@ -132,6 +136,7 @@ describe('raw timeout classification', () => {
       now: () => 5,
       seenCalls: new Set(),
       callKeyByCallId: new Map(),
+      readOutputCache: new Map(),
       // recovery already burned: the classification is what's under test
       malformRecoveryUsed: true,
     });
@@ -157,6 +162,7 @@ describe('timeout in-loop recovery', () => {
       now: () => 6,
       seenCalls: new Set(),
       callKeyByCallId: new Map(),
+      readOutputCache: new Map(),
       malformRecoveryUsed: false,
     });
 
@@ -183,6 +189,7 @@ describe('network-fault classification breadth', () => {
       now: () => 7,
       seenCalls: new Set(),
       callKeyByCallId: new Map(),
+      readOutputCache: new Map(),
       malformRecoveryUsed: true,
     });
 

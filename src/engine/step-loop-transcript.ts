@@ -8,7 +8,7 @@ import {
   type EvictionResult,
   type Scratchpad,
 } from './scratchpad.js';
-import { releaseGuardForCallId } from './step-loop-guards.js';
+import { releaseGuardForCallId, type ReadOutputCache } from './step-loop-guards.js';
 
 const NOTE_PREFIX = 'YOUR NOTES';
 
@@ -20,6 +20,7 @@ export interface BoundedTranscriptParams {
   now: () => number;
   seenCalls: Set<string>;
   callKeyByCallId: Map<string, string>;
+  readOutputCache: ReadOutputCache;
   summarizeRead: ((text: string) => Promise<{ value: string; usage: Usage }>) | undefined;
   debitUsage: (usage: Usage) => void;
   cap?: number;
@@ -33,6 +34,7 @@ export interface TruncatedTranscriptParams {
   now: () => number;
   seenCalls: Set<string>;
   callKeyByCallId: Map<string, string>;
+  readOutputCache: ReadOutputCache;
   cap?: number;
 }
 
@@ -83,12 +85,12 @@ async function evictBoundedTranscript(
 }
 
 async function emitContextEvicted(
-  params: Pick<BoundedTranscriptParams, 'goal' | 'store' | 'now' | 'seenCalls' | 'callKeyByCallId'>,
+  params: Pick<BoundedTranscriptParams, 'goal' | 'store' | 'now' | 'seenCalls' | 'callKeyByCallId' | 'readOutputCache'>,
   eviction: EvictionResult,
   mode: string,
 ): Promise<void> {
   for (const callId of eviction.evictedCallIds) {
-    releaseGuardForCallId(params.seenCalls, params.callKeyByCallId, callId);
+    releaseGuardForCallId(params.seenCalls, params.callKeyByCallId, callId, params.readOutputCache);
   }
   await params.store.append({
     type: 'context-evicted',
