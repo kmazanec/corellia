@@ -592,6 +592,7 @@ export function diffBodiesWithinScope(
 export async function collectTree(
   worktree: TreeWorktree,
   store: EventStore,
+  commitMessage?: { subject: string; body: string },
 ): Promise<{ commits: string[] }> {
   const { root, repoRoot, branch, treeId, goalId } = worktree;
 
@@ -610,10 +611,16 @@ export async function collectTree(
   const commits: string[] = [];
 
   if (statusOutput.length > 0) {
-    // Commit the staged changes.
+    // Commit the staged changes with a descriptive, conventional-commit message
+    // derived from the goal's intent (D1); fall back to the generic subject when
+    // the caller supplied none.
+    const commitArgs =
+      commitMessage !== undefined
+        ? ['-m', commitMessage.subject, '-m', commitMessage.body]
+        : ['-m', `feat(tree): collect worktree ${treeId}`];
     execFileSync(
       'git',
-      ['-C', root, 'commit', '-m', `feat(tree): collect worktree ${treeId}`],
+      ['-C', root, 'commit', ...commitArgs],
       { stdio: 'pipe' },
     );
 

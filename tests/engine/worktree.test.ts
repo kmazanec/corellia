@@ -375,6 +375,37 @@ describe('collect completed tree', () => {
     expect(existsSync(wtResult.root)).toBe(false);
   });
 
+  it('writes the supplied descriptive commit subject+body (D1)', async () => {
+    const repo = makeTempRepo();
+    const store = new InMemoryEventStore();
+
+    const wtResult = await openTreeWorktree(repo, 'goal-descriptive', store);
+    const worktree = {
+      treeId: wtResult.treeId,
+      branch: wtResult.branch,
+      root: wtResult.root,
+      repoRoot: repo,
+      goalId: 'goal-descriptive',
+    };
+
+    writeFileSync(join(wtResult.root, 'feature.ts'), 'export const done = true;\n');
+
+    await collectTree(worktree, store, {
+      subject: 'feat(settings): add a dark-mode toggle',
+      body: 'Goals that contributed to this collection:\n- root-1 (deliver-intent): add a dark-mode toggle',
+    });
+
+    const message = execFileSync('git', ['log', '-1', '--format=%B', wtResult.branch], {
+      cwd: repo,
+      stdio: 'pipe',
+      encoding: 'utf-8',
+    }).trim();
+    expect(message).toContain('feat(settings): add a dark-mode toggle');
+    expect(message).toContain('- root-1 (deliver-intent): add a dark-mode toggle');
+    // The generic placeholder subject must NOT appear.
+    expect(message).not.toContain('collect worktree');
+  });
+
   it('does NOT commit the .venv dependency SYMLINK (AC-4 run #8)', async () => {
     // The lifecycle symlinks the repo root's .venv into the worktree. A gitignore
     // pattern ending in `/` matches directories only, so `.venv/` would NOT ignore
