@@ -3,7 +3,7 @@ import type { EventStore } from '../contract/events.js';
 import type { Goal, MemoryPointer } from '../contract/goal.js';
 import type { MemoryView } from '../contract/memory.js';
 import type { Report } from '../contract/report.js';
-import { COMPREHENSION_WALLCLOCK_FLOOR_MS, floorWallClock, subdivide } from './budget.js';
+import { subdivide } from './budget.js';
 import { diveFactsAsMemories, type FactsForRegions } from './knowledge-memory.js';
 import { blockedReport } from './reports.js';
 
@@ -19,19 +19,12 @@ export async function buildSplitChildGoals(params: {
 
   return Promise.all(params.children.map(async (child, index) => {
     const childMemories = await params.memory.query(child.title, child.scope);
-    let childBudget = budgets[index] ?? {
+    const childBudget = budgets[index] ?? {
       attempts: 1,
       tokens: 1,
       toolCalls: 1,
       wallClockMs: 1,
     };
-    if (isComprehensionDive(child.type)) {
-      childBudget = floorWallClock(
-        childBudget,
-        COMPREHENSION_WALLCLOCK_FLOOR_MS,
-        params.parent.budget.wallClockMs,
-      );
-    }
 
     return {
       id: `${params.parent.id}/${child.localId}`,
@@ -235,8 +228,4 @@ async function lateDiveMemories(params: {
     scope: params.childGoal.scope,
     headSha,
   });
-}
-
-function isComprehensionDive(type: string): boolean {
-  return type === 'map-repo' || type === 'deep-dive-region';
 }

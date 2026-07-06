@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { subdivide, consume, consumeN, floorWallClock, COMPREHENSION_WALLCLOCK_FLOOR_MS } from '../../src/engine/budget.js';
+import { subdivide, consume, consumeN } from '../../src/engine/budget.js';
 import type { Budget } from '../../src/contract/goal.js';
 import { Engine } from '../../src/engine/engine.js';
 import {
@@ -22,14 +22,16 @@ const base: Budget = {
 };
 
 describe('subdivide', () => {
-  // ADR-030: attempts, tokens, and toolCalls are INHERITED, not divided (dividing
-  // them floored a node toward nothing at depth — attempts to 1, tokens and
-  // toolCalls to a fraction-of-a-fraction that starved deep comprehension). Only
-  // wallClockMs still subdivides proportionally (a real external-time bound).
-  it('subdivides wallClockMs proportionally', () => {
+  // ADR-033/ADR-046: budget never steers what or how a goal builds. EVERY
+  // dimension is INHERITED, not divided. attempts/tokens/toolCalls inherit per
+  // ADR-030 (dividing floored a node toward nothing at depth). wallClockMs
+  // inherits per ADR-046 — dividing it rationed a wide fan-out's children down to
+  // ~90s and killed productive leaves. Wall-clock is enforced once, tree-wide,
+  // against the root deadline (see tree-spend), never as a per-child slice.
+  it('inherits wallClockMs (does not divide it) — no per-child rationing', () => {
     const [a, b] = subdivide(base, [0.5, 0.5]);
-    expect(a!.wallClockMs).toBe(base.wallClockMs * 0.5);
-    expect(b!.wallClockMs).toBe(base.wallClockMs * 0.5);
+    expect(a!.wallClockMs).toBe(base.wallClockMs);
+    expect(b!.wallClockMs).toBe(base.wallClockMs);
   });
 
   it('inherits attempts, tokens, and toolCalls (does not divide them)', () => {
@@ -41,62 +43,33 @@ describe('subdivide', () => {
     }
   });
 
-  it('does not floor a deep child at a tiny share — keeps attempts/tokens/toolCalls', () => {
-    // The defect ADR-030 fixes: a tiny share floored attempts to 1 (forbidding
-    // split), and tokens + toolCalls toward nothing (starving deep comprehension
-    // — a deep map-repo could not even afford a directory listing). Inheritance
-    // prevents all three.
+  it('does not floor a deep child at a tiny share — keeps every dimension', () => {
+    // The defect ADR-030/ADR-046 fix: a tiny share floored attempts to 1
+    // (forbidding split), tokens + toolCalls toward nothing (starving deep
+    // comprehension), and wallClockMs to a sliver (killing a productive leaf in a
+    // wide fan-out). Inheritance prevents all four.
     const [a] = subdivide(base, [0.1]);
     expect(a!.attempts).toBe(base.attempts);
     expect(a!.tokens).toBe(base.tokens);
     expect(a!.toolCalls).toBe(base.toolCalls);
+    expect(a!.wallClockMs).toBe(base.wallClockMs);
   });
 
-  it('floors fractional wallClockMs results', () => {
-    const [a] = subdivide(base, [0.33]);
-    expect(a!.wallClockMs).toBe(Math.floor(base.wallClockMs * 0.33));
+  it('does not starve any child no matter how wide the fan-out', () => {
+    // The starvation the tree-deadline model removes by construction: 13 siblings
+    // used to ration wall-clock to ~1/13 each. Now every child inherits the full
+    // allowance; the tree deadline is the only wall-clock bound.
+    const shares = Array.from({ length: 13 }, () => 1 / 13);
+    for (const child of subdivide(base, shares)) {
+      expect(child.wallClockMs).toBe(base.wallClockMs);
+    }
   });
 
   it('handles a single child with share 1.0', () => {
     const [a] = subdivide(base, [1.0]);
     expect(a!.attempts).toBe(10);
     expect(a!.tokens).toBe(1000);
-  });
-
-  it('subdivided wallClockMs sum ≤ parent (no share overflow)', () => {
-    const shares = [0.3, 0.3, 0.3];
-    const parts = subdivide(base, shares);
-    const totalWall = parts.reduce((s, p) => s + p.wallClockMs, 0);
-    expect(totalWall).toBeLessThanOrEqual(base.wallClockMs);
-  });
-});
-
-describe('floorWallClock', () => {
-  // Comprehension dives are starved when a wide split shrinks their proportional
-  // wall-clock below a workable minimum (build run live-self-63daa9cf). The floor
-  // raises a sub-floor child up to the floor, bounded by the parent's wall-clock.
-  const big = 1_800_000; // 30 min parent
-
-  it('raises a below-floor wall-clock up to the floor', () => {
-    const starved: Budget = { attempts: 80, tokens: 5_000_000, toolCalls: 600, wallClockMs: 94_000 };
-    const floored = floorWallClock(starved, COMPREHENSION_WALLCLOCK_FLOOR_MS, big);
-    expect(floored.wallClockMs).toBe(COMPREHENSION_WALLCLOCK_FLOOR_MS);
-    // other dimensions untouched
-    expect(floored.attempts).toBe(80);
-    expect(floored.tokens).toBe(5_000_000);
-  });
-
-  it('leaves an already-sufficient wall-clock unchanged', () => {
-    const ample: Budget = { attempts: 80, tokens: 5_000_000, toolCalls: 600, wallClockMs: 600_000 };
-    expect(floorWallClock(ample, COMPREHENSION_WALLCLOCK_FLOOR_MS, big)).toBe(ample);
-  });
-
-  it('never grants a child more wall-clock than the parent had', () => {
-    // A small parent (2 min) caps the floor: the child cannot get 5 min.
-    const smallParent = 120_000;
-    const starved: Budget = { attempts: 80, tokens: 5_000_000, toolCalls: 600, wallClockMs: 30_000 };
-    const floored = floorWallClock(starved, COMPREHENSION_WALLCLOCK_FLOOR_MS, smallParent);
-    expect(floored.wallClockMs).toBe(smallParent);
+    expect(a!.wallClockMs).toBe(base.wallClockMs);
   });
 });
 

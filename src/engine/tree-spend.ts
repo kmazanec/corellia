@@ -16,9 +16,12 @@ export const DEFAULT_SPEND_CEILING_USD = 15;
 export const WORST_CASE_PRICE_PER_TOKEN = 0.000025;
 
 /**
- * Mutable tree-scoped accumulator for the dollar ceiling. Created once at the
- * root run() call and passed by reference through all recursive child runs so
- * the whole tree shares a single spend counter. Never subdivided.
+ * Mutable tree-scoped accumulator for the two real-cost backstops — the dollar
+ * ceiling and the wall-clock deadline (ADR-033: budget is a runaway backstop,
+ * never a per-goal steer). Created once at the root run() call and passed by
+ * reference through all recursive child runs so the whole tree shares one spend
+ * counter and one deadline. Never subdivided: every goal in the tree checks the
+ * SAME deadline, so a wide fan-out can no longer starve an individual leaf.
  */
 export interface TreeState {
   /** Running total of reported costUsd across all brain calls in the tree. */
@@ -29,6 +32,13 @@ export interface TreeState {
    */
   ceilingUsd: number;
   /**
+   * Absolute wall-clock deadline (ms since epoch) for the whole tree, fixed at
+   * the root from `now() + rootBudget.wallClockMs`. A goal blocks only when this
+   * tree-wide deadline passes — the wall-clock is a runaway/stall backstop tied
+   * to the root's real time grant, not a per-goal slice that shrinks with breadth.
+   */
+  deadline: number;
+  /**
    * Set to true after the first 'ceiling-reached' event is emitted for this
    * tree. Prevents duplicate emission when concurrent branches all find the
    * ceiling tripped (ADR-017 one-in-flight exception: at most one event per
@@ -37,8 +47,19 @@ export interface TreeState {
   ceilingEmitted?: boolean;
 }
 
-export function createTreeState(ceilingUsd = DEFAULT_SPEND_CEILING_USD): TreeState {
-  return { spentUsd: 0, ceilingUsd };
+export function createTreeState(
+  ceilingUsd = DEFAULT_SPEND_CEILING_USD,
+  deadline = Number.POSITIVE_INFINITY,
+): TreeState {
+  return { spentUsd: 0, ceilingUsd, deadline };
+}
+
+/**
+ * True once the tree's shared wall-clock deadline has passed. The single
+ * enforcement point for wall-clock across every goal in the tree.
+ */
+export function hasReachedTreeDeadline(treeState: TreeState, now: number): boolean {
+  return now >= treeState.deadline;
 }
 
 export function debitTreeState(treeState: TreeState, usage: Usage): void {

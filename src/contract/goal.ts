@@ -54,7 +54,12 @@ export interface Budget {
   tokens: number;
   /** Agentic round-trip counter. Tracked for observability; never blocks work. */
   toolCalls: number;
-  /** Wall-clock backstop in milliseconds — a hard bound on runaway external time. */
+  /**
+   * Wall-clock backstop in milliseconds — a hard bound on runaway external time.
+   * The ROOT's value fixes one deadline for the whole tree; children inherit it
+   * as a reported allowance but are never sliced by it. A goal blocks only when
+   * the shared tree deadline passes, never per-goal by fan-out width (ADR-046).
+   */
   wallClockMs: number;
 }
 

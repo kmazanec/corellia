@@ -62,18 +62,26 @@ describe('split child goals', () => {
     });
   });
 
-  it('floors comprehension child wall-clock budgets', async () => {
+  it('inherits the full parent wall-clock for every child, regardless of share or type', async () => {
+    // ADR-046: no per-child wall-clock slice and no comprehension carve-out — a
+    // child inherits the parent's full wall-clock allowance even at a tiny share.
+    // Wall-clock is enforced once against the tree deadline, so a wide fan-out can
+    // never starve a leaf. A map-repo dive at share 0.01 keeps the full 600_000.
     const parent = makeGoal({
       budget: { attempts: 5, tokens: 100, toolCalls: 20, wallClockMs: 600_000 },
     });
 
-    const [goal] = await buildSplitChildGoals({
+    const [dive, buildLeaf] = await buildSplitChildGoals({
       parent,
-      children: [child({ localId: 'map', type: 'map-repo', budgetShare: 0.01 })],
+      children: [
+        child({ localId: 'map', type: 'map-repo', budgetShare: 0.01 }),
+        child({ localId: 'build', budgetShare: 0.01 }),
+      ],
       memory: { async query() { return []; } },
     });
 
-    expect(goal?.budget.wallClockMs).toBe(300_000);
+    expect(dive?.budget.wallClockMs).toBe(600_000);
+    expect(buildLeaf?.budget.wallClockMs).toBe(600_000);
   });
 
   it('appends child-spawned events with global dependency ids', async () => {

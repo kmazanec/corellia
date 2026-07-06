@@ -981,7 +981,8 @@ describe('fix 3 — wallClockMs budget exhaustion', () => {
 
     const registry = buildRegistry([leafTypeDef()]);
 
-    // Time starts at 1000, wallClockMs: 0 → deadline = 1000, first t() call returns 1001
+    // wallClockMs: 0 → the tree deadline is fixed at root and is already in the
+    // past by the time the attempt loop checks it, so exhaustion fires.
     let tick = 1000;
     const engine = new Engine({
       registry,
@@ -998,6 +999,99 @@ describe('fix 3 — wallClockMs budget exhaustion', () => {
     expect(exhausted.length).toBeGreaterThan(0);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((exhausted[0] as any).dimension).toBe('wallClockMs');
+  });
+
+  it('a wide fan-out does NOT starve any leaf — every child shares the tree deadline (ADR-046)', async () => {
+    // The starvation this ADR removes: under the old per-goal subdivision, a root
+    // that fanned out to N children gave each leaf ~1/N of the wall-clock; a wide
+    // fan-out killed productive leaves after ~90s. Now every goal in the tree
+    // checks the SAME root-fixed deadline, so breadth cannot starve a leaf.
+    const store = new MemoryEventStore();
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'splitter' }),
+      leafTypeDef({ name: 'leaf' }),
+    ]);
+
+    // 13 children — the fan-out width from the starving live run (live-self-63daa9cf).
+    const children: ChildPlan[] = Array.from({ length: 13 }, (_, i) => ({
+      localId: `c${i}`,
+      type: 'leaf',
+      title: `child ${i}`,
+      spec: {},
+      dependsOn: [],
+      scope: [],
+      budgetShare: 1 / 13,
+    }));
+
+    const brain = new ScriptedBrain().queueDecide({ kind: 'split', children });
+    for (let i = 0; i < children.length; i++) brain.queueProduce(textArtifact(`out-${i}`));
+
+    // A monotonic clock that advances well past a per-child slice (root wall-clock
+    // / 13 ≈ 4600ms) but stays far under the whole-tree deadline (60_000ms). Under
+    // the old model the later children would time out; under the tree-deadline
+    // model none do.
+    let now = 1_000;
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      now: () => (now += 500),
+    });
+    const goal = makeGoal({
+      type: 'splitter',
+      id: 'root',
+      budget: { attempts: 5, tokens: 100_000, toolCalls: 50, wallClockMs: 60_000 },
+    });
+    const report = await engine.run(goal);
+
+    // No child starved: every leaf emitted, and nothing blocked on wall-clock.
+    const emitted = await store.list({ type: 'emitted' });
+    const leafEmissions = emitted.filter((e) => (e as { goalId: string }).goalId.startsWith('root/c'));
+    expect(leafEmissions.length).toBe(13);
+    const exhausted = await store.list({ type: 'budget-exhausted' });
+    expect(exhausted.some((e) => (e as { dimension?: string }).dimension === 'wallClockMs')).toBe(false);
+    expect(report.blockers).toHaveLength(0);
+  });
+
+  it('the tree deadline still fires for a deep child once the whole tree runs out of time', async () => {
+    // The backstop must still bite: a child that keeps working past the tree
+    // deadline is killed, no matter its depth. Here the root splits to one child;
+    // the clock jumps past the tree deadline before the child produces.
+    const store = new MemoryEventStore();
+    const registry = buildRegistry([
+      nonLeafTypeDef({ name: 'splitter' }),
+      leafTypeDef({ name: 'leaf' }),
+    ]);
+
+    const childA: ChildPlan = {
+      localId: 'a', type: 'leaf', title: 'a', spec: {}, dependsOn: [], scope: [], budgetShare: 1,
+    };
+    const brain = new ScriptedBrain()
+      .queueDecide({ kind: 'split', children: [childA] })
+      .queueProduce(textArtifact('a-output'));
+
+    // Root wall-clock 5_000 → tree deadline = firstNow + 5_000. The clock leaps
+    // 10_000ms per tick, so by the time the child's attempt loop checks, the
+    // shared deadline has passed.
+    let now = 1_000;
+    const engine = new Engine({
+      registry,
+      brain,
+      store,
+      memory: new NoopMemoryView(),
+      now: () => (now += 10_000),
+    });
+    const goal = makeGoal({
+      type: 'splitter',
+      id: 'root',
+      budget: { attempts: 5, tokens: 100_000, toolCalls: 50, wallClockMs: 5_000 },
+    });
+    const report = await engine.run(goal);
+
+    const exhausted = await store.list({ type: 'budget-exhausted' });
+    expect(exhausted.some((e) => (e as { dimension?: string }).dimension === 'wallClockMs')).toBe(true);
+    expect(report.blockers.length).toBeGreaterThan(0);
   });
 });
 

@@ -29,6 +29,7 @@ export async function runRootGoal(params: {
 }): Promise<Report> {
   const treeState = createTreeState(
     params.goal.spendCeilingUsd ?? DEFAULT_SPEND_CEILING_USD,
+    params.now() + params.goal.budget.wallClockMs,
   );
 
   if (params.sandbox === undefined) {

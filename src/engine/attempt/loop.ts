@@ -11,6 +11,7 @@ import { exhaustedBrief } from '../reports.js';
 import {
   debitTreeState,
   hasReachedSpendCeiling,
+  hasReachedTreeDeadline,
   type TreeState,
 } from '../tree-spend.js';
 import {
@@ -42,7 +43,6 @@ export interface AttemptLoopInput {
   initialTier: Tier;
   initialTierIndex: number;
   tierLadder: Tier[];
-  deadline: number;
   entryRisk: RiskClass;
   treeState: TreeState;
 }
@@ -112,7 +112,7 @@ async function runAttemptIteration(
   context: AttemptLoopContext,
   state: AttemptLoopState,
 ): Promise<AttemptIterationResult> {
-  if (context.deps.now() >= context.deadline) {
+  if (hasReachedTreeDeadline(context.treeState, context.deps.now())) {
     return {
       kind: 'report',
       report: await blockOnWallClockBudget(context),

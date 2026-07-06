@@ -184,7 +184,6 @@ function runSatisfyDecision(
     initialTier: decision.entry.tier,
     initialTierIndex: decision.entry.tierIndex,
     tierLadder: decision.entry.tierLadder,
-    deadline: decision.entry.deadline,
     entryRisk: decision.entry.entryRisk,
     treeState,
   });

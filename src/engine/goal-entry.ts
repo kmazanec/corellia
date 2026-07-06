@@ -16,7 +16,6 @@ export type GoalEntryResult =
       tierIndex: number;
       tierLadder: Tier[];
       entryRisk: RiskClass;
-      deadline: number;
     }
   | { kind: 'emitted'; report: Report }
   | { kind: 'ceiling' };
@@ -31,8 +30,6 @@ export async function enterGoal(params: {
   onBrief: ((brief: DecisionBrief) => Promise<'deny' | 'park' | 'bounce' | 'answered'>) | undefined;
   hasReachedCeiling: () => boolean;
 }): Promise<GoalEntryResult> {
-  const deadline = params.now() + params.goal.budget.wallClockMs;
-
   await params.store.append({
     type: 'goal-received',
     at: params.now(),
@@ -94,7 +91,6 @@ export async function enterGoal(params: {
     tierIndex: 0,
     tierLadder: typeDef.tier.ladder,
     entryRisk,
-    deadline,
   };
 }
 

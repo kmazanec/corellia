@@ -62,6 +62,31 @@ severity: high
 > cascade-blocked. Three runs, three wall-clock kills of *productive* goals:
 > the per-goal starvation fix (a floor, or progress-aware extension) is now the
 > single biggest blocker to a commission shipping end-to-end.
+>
+> **Starvation half FIXED (2026-07-06, ADR-046, branch `feat/wallclock-floor`;
+> pending live proof).** The fix is the tree-deadline model, not a floor.
+> `wallClockMs` no longer subdivides among a split's children — every goal
+> inherits the parent's full allowance, and wall-clock is enforced ONCE, tree-wide,
+> against a single deadline fixed at the root (`now() + rootBudget.wallClockMs`,
+> stored on the shared `TreeState` next to the dollar ceiling). The attempt loop
+> checks `hasReachedTreeDeadline(treeState, now())` instead of a per-goal deadline,
+> so a goal is killed only when the whole tree runs out of time — per-goal
+> starvation is impossible by construction, and no fan-out width can starve a
+> leaf. This is maximally aligned with ADR-033 (wall-clock is a runaway backstop,
+> never a per-goal steer); a runaway is still bounded by the root deadline and the
+> ADR-017 dollar ceiling. The earlier comprehension-only floor (`b6434a8`) and its
+> `COMPREHENSION_WALLCLOCK_FLOOR_MS` / `floorWallClock` are removed — the floor
+> only ever covered comprehension dives, and the 2026-07-01 runs showed the
+> starvation had moved to `implement` and `research-external` goals it never
+> touched. Unit-proven (wide 13-way fan-out starves no leaf; the tree deadline
+> still fires when the tree genuinely runs out); a `live:self` run over a wide
+> comprehension fan-out is the confirming proof.
+>
+> **Still open: the cascade half.** A single blocked dependency still hard-blocks
+> every dependent with no degraded path (shared with
+> [partial-delivery-on-blocked-dependency](partial-delivery-on-blocked-dependency.md)).
+> ADR-046 does not touch it. Making killed goals rarer should make the cascade
+> fire less often, but the degraded-dependency mechanism itself is unchanged.
 
 ## Problem
 Two compounding failures, both real:

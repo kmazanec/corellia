@@ -75,7 +75,7 @@ describe('enterGoal', () => {
     ]);
   });
 
-  it('returns type, tier, risk, and deadline when the goal may proceed', async () => {
+  it('returns type, tier, and risk when the goal may proceed', async () => {
     const store = new MemoryEventStore();
     const goal = makeGoal({
       id: 'root',
@@ -102,8 +102,10 @@ describe('enterGoal', () => {
       tierIndex: 0,
       tierLadder: ['mid', 'high'],
       entryRisk: 'low',
-      deadline: 600,
     });
+    // The wall-clock deadline is no longer a per-goal field on goal entry — it is
+    // fixed once at the tree root (see TreeState.deadline) and enforced tree-wide.
+    expect(result).not.toHaveProperty('deadline');
     expect(store.types()).toEqual(['goal-received', 'risk-classified']);
   });
 
