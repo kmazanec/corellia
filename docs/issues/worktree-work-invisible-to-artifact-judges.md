@@ -53,6 +53,17 @@ that existed in the worktree.
 > path must consider the branch diff against the tree's base sha, not just
 > `git status`.
 
+> **Update (2026-07-05, run 7 — the strongest evidence yet).** With the
+> deterministic floor fixed (file criteria read the worktree), run 7 reached
+> 6/7 acceptance criteria and its branch carried the COMPLETE deliverable —
+> live-tail module, CLI, tests, and the OKF close-out (iteration record,
+> log.md entry, issue update) across three round commits. The integration
+> judge still failed the root with "OKF close-out not present in artifact"
+> because it judges the emitted artifact, which no longer reflects the branch.
+> The deterministic floor and the judge now read DIFFERENT worlds; the judge
+> must be given the branch diff (or a worktree-derived artifact), same
+> direction as proposed below.
+
 ## Proposed direction
 
 (Rough, not committed.) Make the worktree the source of truth for a sandboxed

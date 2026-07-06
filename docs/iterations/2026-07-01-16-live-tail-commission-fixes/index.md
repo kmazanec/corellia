@@ -93,6 +93,37 @@ design-arch ✓, and `implement` produced a committed round-0 implementation
 known per-goal wall-clock starvation denied it. That recurrence, and the fact
 that salvage misses committed round work, are recorded on the two issues below.
 
+## Runs 4–7 (2026-07-05): three more brain/decide fixes, then near-success
+
+Runs 4 and 5 died at the ROOT decide on schema-minimal decisions (the decision
+schema requires only `kind`, so strict-mode decode can legally emit
+`{"kind":"block"}` with no brief or `{"kind":"split"}` with no children), and
+run 6 crashed the whole tree on an unparseable judge verdict. Three fixes:
+
+8. **The post-split-rejection re-decide carries `mustDecompose`** so the prompt
+   never offers the satisfy shape to a type that can't satisfy.
+9. **Block briefs normalize leniently** (only `question` is load-bearing;
+   options/deadline/onTimeout default) and **decide makes one full fresh
+   attempt** after callJson's parse+re-ask round fails, before the terminal
+   block.
+10. **A judge that cannot produce a parseable verdict FAILS the subject**
+    (gating finding, signature `judge-verdict-unparseable`) instead of
+    throwing out of the recursive runner — the decide fallback's posture,
+    applied to judge.
+
+**Run 7 result ($3.20): the strongest run yet.** 6/7 acceptance criteria met —
+the worktree-reading floor and 10-min script ceiling demonstrably work. The
+branch (preserved at `.corellia/worktrees/observability-live-tail-286fcc5a`,
+three round commits, +1,682 lines) carries the complete deliverable including
+the OKF close-out. What still failed: the `build-green` criterion tripped over
+a FLAKY factory test (`script-runner.test.ts` npm-spawn test at the 5s vitest
+default under load — fixed on main same day), the integration judge read the
+stale emitted artifact instead of the branch (the
+[worktree-work-invisible-to-artifact-judges](../../issues/worktree-work-invisible-to-artifact-judges.md)
+issue, now with decisive evidence), and a step-loop timeout isomorphic-blocked
+the final test-coverage goal
+([provider-timeout-isomorphic-block](../../issues/provider-timeout-isomorphic-block.md)).
+
 ## Recorded, not fixed here (issues)
 
 - [worktree-work-invisible-to-artifact-judges](../../issues/worktree-work-invisible-to-artifact-judges.md)

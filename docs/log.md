@@ -14,6 +14,18 @@ the [iteration](iterations/index.md) or [ADR](adrs/index.md) that owns the detai
 This file replaces the former `STATUS.md`. Forward strategy is no longer a
 standalone roadmap — it lives as open issues.
 
+## 2026-07-05
+
+- **Live-tail commission runs 4–7** (folded into
+  [iteration 20](iterations/2026-07-01-16-live-tail-commission-fixes/index.md)):
+  three more robustness fixes at the decide/judge seams (schema-minimal
+  decisions retry instead of killing the tree; unparseable judge verdicts
+  degrade to a gating FAIL instead of crashing the runner), plus a flaky
+  npm-spawn test timeout fix. Run 7 hit 6/7 acceptance criteria with the full
+  deliverable on its preserved branch — the remaining gaps are the two open
+  issues (worktree work invisible to the integration judge; provider timeouts
+  isomorphic-blocking) and are now decisively evidenced.
+
 ## 2026-07-01
 
 - **Iteration 20 — acceptance-floor fixes**

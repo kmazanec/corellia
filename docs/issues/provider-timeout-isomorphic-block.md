@@ -32,6 +32,12 @@ timeout"`, retried, hit the same signature, and blocked with "Isomorphic failure
 detected (signature: step-loop:failed)". The block then cascade-blocked `judge`
 and `pr`. Events under `out/commission-observability-live-tail/`.
 
+> **Update (2026-07-05, run 7).** Recurred: the "Add test coverage for live
+> view behavior" implement goal hit `step-loop:failed` twice (isomorphic) and
+> hard-blocked, cascading into three dependent blockers on the root report —
+> in a run that was otherwise one flaky test away from passing its acceptance
+> bar.
+
 ## Proposed direction
 
 (Rough, not committed.) Classify step-loop failures before signature matching:
