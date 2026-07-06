@@ -16,6 +16,20 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-07-06
 
+- **Live-tail commission runs 10–12 — the provider-robustness wave.** Each run
+  died one layer deeper, each layer fixed and committed: run 10 confirmed the
+  `author-acceptance-criteria` emit hangs at every tier — root cause the `oneOf`
+  union in `ACCEPTANCE_CRITERIA_SCHEMA`, which providers wedge on under strict
+  decoding (flattened, same posture as `DECISION_SCHEMA`); run 11 died on
+  non-JSON HTTP response envelopes (now classified `transport`, laddered instead
+  of failing the leaf); run 12 delivered its walking skeleton and
+  characterization, then a timeout inside `brain.repair` — the last unguarded
+  brain call — escaped as `child threw` (now falls through to tier escalation).
+  Provider weather was the dominant failure source all day; every structural
+  crash path surfaced by twelve runs is now guarded. Preserved partial:
+  `tree/observability-live-tail-286fcc5a` (walking skeleton + live-tail module);
+  run 7's fuller deliverable remains on `keep/live-tail-run7`.
+
 - **Live-tail commission runs 8–9 + the transport-failure fix wave.** The
   judge-input fix landed (judges now assess the worktree's delivered state —
   the merged files artifact derives from the branch diff, one authoritative
