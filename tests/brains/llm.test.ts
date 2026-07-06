@@ -854,6 +854,28 @@ describe('LlmBrain.judge', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('falls back to the MID model when a higher tier returns an EMPTY response', async () => {
+    // Regression (live-tail run 8): the high-tier judge returned empty content
+    // four times in a row; re-asking the same model never recovers, and the
+    // repeated judge-verdict-unparseable degrade isomorphic-blocked the tree.
+    const good = { pass: true, findings: [] };
+    const { fetch, calls } = stubFetch(
+      chatResponse(''),
+      chatResponse(JSON.stringify(good)),
+    );
+    const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });
+    const result = await brain.judge(baseGoal, subject, 'rubric', { tier: 'high', memories: [] });
+    expect(result.value.pass).toBe(true);
+    expect(calls).toHaveLength(2);
+    const firstBody = JSON.parse(calls[0]?.options.body as string);
+    const secondBody = JSON.parse(calls[1]?.options.body as string);
+    expect(firstBody.model).toBe('high-model');
+    expect(secondBody.model).toBe('mid-model');
+    // The echoed assistant turn must not be an empty string (providers reject it).
+    const assistantTurn = secondBody.messages.find((m: { role: string }) => m.role === 'assistant');
+    expect(assistantTurn.content.length).toBeGreaterThan(0);
+  });
+
   it('degrades (never throws) after two consecutive parse failures', async () => {
     const { fetch } = stubFetch(chatResponse('bad'), chatResponse('also bad'));
     const brain = new LlmBrain({ baseUrl: 'https://x', apiKey: 'k', modelByTier, fetchImpl: fetch });

@@ -1212,14 +1212,18 @@ export class LlmBrain implements Brain {
       // "Unterminated string at position 3863"), tell the model so explicitly and
       // demand a TERSER response that fits, rather than letting it truncate again.
       const reason = firstErr instanceof Error ? firstErr.message : String(firstErr);
+      const empty = first.content.trim().length === 0;
       const truncationNote = first.truncated
         ? `Your previous response was CUT OFF by the output-length limit (it did not ` +
           `finish). Be much TERSER this time so the whole JSON fits: fewer children, ` +
           `shorter titles, minimal spec text — but still a complete, valid object.\n`
-        : '';
+        : empty
+          ? `Your previous response was EMPTY.\n`
+          : '';
       const correctionMessages: ChatMessage[] = [
         ...messages,
-        { role: 'assistant', content: first.content },
+        // Some providers reject an empty assistant message; substitute a marker.
+        { role: 'assistant', content: empty ? '(empty response)' : first.content },
         {
           role: 'user',
           content:
@@ -1229,13 +1233,17 @@ export class LlmBrain implements Brain {
             `no prose, no markdown fences. Include every required field.`,
         },
       ];
-      // On a TRUNCATION specifically, retry on the MID model — it has a far larger
-      // output budget than the high model (GLM-5.2's 33K cap is what cut the decide
-      // off mid-string; DeepSeek V4 Pro at mid allows ~384K), so the same response
-      // fits. For a non-truncation parse error, retry on the same model. Never
-      // "downgrade" a mid/low call to mid — only a higher-than-mid model falls back.
+      // On a TRUNCATION or an EMPTY response, retry on the MID model. Truncation:
+      // the mid model has a far larger output budget than the high model (GLM-5.2's
+      // 33K cap is what cut the decide off mid-string; DeepSeek V4 Pro at mid allows
+      // ~384K), so the same response fits. Empty: the model returned nothing at all —
+      // a provider/model fault, not a correctable near-miss; re-asking the SAME model
+      // returned empty again and again (live-tail run 8: four consecutive empty
+      // judge-split responses → isomorphic block), so a different model is the only
+      // move with a chance. For an ordinary parse error, retry on the same model.
+      // Never "downgrade" a mid/low call to mid — only a higher-than-mid model falls back.
       const retryModel =
-        first.truncated && model !== this.config.modelByTier.mid
+        (first.truncated || empty) && model !== this.config.modelByTier.mid
           ? this.config.modelByTier.mid
           : model;
       const second = await this.callCompletions(retryModel, correctionMessages, mode, tier);
