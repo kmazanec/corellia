@@ -3,7 +3,8 @@
  *
  * Wires together:
  *   - Substrate selection: DATABASE_URL → PgEventStore, else JSONL from
- *     CORELLIA_EVENTS_PATH (default: out/events.jsonl)
+ *     CORELLIA_EVENTS_PATH (default: out/<target-repo>/events.jsonl,
+ *     namespaced by CORELLIA_REPO_ROOT's basename)
  *   - A Listener on the chosen store
  *   - An HTTP FrontDoorServer bound to FRONT_DOOR_PORT (default: 8080)
  *   - A periodic tick() clock (CORELLIA_TICK_MS, default: 5 000 ms)

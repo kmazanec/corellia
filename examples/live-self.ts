@@ -200,7 +200,7 @@ console.log('');
 
 // For the live:self run, we use the daemon's substrate selection so the event
 // log persists if DATABASE_URL or CORELLIA_EVENTS_PATH is configured.
-const { store } = buildStore();
+const { store } = buildStore({ targetRepoRoot: corelliaRoot });
 const standingEnvelope = buildStandingEnvelope();
 
 const runNonce = randomBytes(4).toString('hex');

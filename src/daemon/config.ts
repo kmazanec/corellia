@@ -7,11 +7,12 @@
  *
  * Substrate selection (AC 7, ADR-026):
  *   DATABASE_URL set → PgEventStore
- *   else             → JsonlEventStore at CORELLIA_EVENTS_PATH
- *                      (default: <cwd>/out/events.jsonl)
+ *   else             → JsonlEventStore at CORELLIA_EVENTS_PATH, or a
+ *                      per-target-repo default (out/<repo-basename>/events.jsonl)
+ *                      when that env is unset. See defaultEventsPath().
  */
 
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { JsonlEventStore } from '../eventlog/jsonl-store.js';
 import { PgEventStore } from '../substrate/pg-event-store.js';
 import { SinkFanoutStore } from '../eventlog/sink-fanout-store.js';
@@ -27,6 +28,16 @@ export interface StoreHandle {
   close: () => Promise<void>;
 }
 
+export interface BuildStoreOptions {
+  /**
+   * The repo the factory is operating on. When present (and CORELLIA_EVENTS_PATH
+   * is unset), the default JSONL log path is namespaced per-repo so concurrent
+   * runs against different target repos do not clobber each other's log. When
+   * absent, falls back to CORELLIA_REPO_ROOT, then to the flat legacy default.
+   */
+  targetRepoRoot?: string;
+}
+
 /**
  * Build the event store from the current environment.
  *
@@ -35,7 +46,7 @@ export interface StoreHandle {
  *
  * F-67 seam: import buildStore() here instead of from daemon.ts.
  */
-export function buildStore(): StoreHandle {
+export function buildStore(opts: BuildStoreOptions = {}): StoreHandle {
   const sinks = buildSinks();
 
   const dbUrl = process.env['DATABASE_URL'];
@@ -47,8 +58,7 @@ export function buildStore(): StoreHandle {
     };
   }
 
-  const eventsPath =
-    process.env['CORELLIA_EVENTS_PATH'] ?? join(process.cwd(), 'out', 'events.jsonl');
+  const eventsPath = process.env['CORELLIA_EVENTS_PATH'] ?? defaultEventsPath(opts.targetRepoRoot);
   const jsonl = new JsonlEventStore(eventsPath);
   return {
     store: wrapWithSinks(jsonl, sinks),
@@ -77,6 +87,33 @@ function wrapWithSinks(inner: EventStore, sinks: readonly EventSink[]): EventSto
 
 function isEnabled(value: string | undefined): boolean {
   return value === '1' || value === 'true';
+}
+
+/**
+ * The default JSONL event-log path when CORELLIA_EVENTS_PATH is unset.
+ *
+ * Per target repo: `out/<sanitized-basename>/events.jsonl`, so runs against
+ * different target repos write to distinct logs and never clobber each other.
+ * When no target repo is discernible, keep the flat legacy default
+ * (`<cwd>/out/events.jsonl`).
+ */
+export function defaultEventsPath(targetRepoRoot?: string): string {
+  const repoRoot = targetRepoRoot ?? process.env['CORELLIA_REPO_ROOT'];
+  if (repoRoot === undefined || repoRoot.length === 0) {
+    return join(process.cwd(), 'out', 'events.jsonl');
+  }
+  return join(process.cwd(), 'out', sanitizeRepoSegment(repoRoot), 'events.jsonl');
+}
+
+/**
+ * Reduce a repo path to a single filesystem-safe path segment (its basename with
+ * non-alphanumeric runs collapsed to `-`). Empty or root-only paths fall back to
+ * `repo` so a valid segment is always produced.
+ */
+function sanitizeRepoSegment(repoRoot: string): string {
+  const name = basename(repoRoot.replace(/[/\\]+$/, ''));
+  const sanitized = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return sanitized.length > 0 ? sanitized : 'repo';
 }
 
 // ── Standing envelope (F-63 seam) ─────────────────────────────────────────
