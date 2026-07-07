@@ -14,7 +14,22 @@ the [iteration](iterations/index.md) or [ADR](adrs/index.md) that owns the detai
 This file replaces the former `STATUS.md`. Forward strategy is no longer a
 standalone roadmap — it lives as open issues.
 
-## 2026-07-07
+## 2026-07-07 (later)
+
+- **Runs 20–22 — every goal green; 9/11 criteria; only anchor guesses left.**
+  Two final transport-classification leaks fixed: a timed-out EMIT call lost
+  its error kind through stringification (`runNoToolBrainStep` now carries a
+  transport flag into the step-loop failure), and undici's "terminated"
+  (socket destroyed mid-body-read, thrown OUTSIDE the request retry) matched
+  no heuristic — one shared `isTransportErrorLike` predicate in the contract
+  now covers every seam, and response-body reads retry like requests. **Run 22
+  then ran clean end to end: zero blocks, all five goals passed (criteria,
+  implement, judge-acceptance, open-pr, fix round), 9/11 criteria met across
+  two milestone rounds.** The two unmet are round-0 anchor guesses about
+  identifier names the implementation legitimately named differently — filed
+  as [frozen-anchor-criteria-guess-identifiers](issues/frozen-anchor-criteria-guess-identifiers.md).
+  Deliverable preserved on `keep/live-tail-run22` (+1,376 lines: live-tail,
+  live-view, log-view, three test files, CLI wiring, OKF close-out).
 
 - **Runs 13–19 — the criteria-emit hang finally isolated and fixed; the
   milestone loop iterates for the first time.** The `author-acceptance-criteria`

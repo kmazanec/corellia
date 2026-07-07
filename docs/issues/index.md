@@ -39,6 +39,7 @@ Each issue is one OKF `type: issue` file with `kind` (bug | idea | future-work),
 | [collect-review-manifest](collect-review-manifest.md) | idea | scope-safety, collect, review |
 | [observability-pluggable-tracing](observability-pluggable-tracing.md) | idea | observability, eventlog, cli, langsmith, otel |
 | [provider-timeout-isomorphic-block](provider-timeout-isomorphic-block.md) | bug | engine, brain, retry, timeout, robustness |
+| [frozen-anchor-criteria-guess-identifiers](frozen-anchor-criteria-guess-identifiers.md) | bug | engine, acceptance-criteria, milestone-loop, anchors |
 | [external-asset-acquisition](external-asset-acquisition.md) | future-work | structural, asset, tool |
 | [deployment-to-live-url](deployment-to-live-url.md) | future-work | structural, deploy |
 | [deploy-the-factory-end-to-end](deploy-the-factory-end-to-end.md) | future-work | harness, deploy, docker, ci, ghcr, ops, lifecycle |
