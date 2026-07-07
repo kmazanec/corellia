@@ -40,19 +40,51 @@ export interface RenderDocumentCapture {
 }
 
 /**
- * Start a server via a declared script, wait for a localhost port, navigate to a
- * route, and capture a screenshot. The screenshot is the captured output.
+ * Capture a screenshot of a running UI at a route. Two modes fix WHO takes the
+ * screenshot, so a repo that ships a screenshot script keeps precedence and a repo
+ * that ships none still gets a built-in floor (ADR-042, ADR-048):
+ *
+ * - `script` (default) — the declared `startScript` both starts the server AND
+ *   writes the screenshot to `outputPath`. This is the original path; the repo
+ *   owns the browser dependency. Absent `screenshotMode`, this is the behavior,
+ *   so every existing declaration is byte-identical.
+ * - `built-in` — the factory drives a headless browser itself. The server comes
+ *   from `startScript` (a plain serve command that stays running) or, when
+ *   `startScript` is omitted, a built-in static file server rooted at `staticDir`.
+ *   The built-in browser is an optional runtime dependency; when it is absent the
+ *   capture fails with a clear reason and the `script` path is unaffected.
  */
 export interface ScreenshotUiCapture {
   kind: 'screenshot-ui';
-  /** A declared-script name that starts the server. */
-  startScript: string;
-  /** The localhost port the server binds. */
-  port: number;
+  /**
+   * A declared-script name that starts the server. Required in `script` mode
+   * (it also writes the screenshot). In `built-in` mode it is a plain serve
+   * command; omit it to serve `staticDir` with the built-in static server.
+   */
+  startScript?: string;
+  /**
+   * Who takes the screenshot. `script` (default) delegates to `startScript`;
+   * `built-in` drives the factory's headless browser.
+   */
+  screenshotMode?: 'script' | 'built-in';
+  /**
+   * Worktree-relative directory the built-in static server serves when
+   * `built-in` mode is used with no `startScript` (a plain-HTML repo). Ignored in
+   * `script` mode and when `startScript` is present.
+   */
+  staticDir?: string;
+  /**
+   * The localhost port the server binds. Required in `script` mode and in
+   * `built-in` mode with a `startScript`. Ignored for the built-in static server,
+   * which binds an OS-assigned free port.
+   */
+  port?: number;
   /** The path to navigate to (e.g. "/"). */
   route: string;
   /** Worktree-relative path the screenshot is written to. */
   outputPath: string;
+  /** Extra settle time after page load before the built-in shot, in ms (default 0). */
+  waitForMs?: number;
   /** Wall-clock bound for the whole capture, in milliseconds. */
   timeoutMs?: number;
 }

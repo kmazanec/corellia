@@ -29,9 +29,24 @@ import type {
 } from '../contract/capture.js';
 import type { EventStore, FactoryEvent } from '../contract/events.js';
 import type { ScriptRunner } from './script-runner.js';
+import {
+  resolvePlaywrightLauncher,
+  startStaticServer,
+  type BrowserLauncher,
+  type RunningServer,
+} from './browser-capture.js';
 
 const DEFAULT_CAPTURE_TIMEOUT_MS = 30_000;
 const READINESS_POLL_INTERVAL_MS = 250;
+
+/**
+ * How the built-in `screenshot-ui` path obtains a headless browser. Production
+ * resolves Playwright by dynamic import ({@link resolvePlaywrightLauncher}); tests
+ * inject a fake so the built-in path is provable without a real browser download.
+ * A resolver that returns null means "no browser available" — the built-in path
+ * degrades to a clear failure and the repo-script path is untouched.
+ */
+export type BrowserLauncherResolver = () => Promise<BrowserLauncher | null>;
 
 /** A worktree-relative path that does not escape the worktree, or null. */
 function safeWorktreePath(worktreeRoot: string, rel: string): string | null {
@@ -60,6 +75,7 @@ export function createCaptureRunner(
   worktreeRoot: string,
   declaredCaptures: DeclaredCaptures,
   scriptRunner: ScriptRunner,
+  resolveBrowserLauncher: BrowserLauncherResolver = resolvePlaywrightLauncher,
 ): CaptureRunner {
   return async (name: string): Promise<CaptureResult> => {
     const def = declaredCaptures[name];
@@ -78,7 +94,7 @@ export function createCaptureRunner(
         case 'render-document':
           return await runRenderDocument(def, worktreeRoot, scriptRunner, timeoutMs, started);
         case 'screenshot-ui':
-          return await runScreenshotUi(def, worktreeRoot, scriptRunner, timeoutMs, started);
+          return await runScreenshotUi(def, worktreeRoot, scriptRunner, resolveBrowserLauncher, timeoutMs, started);
         case 'drive-endpoint':
           return await runDriveEndpoint(def, worktreeRoot, scriptRunner, timeoutMs, started);
       }
@@ -121,6 +137,7 @@ async function runScreenshotUi(
   def: Extract<CaptureDef, { kind: 'screenshot-ui' }>,
   worktreeRoot: string,
   scriptRunner: ScriptRunner,
+  resolveBrowserLauncher: BrowserLauncherResolver,
   timeoutMs: number,
   started: number,
 ): Promise<CaptureResult> {
@@ -128,6 +145,25 @@ async function runScreenshotUi(
   const outAbs = safeWorktreePath(worktreeRoot, def.outputPath);
   if (outAbs === null) {
     return { ok: false, kind, detail: 'screenshot output path must be worktree-relative and in-bounds', durationMs: Date.now() - started };
+  }
+  // A repo-declared screenshot script always wins (ADR-042); the built-in browser
+  // is only the FLOOR for repos that ship none. `screenshotMode` fixes which path
+  // runs — default 'script' keeps every existing declaration byte-identical.
+  return (def.screenshotMode ?? 'script') === 'built-in'
+    ? runBuiltInScreenshot(def, worktreeRoot, outAbs, scriptRunner, resolveBrowserLauncher, timeoutMs, started)
+    : runScriptScreenshot(def, outAbs, scriptRunner, timeoutMs, started);
+}
+
+async function runScriptScreenshot(
+  def: Extract<CaptureDef, { kind: 'screenshot-ui' }>,
+  outAbs: string,
+  scriptRunner: ScriptRunner,
+  timeoutMs: number,
+  started: number,
+): Promise<CaptureResult> {
+  const kind = 'screenshot-ui' as const;
+  if (def.startScript === undefined) {
+    return { ok: false, kind, detail: 'script-mode screenshot requires a startScript', durationMs: Date.now() - started };
   }
   // The start script both launches the server AND captures the screenshot: keeping
   // the browser dependency in a declared script preserves the factory's zero-dep
@@ -142,6 +178,95 @@ async function runScreenshotUi(
     return { ok: false, kind, detail: `screenshot script produced no image at ${def.outputPath}`, durationMs: Date.now() - started };
   }
   return { ok: true, kind, outputRef: def.outputPath, detail: `screenshot of ${def.route} → ${def.outputPath}`, durationMs: Date.now() - started };
+}
+
+/**
+ * The built-in screenshot floor: bring a server up (declared serve script or the
+ * built-in static server), drive a headless browser to the route, and write the
+ * PNG. When no browser is resolvable the path degrades to a clear failure — the
+ * repo-script path and the zero-dep core are untouched.
+ */
+async function runBuiltInScreenshot(
+  def: Extract<CaptureDef, { kind: 'screenshot-ui' }>,
+  worktreeRoot: string,
+  outAbs: string,
+  scriptRunner: ScriptRunner,
+  resolveBrowserLauncher: BrowserLauncherResolver,
+  timeoutMs: number,
+  started: number,
+): Promise<CaptureResult> {
+  const kind = 'screenshot-ui' as const;
+  const deadline = started + timeoutMs;
+  const launcher = await resolveBrowserLauncher();
+  if (launcher === null) {
+    return { ok: false, kind, detail: 'built-in screenshot is unavailable: no headless browser is installed (optional dependency "playwright")', durationMs: Date.now() - started };
+  }
+
+  const server = await startCaptureServer(def, worktreeRoot, scriptRunner, deadline);
+  if (!server.ok) return { ok: false, kind, detail: server.detail, durationMs: Date.now() - started };
+  try {
+    const ready = await waitForPort(server.port, deadline);
+    if (!ready) {
+      return { ok: false, kind, detail: `server did not become ready on 127.0.0.1:${server.port} within ${timeoutMs}ms`, durationMs: Date.now() - started };
+    }
+    await launcher({
+      url: `http://127.0.0.1:${server.port}${normalizeRoute(def.route)}`,
+      outputAbsPath: outAbs,
+      timeoutMs: Math.max(1, deadline - Date.now()),
+      waitForMs: def.waitForMs ?? 0,
+    });
+  } catch (err) {
+    return { ok: false, kind, detail: `built-in browser failed to screenshot ${def.route}: ${err instanceof Error ? err.message : String(err)}`, durationMs: Date.now() - started };
+  } finally {
+    await server.stop();
+  }
+
+  if (!(await producedNonEmpty(outAbs))) {
+    return { ok: false, kind, detail: `built-in screenshot produced no image at ${def.outputPath}`, durationMs: Date.now() - started };
+  }
+  return { ok: true, kind, outputRef: def.outputPath, detail: `built-in screenshot of ${def.route} → ${def.outputPath}`, durationMs: Date.now() - started };
+}
+
+type ServerHandle = { ok: true; port: number; stop: () => Promise<void> } | { ok: false; detail: string };
+
+/**
+ * Bring the server up for a built-in screenshot. A declared `startScript` is a
+ * plain serve command: it is fired without awaiting (it blocks while the server
+ * runs) and killed by the ScriptRunner's timeout — the same discipline as
+ * `drive-endpoint`. With no `startScript`, the built-in static server serves the
+ * worktree-relative `staticDir` on an OS-assigned free port.
+ */
+async function startCaptureServer(
+  def: Extract<CaptureDef, { kind: 'screenshot-ui' }>,
+  worktreeRoot: string,
+  scriptRunner: ScriptRunner,
+  deadline: number,
+): Promise<ServerHandle> {
+  if (def.startScript !== undefined) {
+    if (def.port === undefined) {
+      return { ok: false, detail: 'built-in screenshot with a startScript requires a declared port' };
+    }
+    void scriptRunner.run(def.startScript, undefined, Math.max(1, deadline - Date.now()));
+    return { ok: true, port: def.port, stop: async () => {} };
+  }
+  const staticDir = def.staticDir ?? '.';
+  const dirAbs = safeWorktreePath(worktreeRoot, staticDir);
+  if (dirAbs === null) {
+    return { ok: false, detail: 'built-in screenshot staticDir must be worktree-relative and in-bounds' };
+  }
+  let server: RunningServer;
+  try {
+    server = await startStaticServer(dirAbs);
+  } catch (err) {
+    return { ok: false, detail: `built-in static server failed to start: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  return { ok: true, port: server.port, stop: () => server.stop() };
+}
+
+/** Ensure a route begins with a single leading slash so URL joining is well-formed. */
+function normalizeRoute(route: string): string {
+  if (route.length === 0) return '/';
+  return route.startsWith('/') ? route : `/${route}`;
 }
 
 async function runDriveEndpoint(
@@ -263,19 +388,76 @@ export function validateDeclaredCaptures(
   declaredScriptNames: ReadonlySet<string>,
 ): string | null {
   for (const [name, def] of Object.entries(declaredCaptures)) {
-    const scriptRef = def.kind === 'render-document' ? def.renderScript : def.startScript;
-    if (!declaredScriptNames.has(scriptRef)) {
-      return `capture "${name}" references undeclared script "${scriptRef}"`;
-    }
-    if (isAbsolute(def.outputPath) || normalize(def.outputPath).startsWith('..')) {
+    if (outOfBounds(def.outputPath)) {
       return `capture "${name}" outputPath must be worktree-relative and in-bounds`;
     }
-    if (def.kind === 'render-document' && (isAbsolute(def.file) || normalize(def.file).startsWith('..'))) {
-      return `capture "${name}" file must be worktree-relative and in-bounds`;
-    }
-    if ((def.kind === 'screenshot-ui' || def.kind === 'drive-endpoint') && (!Number.isInteger(def.port) || def.port <= 0 || def.port > 65535)) {
-      return `capture "${name}" declares an invalid port ${def.port}`;
-    }
+    const problem = validateCaptureDef(name, def, declaredScriptNames);
+    if (problem !== null) return problem;
   }
   return null;
+}
+
+function validateCaptureDef(
+  name: string,
+  def: CaptureDef,
+  declaredScriptNames: ReadonlySet<string>,
+): string | null {
+  switch (def.kind) {
+    case 'render-document':
+      if (!declaredScriptNames.has(def.renderScript)) {
+        return `capture "${name}" references undeclared script "${def.renderScript}"`;
+      }
+      if (outOfBounds(def.file)) {
+        return `capture "${name}" file must be worktree-relative and in-bounds`;
+      }
+      return null;
+    case 'drive-endpoint':
+      if (!declaredScriptNames.has(def.startScript)) {
+        return `capture "${name}" references undeclared script "${def.startScript}"`;
+      }
+      if (!validPort(def.port)) return `capture "${name}" declares an invalid port ${def.port}`;
+      return null;
+    case 'screenshot-ui':
+      return validateScreenshotUi(name, def, declaredScriptNames);
+  }
+}
+
+/**
+ * Screenshot-ui admits three shapes: `script` (startScript + port, both required),
+ * `built-in` with a serve script (startScript + port), and `built-in` static (no
+ * startScript, so no port is needed and the built-in static server binds a free
+ * one). Every declared startScript must be in the declared-script set, and
+ * staticDir must stay in-bounds.
+ */
+function validateScreenshotUi(
+  name: string,
+  def: Extract<CaptureDef, { kind: 'screenshot-ui' }>,
+  declaredScriptNames: ReadonlySet<string>,
+): string | null {
+  if (def.startScript !== undefined && !declaredScriptNames.has(def.startScript)) {
+    return `capture "${name}" references undeclared script "${def.startScript}"`;
+  }
+  if (def.staticDir !== undefined && outOfBounds(def.staticDir)) {
+    return `capture "${name}" staticDir must be worktree-relative and in-bounds`;
+  }
+  const mode = def.screenshotMode ?? 'script';
+  if (mode === 'script' && def.startScript === undefined) {
+    return `capture "${name}" is script-mode and must declare a startScript`;
+  }
+  // A port is required whenever a server is reached by a fixed port — always in
+  // script mode, and in built-in mode when a serve script (not the built-in static
+  // server) is used.
+  const needsPort = mode === 'script' || def.startScript !== undefined;
+  if (needsPort && !validPort(def.port)) {
+    return `capture "${name}" declares an invalid port ${def.port}`;
+  }
+  return null;
+}
+
+function outOfBounds(rel: string): boolean {
+  return isAbsolute(rel) || normalize(rel).startsWith('..');
+}
+
+function validPort(port: number | undefined): boolean {
+  return port !== undefined && Number.isInteger(port) && port > 0 && port <= 65535;
 }
