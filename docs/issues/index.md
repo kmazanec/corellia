@@ -64,6 +64,7 @@ issue/iteration/log discipline, not just its subject.
 | Issue | Kind | Tags |
 |---|---|---|
 | [duplicate-read-return-cached-value](duplicate-read-return-cached-value.md) | bug | in-run-stall, engine, broker |
+| [test-suite-parallel-load-timeouts](test-suite-parallel-load-timeouts.md) | bug | tests, flake, ci |
 | [descriptive-commit-messages](descriptive-commit-messages.md) | idea | ergonomic, collect, git |
 | [model-capability-signal](model-capability-signal.md) | idea | ergonomic, metrics, brain |
 | [per-project-event-log-path](per-project-event-log-path.md) | idea | ergonomic, eventlog, config |

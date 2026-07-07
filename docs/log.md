@@ -54,6 +54,27 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-07-06
 
+- **The cloud-ready wave (iteration 21, `feat/cloud-ready`, ADR-044…048).**
+  Nine features hand-built in one orchestrated pass on parallel worktree
+  branches, reviewed and folded with linear history — closing the gap between
+  the factory and unattended cloud operation. Shipped: the end-to-end deploy
+  path (dockerignore, docker scripts, first CI → GHCR, published-image compose,
+  SSH deploy/rollback script, ops runbook — ADR-045); the capability/cost-tagged
+  model catalog replacing the three hardwired tier env vars, with per-model
+  endpoints for local models, authoritative pins, and a per-tier tool-call
+  failure signal (ADR-044); wall-clock as one tree-wide deadline, ending
+  per-leaf starvation in wide fan-outs (ADR-046); `corellia logs --follow` +
+  the EventSink fan-out with stdout and dependency-free OTLP exporters; the
+  integrate-edge repair rung (ADR-047); the structural floor for null
+  comprehension dives; ship-what's-green partial delivery (ADR-048);
+  empty-artifact diagnosis in `produce()`; and five ergonomics fixes
+  (duplicate-read cache, per-repo log path, worktree reaper, descriptive
+  collect commits, files-touched-vs-scope event). Every touched issue is
+  fixed-pending-live-proof; the proving runs (commission through the daemon,
+  CI→GHCR push, clean-host deploy, OTLP into a real collector) are operator
+  steps. Detail: [iteration 21](iterations/2026-07-06-19-cloud-ready-wave/index.md).
+  New issue filed: [test-suite-parallel-load-timeouts](issues/test-suite-parallel-load-timeouts.md).
+
 - **Live-tail commission runs 10–12 — the provider-robustness wave.** Each run
   died one layer deeper, each layer fixed and committed: run 10 confirmed the
   `author-acceptance-criteria` emit hangs at every tier — root cause the `oneOf`
