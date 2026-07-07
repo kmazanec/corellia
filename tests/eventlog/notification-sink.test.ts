@@ -88,8 +88,9 @@ function harness(
 // ── Event selection ─────────────────────────────────────────────────────────
 
 describe('NotificationSink — event selection', () => {
-  it('POSTs a brief payload with question, options, deadline, and answer route on blocked', async () => {
+  it('POSTs a brief payload with question, options, deadline, and (for a root block) the answer route', async () => {
     const { sink, calls, drain } = harness();
+    sink.emit(received('root', null)); // a root goal — its goalId IS the intent id
     sink.emit({ type: 'blocked', at: 5_000, goalId: 'root', brief: brief(), resolution: 'park' });
     await drain();
 
@@ -103,6 +104,19 @@ describe('NotificationSink — event selection', () => {
     expect(p.onTimeout).toBe('park');
     expect(p.resolution).toBe('park');
     expect(p.answerRoute).toBe('/intents/root/answer');
+  });
+
+  it('omits the answer route on a mid-tree block — the goalId is a goal id, not an intent id', async () => {
+    const { sink, calls, drain } = harness();
+    // A blocking goal deep in a tree: its goalId is NOT the intent id the front
+    // door's answer route keys on, so we must not advertise a route that 404s.
+    sink.emit({ type: 'blocked', at: 5_000, goalId: 'root.child.leaf', brief: brief(), resolution: 'park' });
+    await drain();
+
+    const p = calls[0]!.payload;
+    expect(p.kind).toBe('blocked');
+    expect(p.question).toBe('Which auth strategy?');
+    expect(p.answerRoute).toBeUndefined();
   });
 
   it('POSTs a park payload with the deadline derived from ttlMs', async () => {

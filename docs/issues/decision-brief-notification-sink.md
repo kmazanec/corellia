@@ -53,9 +53,10 @@ finished tree arrives the same way; with the env var unset, behavior is unchange
 > env-gated by `CORELLIA_NOTIFY_WEBHOOK` (+ optional `CORELLIA_NOTIFY_HEADERS`
 > JSON, the same lenient parse as `CORELLIA_OTLP_HEADERS`). It POSTs one compact
 > JSON payload per curated event and ignores everything else. The curated set:
-> `blocked` (question, options, absolute deadline, `onTimeout`, resolution, and
-> the `/intents/<id>/answer` route), `parked` (question + `ttlMs`-derived
-> deadline + answer route), `resumed` (answer), `pr-opened` (url + branch), and
+> `blocked` (question, options, absolute deadline, `onTimeout`, resolution, and —
+> for a ROOT block only — the `/intents/<id>/answer` route), `parked` (question +
+> `ttlMs`-derived deadline + answer route), `resumed` (answer), `pr-opened` (url +
+> branch), and
 > tree terminals — `emitted` **at a tree root only** → `tree-done`/`tree-failed`
 > (with blockers), and `partial-delivered` → `tree-partial` (blocked modules).
 >
@@ -75,17 +76,25 @@ finished tree arrives the same way; with the env var unset, behavior is unchange
 > - *`pr-opened` is notified unconditionally* — it is fired by a granted leaf, so
 >   its `goalId` is a leaf, not the root; it is inherently a tree-level happy
 >   moment carrying `treeId`/`branch`/`url`, so root-filtering it would drop it.
+> - *The `blocked` answer route is included only for a ROOT block.* The front
+>   door's answer route keys on the INTENT id (`Listener.answer` looks up the
+>   parked map by it), and only a tree root's `goalId` IS the intent id. A
+>   mid-tree `blocked` event's `goalId` is the blocking goal's id, which would
+>   404 — so the route is emitted only when `goalId` is a known root (the same
+>   root set used for tree terminals). `parked` always carries the route: its
+>   event `goalId` is `input.id`, the intent id, by construction (listener.ts).
 > - *Payload schema:* a flat, transport-neutral object with a ready-to-render
 >   `text` one-liner plus structured fields (Slack/ntfy/Discord/email bridges all
 >   accept an incoming webhook). *Retry:* none — one timeout-capped attempt.
 > - *Header parse* refactored `parseOtlpHeaders` into a shared `parseJsonHeaders`
 >   reused by both sinks (DRY per `_shared.md`).
 >
-> Unit-proven at the sink seam (`tests/eventlog/notification-sink.test.ts`, 13
-> tests): brief -> payload with question/options/deadline/answer-route; park;
-> resume; pr-opened; irrelevant events -> no call; tree-done/failed root-only
-> (child emit -> no call); tree-partial; header passthrough; fail-open on network
-> error and non-ok status; log-once-per-burst + re-arm. buildSinks selection
+> Unit-proven at the sink seam (`tests/eventlog/notification-sink.test.ts`, 14
+> tests): root brief -> payload with question/options/deadline/answer-route;
+> mid-tree brief -> route omitted; park; resume; pr-opened; irrelevant events ->
+> no call; tree-done/failed root-only (child emit -> no call); tree-partial;
+> header passthrough; fail-open on network error and non-ok status;
+> log-once-per-burst + re-arm. buildSinks selection
 > proven in `tests/daemon/config-sinks.test.ts` (unset -> not built; set -> built;
 > malformed headers tolerated; all three sinks together). Documented in
 > docs/observability.md and docs/deploy.md beside the OTLP vars. A live run whose

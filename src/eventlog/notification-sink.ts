@@ -141,7 +141,11 @@ export class NotificationSink implements EventSink {
           deadline: event.at + event.brief.deadlineMs,
           onTimeout: event.brief.onTimeout,
           resolution: event.resolution,
-          answerRoute: answerRoute(event.goalId),
+          // The answer route keys on the INTENT id (Listener.answer looks up the
+          // parked map by it). A `blocked` event's goalId is the blocking GOAL's
+          // id — only a tree root's goalId IS the intent id. Include the route
+          // only for a root block, so we never hand an operator a path that 404s.
+          ...(this.#roots.has(event.goalId) ? { answerRoute: answerRoute(event.goalId) } : {}),
         };
       case 'parked':
         return {
