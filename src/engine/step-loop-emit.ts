@@ -1,5 +1,5 @@
 import type { Brain, BrainContext, StepTranscript } from '../contract/brain.js';
-import { StepTransportError } from '../contract/brain.js';
+import { isTransportErrorLike } from '../contract/brain.js';
 import type { EventStore } from '../contract/events.js';
 import type { Goal, Usage } from '../contract/goal.js';
 import type { GoalTypeDef } from '../contract/goal-type.js';
@@ -175,11 +175,11 @@ async function runNoToolBrainStep(
     // classified as a plain 'failed' produced the isomorphic step-loop:failed
     // signature and hard-blocked after two provider blips (live-tail run 20),
     // bypassing every transport allowance (no isomorphism, top-rung retry).
-    const transport =
-      err instanceof StepTransportError ||
-      (err instanceof Error &&
-        (err.name === 'AbortError' || err.name === 'TimeoutError' || err.message.includes('timeout')));
-    return { ok: false, error: err instanceof Error ? err.message : String(err), transport };
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      transport: isTransportErrorLike(err),
+    };
   }
 }
 

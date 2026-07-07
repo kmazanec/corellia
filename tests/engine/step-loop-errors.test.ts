@@ -169,3 +169,24 @@ describe('timeout in-loop recovery', () => {
     expect(last && 'content' in last ? last.content : '').toContain('Emit the final artifact');
   });
 });
+
+describe('network-fault classification breadth', () => {
+  it("classifies undici's 'terminated' socket error as transport", async () => {
+    const result = await handleStepLoopStepError({
+      err: new TypeError('terminated'),
+      goal: makeGoal(),
+      budget,
+      remainingToolCalls: 2,
+      transcript: [],
+      scratchpad: newScratchpad(),
+      store: new MemoryEventStore(),
+      now: () => 7,
+      seenCalls: new Set(),
+      callKeyByCallId: new Map(),
+      malformRecoveryUsed: true,
+    });
+
+    expect(result.kind).toBe('failed');
+    expect(result.kind === 'failed' ? result.result.failKind : undefined).toBe('transport');
+  });
+});

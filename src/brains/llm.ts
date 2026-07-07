@@ -1691,7 +1691,21 @@ export class LlmBrain implements Brain {
       }
 
       if (response.ok) {
-        return parseStepResponseBody(await response.text());
+        // The body read is a network operation too: a socket destroyed
+        // mid-stream throws undici's "terminated" here, OUTSIDE the request
+        // try above — it escaped as a plain error and classified as a model
+        // failure (live-tail run 21). Retry it like any network fault.
+        let bodyText: string;
+        try {
+          bodyText = await response.text();
+        } catch (bodyErr) {
+          if (await retryNetworkStepRequest(params.transportIncidents, sleepFn, attempt, bodyErr, isTimeoutError(bodyErr))) {
+            attempt++;
+            continue;
+          }
+          throw stepTransportError(bodyErr, isTimeoutError(bodyErr));
+        }
+        return parseStepResponseBody(bodyText);
       }
 
       const httpError = await retryHttpStepRequest(params.transportIncidents, sleepFn, attempt, response);

@@ -1,5 +1,5 @@
 import type { StepTranscript } from '../contract/brain.js';
-import { MalformedStepError, StepTransportError } from '../contract/brain.js';
+import { MalformedStepError, isTransportErrorLike } from '../contract/brain.js';
 import type { EventStore } from '../contract/events.js';
 import type { Budget, Goal } from '../contract/goal.js';
 import type { Scratchpad } from './scratchpad.js';
@@ -123,18 +123,12 @@ async function recoverTimedOutStep(
 
 function stepFailureKind(err: unknown): 'failed' | 'malformed' | 'transport' {
   if (err instanceof MalformedStepError) return 'malformed';
-  if (err instanceof StepTransportError) return 'transport';
-  // A raw abort/timeout that escaped the adapter's own wrapping (paths outside
-  // fetchStepResponse: the malformed-step reprompt, the eviction summarizer)
-  // is still a transport incident, not non-convergence. Left as 'failed' it
-  // produced the step-loop:failed signature that isomorphic-blocked goals on
-  // flaky provider windows (live-tail runs 1, 7, 9: "The operation was
-  // aborted due to timeout").
-  if (
-    err instanceof Error &&
-    (err.name === 'AbortError' || err.name === 'TimeoutError' || err.message.includes('timeout'))
-  ) {
-    return 'transport';
-  }
+  // The shared predicate covers the typed StepTransportError, raw
+  // aborts/timeouts that escaped the adapter's wrapping, and network-layer
+  // fetch failures (undici "terminated", resets) — all provider faults, not
+  // non-convergence. Left as 'failed' they produced the step-loop:failed
+  // signature that isomorphic-blocked goals on flaky provider windows
+  // (live-tail runs 1, 7, 9, 21).
+  if (isTransportErrorLike(err)) return 'transport';
   return 'failed';
 }

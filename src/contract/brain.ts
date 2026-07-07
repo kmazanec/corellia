@@ -162,6 +162,31 @@ export class StepTransportError extends Error {
 }
 
 /**
+ * Whether a thrown error is a TRANSPORT-class fault: the typed
+ * {@link StepTransportError}, an abort/timeout, or a network-layer fetch
+ * failure (undici's "terminated" on a destroyed socket, "fetch failed",
+ * connection resets). One predicate so every seam that classifies errors
+ * (the step loop, the emit paths) agrees — run 21 died because "terminated"
+ * matched none of the ad-hoc heuristics and classified as a model failure.
+ */
+export function isTransportErrorLike(err: unknown): boolean {
+  if (err instanceof StepTransportError) return true;
+  if (!(err instanceof Error)) return false;
+  if (err.name === 'AbortError' || err.name === 'TimeoutError') return true;
+  const msg = err.message.toLowerCase();
+  return (
+    msg.includes('timeout') ||
+    msg.includes('terminated') ||
+    msg.includes('fetch failed') ||
+    msg.includes('socket') ||
+    msg.includes('econnreset') ||
+    msg.includes('econnrefused') ||
+    msg.includes('epipe') ||
+    msg.includes('network')
+  );
+}
+
+/**
  * The brain interface. Four classic methods are the LLM-driven moments of the
  * factory — decide, produce, judge, repair — each returning its value paired
  * with provider-reported {@link Metered} usage. The fifth, `step`, is the pure
