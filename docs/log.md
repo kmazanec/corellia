@@ -14,6 +14,38 @@ the [iteration](iterations/index.md) or [ADR](adrs/index.md) that owns the detai
 This file replaces the former `STATUS.md`. Forward strategy is no longer a
 standalone roadmap — it lives as open issues.
 
+## 2026-07-07 (proof runs 4-6 — the daemon gauntlet)
+
+- **Six daemon proof runs hardened four mechanisms and isolated one design
+  gap.** Runs 4-6 (`proof-word-count-{4,5b,6}`, ~$2 each) on the merged wave:
+  the qwen cheapest-in-band defaults stalled structured calls 4-12 min, so the
+  catalog got its first signal-driven correction (qwen re-tagged `weak`, a
+  `BASELINE_NEEDS` minToolCalling floor on automatic resolution, defaults back
+  to the proven deepseek trio — ADR-044 amendment); the high band finally got
+  the 300s request headroom the ee51401d note assumed; the tree deadline now
+  bounds every run exactly (31-34 min on 30-min grants vs the 105-min overrun
+  of run 1); and a two-stage read-without-emit steer joined the explore
+  economy. An accidental SIGTERM mid-run-5 also live-proved ADR-026
+  preservation and the boot-time worktree reaper. **The remaining gap is
+  design, not robustness:** the implement leaf built and judge-passed the
+  greenfield CLI in ~2 min in every completing round, but
+  `author-acceptance-criteria` cannot ground verify-on-read criteria for an
+  empty-scope deliverable — it surveys the host repo 50-92 reads until the
+  deadline (0/0 criteria, six runs). Filed as
+  [greenfield-criteria-grounding](issues/greenfield-criteria-grounding.md)
+  (severity high; the spec-grounded greenfield mode is the proposed fix).
+  Destroyed three fully-proven issues per OKF discipline:
+  deploy-the-factory-end-to-end, per-project-event-log-path,
+  model-capability-signal.
+
+- **Remote deploy proven on devforward-web-1.** `scripts/deploy.sh` took the
+  GHCR image to the Hetzner box end-to-end: pull → drain → recreate →
+  `/status` 200; a Postgres marker survived container replacement; rollback to
+  the prior tag verified. The first attempt surfaced (and fixed) a real
+  packaging bug: postgres:18 refuses the legacy `/var/lib/postgresql/data`
+  mount (compose files corrected). GHCR access is via host-side `docker login`
+  (package still private).
+
 ## 2026-07-07 (merge + live proofs)
 
 - **Iteration 21 merged to main** (`bfaf6a4`, rebased over the runs-13–22

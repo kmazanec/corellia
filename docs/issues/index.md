@@ -28,6 +28,7 @@ Each issue is one OKF `type: issue` file with `kind` (bug | idea | future-work),
 | [milestone-loop-step-7-prove-live](milestone-loop-step-7-prove-live.md) | future-work | milestone-loop, engine, live-proof |
 | [operator-console-ui](operator-console-ui.md) | future-work | ui, operator-console, observability, read-model, front-door |
 | [worktree-work-invisible-to-artifact-judges](worktree-work-invisible-to-artifact-judges.md) | bug | engine, artifact, worktree, salvage, judge |
+| [greenfield-criteria-grounding](greenfield-criteria-grounding.md) | bug | engine, acceptance-criteria, greenfield, anchors |
 | [golden-outcome-labels](golden-outcome-labels.md) | bug | engine, eventlog, golden, calibration, judge |
 | [judge-calibration-replay](judge-calibration-replay.md) | future-work | engine, eval, golden, calibration, judge, replay |
 | [web-fetch-tool](web-fetch-tool.md) | bug | engine, broker, tool, research, web |
@@ -46,7 +47,6 @@ Each issue is one OKF `type: issue` file with `kind` (bug | idea | future-work),
 | [frozen-anchor-criteria-guess-identifiers](frozen-anchor-criteria-guess-identifiers.md) | bug | engine, acceptance-criteria, milestone-loop, anchors |
 | [external-asset-acquisition](external-asset-acquisition.md) | future-work | structural, asset, tool |
 | [deployment-to-live-url](deployment-to-live-url.md) | future-work | structural, deploy |
-| [deploy-the-factory-end-to-end](deploy-the-factory-end-to-end.md) | future-work | harness, deploy, docker, ci, ghcr, ops, lifecycle |
 | [greenfield-bootstrap](greenfield-bootstrap.md) | future-work | structural, scaffold |
 | [ground-fact-external-knowledge](ground-fact-external-knowledge.md) | future-work | structural, knowledge, grounding |
 | [semantic-retrieval-vector-store](semantic-retrieval-vector-store.md) | future-work | library, engine, retrieval, knowledge, embeddings, comprehend |
@@ -81,8 +81,6 @@ issue/iteration/log discipline, not just its subject.
 | [duplicate-read-return-cached-value](duplicate-read-return-cached-value.md) | bug | in-run-stall, engine, broker |
 | [test-suite-parallel-load-timeouts](test-suite-parallel-load-timeouts.md) | bug | tests, flake, ci |
 | [descriptive-commit-messages](descriptive-commit-messages.md) | idea | ergonomic, collect, git |
-| [model-capability-signal](model-capability-signal.md) | idea | ergonomic, metrics, brain |
-| [per-project-event-log-path](per-project-event-log-path.md) | idea | ergonomic, eventlog, config |
 | [auto-prune-blocked-worktrees](auto-prune-blocked-worktrees.md) | idea | ergonomic, worktree, cleanup |
 | [ride-along-items](ride-along-items.md) | future-work | ride-along, future-work, roadmap |
 | [roadmap-non-goals](roadmap-non-goals.md) | idea | roadmap, non-goals, deferred |
