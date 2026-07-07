@@ -46,6 +46,9 @@ import {
   stackCheck,
   conventionsCheck,
   testScaffoldCheck,
+  depsCheck,
+  credentialsCheck,
+  designSystemCheck,
   diveAnchorCheck,
   mapRepoCheck,
   type ArchScanFn,
@@ -596,9 +599,15 @@ function categoryCheck(category: KnowledgeCategory, scanFn: ArchScanFn): Determi
       return conventionsCheck();
     case 'test-scaffold':
       return testScaffoldCheck();
+    case 'deps':
+      return depsCheck();
+    case 'credentials':
+      return credentialsCheck();
+    case 'design-system':
+      return designSystemCheck();
     default:
-      // Categories without shipped self-validation: the map-repo dispatcher
-      // passes them through. Mirror that here with a passing check.
+      // Unreachable for a well-typed KnowledgeCategory (all seven now validate).
+      // The map-repo dispatcher is the total-switch guard; mirror it here.
       return mapRepoCheck(scanFn);
   }
 }

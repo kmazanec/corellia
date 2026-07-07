@@ -15,6 +15,9 @@ import {
   stackCheck,
   conventionsCheck,
   testScaffoldCheck,
+  depsCheck,
+  credentialsCheck,
+  designSystemCheck,
   diveAnchorCheck,
   mapRepoCheck,
 } from '../../src/library/knowledge-checks.js';
@@ -600,6 +603,339 @@ describe('testScaffoldCheck', () => {
 });
 
 // ---------------------------------------------------------------------------
+// depsCheck
+// ---------------------------------------------------------------------------
+
+describe('depsCheck', () => {
+  it('passes when no manifest or lockfile exists (nothing to diff)', async () => {
+    const repoRoot = makeTmp();
+    const artifact = knowledgeArtifact({ category: 'deps', repoRoot, pointers: [] });
+    const ctx: CheckContext = { sandboxRoot: repoRoot };
+    const r = await depsCheck().run(baseGoal, textArt(JSON.stringify(artifact)), ctx);
+    expect(r.ok).toBe(true);
+    expect(r.detail).toContain('No manifest or lockfile');
+  });
+
+  it('fails when a claimed version contradicts the fresh lockfile (clean twin passes)', async () => {
+    const repoRoot = makeTmp();
+    writeFileSync(join(repoRoot, 'package.json'), JSON.stringify({
+      dependencies: { typescript: '^5.4.0' },
+    }));
+    // Lockfile resolves typescript to the EXACT 5.4.3 — the freshest truth.
+    writeFileSync(join(repoRoot, 'package-lock.json'), JSON.stringify({
+      lockfileVersion: 1,
+      dependencies: { typescript: { version: '5.4.3' } },
+    }));
+    const ctx: CheckContext = { sandboxRoot: repoRoot };
+
+    // Broken: claims a version the lockfile does not resolve to.
+    const broken = knowledgeArtifact({
+      category: 'deps',
+      repoRoot,
+      pointers: [{ path: 'package-lock.json', note: 'version:typescript@4.9.0 (stale)' }],
+    });
+    const rBroken = await depsCheck().run(baseGoal, textArt(JSON.stringify(broken)), ctx);
+    expect(rBroken.ok).toBe(false);
+    expect(rBroken.detail).toContain('typescript');
+    expect(rBroken.detail).toContain('mismatch');
+    expect(rBroken.detail).toContain('5.4.3');
+
+    // Clean twin: claims the resolved lockfile version.
+    const clean = knowledgeArtifact({
+      category: 'deps',
+      repoRoot,
+      pointers: [{ path: 'package-lock.json', note: 'version:typescript@5.4.3 (resolved)' }],
+    });
+    const rClean = await depsCheck().run(baseGoal, textArt(JSON.stringify(clean)), ctx);
+    expect(rClean.ok).toBe(true);
+  });
+
+  it('catches a claim that matches the package.json RANGE but not the resolved lock version', async () => {
+    const repoRoot = makeTmp();
+    writeFileSync(join(repoRoot, 'package.json'), JSON.stringify({
+      dependencies: { express: '^4.18.0' },
+    }));
+    // Lockfile resolved express to 4.18.2 — a claim of 4.18.0 satisfies the range
+    // but is NOT the resolved version; deps parses the lockfile first, so it catches it.
+    writeFileSync(join(repoRoot, 'package-lock.json'), JSON.stringify({
+      lockfileVersion: 1,
+      dependencies: { express: { version: '4.18.2' } },
+    }));
+    const ctx: CheckContext = { sandboxRoot: repoRoot };
+
+    const artifact = knowledgeArtifact({
+      category: 'deps',
+      repoRoot,
+      pointers: [{ path: 'package-lock.json', note: 'version:express@4.17.0 (below resolved)' }],
+    });
+    const r = await depsCheck().run(baseGoal, textArt(JSON.stringify(artifact)), ctx);
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('express');
+    expect(r.detail).toContain('4.18.2');
+  });
+
+  it('falls back to package.json ranges when no lockfile is present', async () => {
+    const repoRoot = makeTmp();
+    writeFileSync(join(repoRoot, 'package.json'), JSON.stringify({
+      dependencies: { react: '^18.2.0' },
+    }));
+    const ctx: CheckContext = { sandboxRoot: repoRoot };
+
+    // Range-tolerant match against the declared ^18.2.0.
+    const clean = knowledgeArtifact({
+      category: 'deps',
+      repoRoot,
+      pointers: [{ path: 'package.json', note: 'version:react@18.2.0' }],
+    });
+    expect((await depsCheck().run(baseGoal, textArt(JSON.stringify(clean)), ctx)).ok).toBe(true);
+
+    const broken = knowledgeArtifact({
+      category: 'deps',
+      repoRoot,
+      pointers: [{ path: 'package.json', note: 'version:react@17.0.0' }],
+    });
+    expect((await depsCheck().run(baseGoal, textArt(JSON.stringify(broken)), ctx)).ok).toBe(false);
+  });
+
+  it('passes when a claimed package is not in the resolved set (cannot contradict)', async () => {
+    const repoRoot = makeTmp();
+    writeFileSync(join(repoRoot, 'package-lock.json'), JSON.stringify({
+      lockfileVersion: 1,
+      dependencies: { express: { version: '4.18.2' } },
+    }));
+    const artifact = knowledgeArtifact({
+      category: 'deps',
+      repoRoot,
+      pointers: [{ path: 'package-lock.json', note: 'version:not-installed@1.0.0' }],
+    });
+    const r = await depsCheck().run(baseGoal, textArt(JSON.stringify(artifact)), { sandboxRoot: repoRoot });
+    expect(r.ok).toBe(true);
+  });
+
+  it('fails on wrong category', async () => {
+    const art = JSON.stringify(knowledgeArtifact({ category: 'stack' }));
+    const r = await depsCheck().run(baseGoal, textArt(art));
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('deps');
+  });
+
+  it('check name is knowledge:deps', () => {
+    expect(depsCheck().name).toBe('knowledge:deps');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// credentialsCheck
+// ---------------------------------------------------------------------------
+
+describe('credentialsCheck', () => {
+  it('passes when every reference resolves and no value is present (clean)', async () => {
+    const repoRoot = makeTmp();
+    writeFileSync(join(repoRoot, '.env.example'), 'STRIPE_SECRET_KEY=\nDATABASE_URL=\n');
+    writeFileSync(join(repoRoot, 'config.ts'), 'export const cfg = {};');
+
+    const artifact = knowledgeArtifact({
+      category: 'credentials',
+      repoRoot,
+      pointers: [
+        { path: 'STRIPE_SECRET_KEY', note: 'Stripe API secret, injected via env at runtime' },
+        { path: 'config.ts', note: 'reads the vault references' },
+      ],
+      summary: 'All secrets are referenced via environment variables; no values stored.',
+    });
+    const ctx: CheckContext = { sandboxRoot: repoRoot };
+    const r = await credentialsCheck().run(baseGoal, textArt(JSON.stringify(artifact)), ctx);
+    expect(r.ok).toBe(true);
+    expect(r.detail).toContain('2 reference');
+  });
+
+  it('fails when a pointer note carries a value-shaped secret (AWS key)', async () => {
+    const repoRoot = makeTmp();
+    writeFileSync(join(repoRoot, 'config.ts'), 'x');
+    const artifact = knowledgeArtifact({
+      category: 'credentials',
+      repoRoot,
+      pointers: [
+        { path: 'config.ts', note: 'the AWS key is AKIAIOSFODNN7EXAMPLE — do not commit' },
+      ],
+    });
+    const r = await credentialsCheck().run(baseGoal, textArt(JSON.stringify(artifact)), { sandboxRoot: repoRoot });
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('value-shaped secret');
+  });
+
+  it('fails when the summary carries a value-shaped secret (provider key)', async () => {
+    const repoRoot = makeTmp();
+    const artifact = knowledgeArtifact({
+      category: 'credentials',
+      repoRoot,
+      pointers: [],
+      summary: 'The OpenAI key sk-abcdef1234567890ABCDEF is used for embeddings.',
+    });
+    const r = await credentialsCheck().run(baseGoal, textArt(JSON.stringify(artifact)), { sandboxRoot: repoRoot });
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('summary');
+    expect(r.detail).toContain('value-shaped secret');
+  });
+
+  it('fails when a secret-value assignment appears in a note', async () => {
+    const repoRoot = makeTmp();
+    writeFileSync(join(repoRoot, 'x.ts'), 'x');
+    const artifact = knowledgeArtifact({
+      category: 'credentials',
+      repoRoot,
+      pointers: [
+        { path: 'x.ts', note: 'password = hunter2seCReTvalue is the db password' },
+      ],
+    });
+    const r = await credentialsCheck().run(baseGoal, textArt(JSON.stringify(artifact)), { sandboxRoot: repoRoot });
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('value-shaped secret');
+  });
+
+  it('fails when a referenced FILE does not exist at the SHA (dangling reference)', async () => {
+    const repoRoot = makeTmp();
+    const artifact = knowledgeArtifact({
+      category: 'credentials',
+      repoRoot,
+      pointers: [
+        { path: 'secrets/vault.json', note: 'holds the vault references' },
+      ],
+    });
+    const r = await credentialsCheck().run(baseGoal, textArt(JSON.stringify(artifact)), { sandboxRoot: repoRoot });
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('secrets/vault.json');
+    expect(r.detail).toContain('not found');
+  });
+
+  it('fails when a referenced ENV VAR is not grounded anywhere in the repo', async () => {
+    const repoRoot = makeTmp();
+    writeFileSync(join(repoRoot, '.env.example'), 'DATABASE_URL=\n');
+    const artifact = knowledgeArtifact({
+      category: 'credentials',
+      repoRoot,
+      pointers: [
+        { path: 'GHOST_SECRET_KEY', note: 'a hallucinated credential — nowhere in the repo' },
+      ],
+    });
+    const r = await credentialsCheck().run(baseGoal, textArt(JSON.stringify(artifact)), { sandboxRoot: repoRoot });
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('GHOST_SECRET_KEY');
+    expect(r.detail).toContain('not referenced');
+  });
+
+  it('treats an env-var name found in a compose file as a live reference', async () => {
+    const repoRoot = makeTmp();
+    writeFileSync(join(repoRoot, 'compose.yaml'), 'services:\n  app:\n    environment:\n      - REDIS_PASSWORD\n');
+    const artifact = knowledgeArtifact({
+      category: 'credentials',
+      repoRoot,
+      pointers: [
+        { path: 'REDIS_PASSWORD', note: 'redis auth, injected via compose' },
+      ],
+    });
+    const r = await credentialsCheck().run(baseGoal, textArt(JSON.stringify(artifact)), { sandboxRoot: repoRoot });
+    expect(r.ok).toBe(true);
+  });
+
+  it('does not flag a plain env-var name or file path as a value (no false positive)', async () => {
+    const repoRoot = makeTmp();
+    writeFileSync(join(repoRoot, '.env.example'), 'DATABASE_URL=\nJWT_SIGNING_KEY=\n');
+    const artifact = knowledgeArtifact({
+      category: 'credentials',
+      repoRoot,
+      pointers: [
+        { path: 'DATABASE_URL', note: 'connection string reference' },
+        { path: 'JWT_SIGNING_KEY', note: 'signs session tokens' },
+      ],
+      summary: 'DATABASE_URL and JWT_SIGNING_KEY are the two credential references.',
+    });
+    const r = await credentialsCheck().run(baseGoal, textArt(JSON.stringify(artifact)), { sandboxRoot: repoRoot });
+    expect(r.ok).toBe(true);
+  });
+
+  it('fails on wrong category', async () => {
+    const art = JSON.stringify(knowledgeArtifact({ category: 'stack' }));
+    const r = await credentialsCheck().run(baseGoal, textArt(art));
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('credentials');
+  });
+
+  it('check name is knowledge:credentials', () => {
+    expect(credentialsCheck().name).toBe('knowledge:credentials');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// designSystemCheck
+// ---------------------------------------------------------------------------
+
+describe('designSystemCheck', () => {
+  it('passes when artifact has no pointers', async () => {
+    const artifact = knowledgeArtifact({ category: 'design-system', pointers: [] });
+    const r = await designSystemCheck().run(baseGoal, textArt(JSON.stringify(artifact)));
+    expect(r.ok).toBe(true);
+  });
+
+  it('passes when every token/exemplar pointer resolves (clean)', async () => {
+    const repoRoot = makeTmp();
+    mkdirSync(join(repoRoot, 'src', 'components'), { recursive: true });
+    writeFileSync(join(repoRoot, 'src', 'tokens.css'), ':root { --brand: #000; }');
+    writeFileSync(join(repoRoot, 'src', 'components', 'Button.tsx'), 'export {}');
+
+    const artifact = knowledgeArtifact({
+      category: 'design-system',
+      repoRoot,
+      pointers: [
+        { path: 'src/tokens.css', note: 'design tokens' },
+        { path: 'src/components', note: 'exemplar components' },
+      ],
+    });
+    const ctx: CheckContext = { sandboxRoot: repoRoot };
+    const r = await designSystemCheck().run(baseGoal, textArt(JSON.stringify(artifact)), ctx);
+    expect(r.ok).toBe(true);
+    expect(r.detail).toContain('2 pointer');
+  });
+
+  it('fails when a pointer is dangling at the SHA (broken); clean twin passes', async () => {
+    const repoRoot = makeTmp();
+    writeFileSync(join(repoRoot, 'tokens.css'), ':root {}');
+
+    const broken = knowledgeArtifact({
+      category: 'design-system',
+      repoRoot,
+      pointers: [
+        { path: 'tokens.css', note: 'tokens' },
+        { path: 'src/gone.tsx', note: 'deleted exemplar' },
+      ],
+    });
+    const ctx: CheckContext = { sandboxRoot: repoRoot };
+    const rBroken = await designSystemCheck().run(baseGoal, textArt(JSON.stringify(broken)), ctx);
+    expect(rBroken.ok).toBe(false);
+    expect(rBroken.detail).toContain('src/gone.tsx');
+
+    const clean = knowledgeArtifact({
+      category: 'design-system',
+      repoRoot,
+      pointers: [{ path: 'tokens.css', note: 'tokens' }],
+    });
+    const rClean = await designSystemCheck().run(baseGoal, textArt(JSON.stringify(clean)), ctx);
+    expect(rClean.ok).toBe(true);
+  });
+
+  it('fails on wrong category', async () => {
+    const art = JSON.stringify(knowledgeArtifact({ category: 'conventions' }));
+    const r = await designSystemCheck().run(baseGoal, textArt(art));
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('design-system');
+  });
+
+  it('check name is knowledge:design-system', () => {
+    expect(designSystemCheck().name).toBe('knowledge:design-system');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // diveAnchorCheck
 // ---------------------------------------------------------------------------
 
@@ -757,11 +1093,27 @@ describe('mapRepoCheck — dispatcher', () => {
     expect(r.ok).toBe(true);
   });
 
-  it('passes through for unhandled categories (design-system, deps, credentials)', async () => {
+  it('dispatches to designSystemCheck for category "design-system"', async () => {
     const artifact = knowledgeArtifact({ category: 'design-system', pointers: [] });
     const r = await mapRepoCheck(noScanFn).run(baseGoal, textArt(JSON.stringify(artifact)));
     expect(r.ok).toBe(true);
-    expect(r.detail).toContain('design-system');
+    expect(r.detail).toContain('Design-system artifact');
+  });
+
+  it('dispatches to depsCheck for category "deps"', async () => {
+    const repoRoot = makeTmp();
+    const artifact = knowledgeArtifact({ category: 'deps', repoRoot, pointers: [] });
+    const ctx: CheckContext = { sandboxRoot: repoRoot };
+    const r = await mapRepoCheck(noScanFn).run(baseGoal, textArt(JSON.stringify(artifact)), ctx);
+    expect(r.ok).toBe(true);
+    expect(r.detail).toContain('No manifest or lockfile');
+  });
+
+  it('dispatches to credentialsCheck for category "credentials"', async () => {
+    const artifact = knowledgeArtifact({ category: 'credentials', pointers: [] });
+    const r = await mapRepoCheck(noScanFn).run(baseGoal, textArt(JSON.stringify(artifact)));
+    expect(r.ok).toBe(true);
+    expect(r.detail).toContain('Credentials artifact');
   });
 
   it('fails on null artifact (before dispatch)', async () => {

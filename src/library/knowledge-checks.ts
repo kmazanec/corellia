@@ -511,6 +511,381 @@ export function testScaffoldCheck(): DeterministicCheck {
 }
 
 // ---------------------------------------------------------------------------
+// Deps check
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the repo's dependency versions FRESH at the SHA, preferring the
+ * lockfile (the resolved truth) over package.json's declared ranges. Mirrors
+ * the precedence in `retrieval.ts` `stackVersions` — lockfile v1 first, then
+ * package.json declared ranges — so the deps validator diffs against the same
+ * source of truth the retrieval tool surfaces.
+ *
+ * Returns a flat name → version map. Lockfile versions are exact (`5.4.3`);
+ * package.json fallback values keep their range prefix (`^5.4.0`), matched
+ * range-tolerantly the same way the stack check does.
+ */
+async function resolveDepVersions(root: string): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+
+  // Prefer the lockfile (resolved, exact versions) — the freshest truth.
+  try {
+    const lockText = await readFile(join(root, 'package-lock.json'), 'utf8');
+    const lock = JSON.parse(lockText) as Record<string, unknown>;
+    if (lock['lockfileVersion'] === 1 && typeof lock['dependencies'] === 'object' && lock['dependencies'] !== null) {
+      const lockDeps = lock['dependencies'] as Record<string, Record<string, unknown>>;
+      for (const [name, info] of Object.entries(lockDeps)) {
+        if (typeof info['version'] === 'string') result.set(name, info['version']);
+      }
+    }
+  } catch {
+    // No lockfile or unparseable — fall back to package.json ranges below.
+  }
+  if (result.size > 0) return result;
+
+  // Fall back to package.json's declared ranges (reuses the stack parser).
+  try {
+    const pkgText = await readFile(join(root, 'package.json'), 'utf8');
+    return parsePackageVersions(pkgText);
+  } catch {
+    return result;
+  }
+}
+
+/**
+ * Returns a DeterministicCheck that validates a `deps` category
+ * KnowledgeArtifact by diffing its claimed dependency versions against the
+ * versions resolved FRESH from the lockfile (or package.json when no lockfile
+ * is present) at the SHA.
+ *
+ * A pointer whose `note` carries a `version:<name>@<version>` token is checked
+ * against the resolved versions, using the same range-tolerant comparison as
+ * `stackCheck`. A claim naming a package that is not in the manifest/lockfile
+ * cannot be contradicted and is skipped. When no manifest exists at all there
+ * is nothing to diff against — a soft pass, mirroring `stackCheck`.
+ *
+ * This is intentionally the same shape as `stackCheck` (they share the version
+ * claim convention); the difference is deps parses the lockfile *first*, so a
+ * stale artifact that matched package.json's range but not the resolved lock
+ * version is still caught.
+ */
+export function depsCheck(): DeterministicCheck {
+  return {
+    name: 'knowledge:deps',
+    async run(
+      _goal: Goal,
+      artifact: Artifact | null,
+      ctx?: CheckContext,
+    ): Promise<{ ok: boolean; detail: string }> {
+      const parsed = parseArtifactJson(artifact);
+      if (!parsed.ok) return { ok: false, detail: parsed.detail };
+
+      const kaResult = toKnowledgeArtifactResult(parsed.value);
+      if (!kaResult.ok) {
+        return { ok: false, detail: kaResult.detail };
+      }
+      const ka = kaResult.value;
+
+      if (ka.category !== 'deps') {
+        return { ok: false, detail: `Expected category "deps"; got "${ka.category}".` };
+      }
+
+      const root = ctx?.sandboxRoot ?? ka.repoRoot;
+      const resolved = await resolveDepVersions(root);
+      if (resolved.size === 0) {
+        // No manifest/lockfile — nothing to diff against; soft pass.
+        return { ok: true, detail: 'No manifest or lockfile found; no dep claims to validate.' };
+      }
+
+      const mismatches: string[] = [];
+      const versionClaimRe = /version:(@?[^@\s]+(?:\/[^@\s]+)?)@(\S+)/g;
+      for (const pointer of ka.pointers) {
+        let match: RegExpExecArray | null;
+        versionClaimRe.lastIndex = 0;
+        while ((match = versionClaimRe.exec(pointer.note)) !== null) {
+          const [, claimedName, claimedVersion] = match;
+          if (!claimedName || !claimedVersion) continue;
+          const declared = resolved.get(claimedName);
+          if (declared === undefined) continue; // Not in the resolved set — cannot contradict.
+          const declaredStripped = declared.replace(/^[^0-9]*/, '');
+          const claimedStripped = claimedVersion.replace(/^[^0-9]*/, '');
+          if (claimedStripped !== declaredStripped && declared !== claimedVersion) {
+            mismatches.push(
+              `${claimedName}: artifact claims ${claimedVersion}, lockfile/manifest has ${declared}`,
+            );
+          }
+        }
+      }
+
+      if (mismatches.length > 0) {
+        return {
+          ok: false,
+          detail: `Deps version mismatch(es) against fresh lockfile/manifest: ${mismatches.join('; ')}`,
+        };
+      }
+
+      return {
+        ok: true,
+        detail: `Deps artifact validated: ${ka.pointers.length} pointer(s) checked against fresh lockfile/manifest.`,
+      };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Credentials check
+// ---------------------------------------------------------------------------
+
+/**
+ * Patterns that identify a *value-shaped* secret — an actual token/key/password,
+ * as opposed to a reference to where one lives. A credentials artifact must
+ * carry references only (DESIGN.md: "vault references only, never values"), so
+ * any value-shaped string in a pointer note or the summary fails the artifact.
+ *
+ * These are deliberately high-signal shapes (provider-prefixed keys, JWTs, PEM
+ * blocks, long base64/hex blobs, `key=value` secret assignments). An env-var
+ * name (`DATABASE_URL`) or a file path (`.env`) is a reference, not a value, and
+ * must NOT match — the check's whole job is to distinguish the two.
+ */
+const SECRET_VALUE_PATTERNS: { name: string; re: RegExp }[] = [
+  // Provider-prefixed API keys: sk-..., AKIA..., ghp_..., xoxb-..., AIza...
+  { name: 'provider-prefixed key', re: /\b(?:sk|pk|rk)-[A-Za-z0-9]{16,}\b/ },
+  { name: 'AWS access key id', re: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/ },
+  { name: 'GitHub token', re: /\bgh[posru]_[A-Za-z0-9]{20,}\b/ },
+  { name: 'Slack token', re: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/ },
+  { name: 'Google API key', re: /\bAIza[A-Za-z0-9_-]{30,}\b/ },
+  // JWT: three base64url segments separated by dots.
+  { name: 'JWT', re: /\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/ },
+  // PEM private key block.
+  { name: 'PEM private key', re: /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/ },
+  // A secret-looking assignment: password/secret/token/apikey = <non-trivial value>.
+  {
+    name: 'secret assignment',
+    re: /\b(?:pass(?:word|wd)?|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)\b\s*[:=]\s*["']?[A-Za-z0-9/+_.-]{8,}["']?/i,
+  },
+];
+
+/**
+ * A reference is an env-var name or a file path — the two forms a credentials
+ * pointer legitimately carries. A pointer `path` naming one of these is a
+ * location to check for existence, not a value. Env-var references are matched
+ * by an all-caps SNAKE_CASE shape (`STRIPE_SECRET_KEY`); everything else is
+ * treated as a repo-relative file path and checked with `stat`.
+ */
+const ENV_VAR_NAME_RE = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/;
+
+/**
+ * Scan a blob of artifact-authored text for any value-shaped secret. Returns the
+ * name of the first pattern that matched, or null when the text is clean.
+ */
+function scanForSecretValue(text: string): string | null {
+  for (const { name, re } of SECRET_VALUE_PATTERNS) {
+    if (re.test(text)) return name;
+  }
+  return null;
+}
+
+/**
+ * Returns a DeterministicCheck that validates a `credentials` category
+ * KnowledgeArtifact. The credentials inventory feeds `classify_risk`, so an
+ * unvalidated (hallucinated or stale) artifact silently weakens the risk gate —
+ * this check makes three guarantees at promotion:
+ *
+ *   1. **No values, only references.** No pointer note or the summary may carry
+ *      a value-shaped secret (DESIGN.md: "vault references only, never values").
+ *   2. **Every reference resolves at the SHA.** A pointer `path` that names an
+ *      env-var (`STRIPE_SECRET_KEY`) must be referenced somewhere in the repo;
+ *      a pointer `path` that names a file must exist on disk.
+ *   3. **The artifact itself carries no secret.** Same value scan over notes and
+ *      summary — an artifact that leaked a real key is rejected outright.
+ *
+ * Failure means the artifact stays provisional/unpromoted, identical to the
+ * categories that already validate.
+ */
+export function credentialsCheck(): DeterministicCheck {
+  return {
+    name: 'knowledge:credentials',
+    async run(
+      _goal: Goal,
+      artifact: Artifact | null,
+      ctx?: CheckContext,
+    ): Promise<{ ok: boolean; detail: string }> {
+      const parsed = parseArtifactJson(artifact);
+      if (!parsed.ok) return { ok: false, detail: parsed.detail };
+
+      const kaResult = toKnowledgeArtifactResult(parsed.value);
+      if (!kaResult.ok) {
+        return { ok: false, detail: kaResult.detail };
+      }
+      const ka = kaResult.value;
+
+      if (ka.category !== 'credentials') {
+        return { ok: false, detail: `Expected category "credentials"; got "${ka.category}".` };
+      }
+
+      const root = ctx?.sandboxRoot ?? ka.repoRoot;
+
+      // 1 + 3. No value-shaped secret anywhere the artifact authored text: the
+      //         summary and every pointer note. Reference-only is the invariant.
+      const summaryHit = scanForSecretValue(ka.summary);
+      if (summaryHit !== null) {
+        return {
+          ok: false,
+          detail: `Credentials artifact summary carries a value-shaped secret (${summaryHit}); credentials must be references only, never values.`,
+        };
+      }
+      for (const pointer of ka.pointers) {
+        const noteHit = scanForSecretValue(pointer.note);
+        if (noteHit !== null) {
+          return {
+            ok: false,
+            detail: `Credentials pointer note for "${pointer.path}" carries a value-shaped secret (${noteHit}); credentials must be references only, never values.`,
+          };
+        }
+        // A value-shaped secret sitting in the `path` field itself is also a leak.
+        const pathHit = scanForSecretValue(pointer.path);
+        if (pathHit !== null) {
+          return {
+            ok: false,
+            detail: `Credentials pointer path "${pointer.path}" is a value-shaped secret (${pathHit}); the path must reference a location, not a value.`,
+          };
+        }
+      }
+
+      // 2. Every referenced location resolves at the SHA. Env-var references
+      //    (SNAKE_CASE) must appear somewhere in the repo; file references must
+      //    exist on disk. A reference to a location that does not exist is a
+      //    stale/hallucinated inventory entry.
+      const unresolved: string[] = [];
+      for (const pointer of ka.pointers) {
+        if (ENV_VAR_NAME_RE.test(pointer.path)) {
+          const referenced = await envVarReferenced(root, pointer.path);
+          if (!referenced) unresolved.push(`env var ${pointer.path} (not referenced in repo)`);
+        } else {
+          try {
+            await stat(join(root, pointer.path));
+          } catch {
+            unresolved.push(`file ${pointer.path} (not found at SHA)`);
+          }
+        }
+      }
+
+      if (unresolved.length > 0) {
+        return {
+          ok: false,
+          detail: `Credentials reference(s) do not resolve at this SHA: ${unresolved.join('; ')}`,
+        };
+      }
+
+      return {
+        ok: true,
+        detail: `Credentials artifact validated: ${ka.pointers.length} reference(s) resolve and carry no values.`,
+      };
+    },
+  };
+}
+
+/**
+ * Best-effort liveness for an env-var reference: is the name mentioned anywhere
+ * in the repo's env manifests or source at the SHA? A credentials pointer that
+ * names `STRIPE_SECRET_KEY` should be grounded in the repo (a `.env.example`
+ * entry, a `process.env.STRIPE_SECRET_KEY` read, a compose/deploy manifest). We
+ * scan a bounded set of likely env-declaration files rather than the whole tree,
+ * so the check stays cheap and deterministic; if none exist, the reference is
+ * treated as ungrounded.
+ *
+ * The scanned files match the env-manifest conventions Corellia itself uses
+ * (`.env*`, compose files) plus a fallback grep is intentionally avoided — a
+ * repo-wide scan would be neither cheap nor deterministic across large trees.
+ */
+async function envVarReferenced(root: string, name: string): Promise<boolean> {
+  const candidates = [
+    '.env',
+    '.env.example',
+    '.env.sample',
+    '.env.local',
+    '.env.template',
+    'compose.yaml',
+    'compose.yml',
+    'docker-compose.yml',
+    'docker-compose.yaml',
+  ];
+  for (const rel of candidates) {
+    let text: string;
+    try {
+      text = await readFile(join(root, rel), 'utf8');
+    } catch {
+      continue;
+    }
+    // Word-boundary match so STRIPE_KEY does not match STRIPE_KEY_ID's prefix.
+    const re = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+    if (re.test(text)) return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Design-system check
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a DeterministicCheck that validates a `design-system` category
+ * KnowledgeArtifact by pointer liveness: every token/exemplar pointer must
+ * resolve at the SHA. A design-system artifact points at the files that define
+ * the design tokens and the components that exemplify them; if a pointer's path
+ * is gone, the artifact is stale and must refresh.
+ *
+ * Existence (`stat`), not readability, is the test — a directory pointer
+ * ("components/* exemplify the button variants") is legitimate, same reasoning
+ * as `conventionsCheck`.
+ */
+export function designSystemCheck(): DeterministicCheck {
+  return {
+    name: 'knowledge:design-system',
+    async run(
+      _goal: Goal,
+      artifact: Artifact | null,
+      ctx?: CheckContext,
+    ): Promise<{ ok: boolean; detail: string }> {
+      const parsed = parseArtifactJson(artifact);
+      if (!parsed.ok) return { ok: false, detail: parsed.detail };
+
+      const kaResult = toKnowledgeArtifactResult(parsed.value);
+      if (!kaResult.ok) {
+        return { ok: false, detail: kaResult.detail };
+      }
+      const ka = kaResult.value;
+
+      if (ka.category !== 'design-system') {
+        return { ok: false, detail: `Expected category "design-system"; got "${ka.category}".` };
+      }
+
+      const root = ctx?.sandboxRoot ?? ka.repoRoot;
+      const missing: string[] = [];
+      for (const pointer of ka.pointers) {
+        try {
+          await stat(join(root, pointer.path));
+        } catch {
+          missing.push(pointer.path);
+        }
+      }
+
+      if (missing.length > 0) {
+        return {
+          ok: false,
+          detail: `Design-system pointer(s) do not resolve at this SHA: ${missing.join(', ')}`,
+        };
+      }
+
+      return {
+        ok: true,
+        detail: `Design-system artifact validated: ${ka.pointers.length} pointer(s) resolve.`,
+      };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // map-repo dispatcher check
 // ---------------------------------------------------------------------------
 
@@ -551,12 +926,20 @@ export function mapRepoCheck(scanFn: ArchScanFn): DeterministicCheck {
           return conventionsCheck().run(goal, artifact, ctx);
         case 'test-scaffold':
           return testScaffoldCheck().run(goal, artifact, ctx);
+        case 'deps':
+          return depsCheck().run(goal, artifact, ctx);
+        case 'credentials':
+          return credentialsCheck().run(goal, artifact, ctx);
+        case 'design-system':
+          return designSystemCheck().run(goal, artifact, ctx);
         default:
-          // Other categories (design-system, deps, credentials) are not yet
-          // shipped with deterministic self-validation; pass through.
+          // All seven categories now self-validate. This arm is unreachable for
+          // a well-typed KnowledgeCategory; it stays as a total-switch guard so a
+          // future category added to the union fails loudly here rather than
+          // silently passing through unchecked.
           return {
-            ok: true,
-            detail: `Category "${ka.category}" has no self-validation in this version; passing through.`,
+            ok: false,
+            detail: `Category "${ka.category}" has no self-validation wired in this version.`,
           };
       }
     },
