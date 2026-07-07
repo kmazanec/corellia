@@ -770,8 +770,21 @@ export function renderTree(events: FactoryEvent[]): string {
 // ──────────────────────────────────────────────
 
 /**
+ * The exogenous ground-truth outcome joined to a candidate from a `golden-label`
+ * event: the label itself, who/what delivered it, and optional context.
+ */
+export interface GoldenLabel {
+  outcome: 'merged' | 'rejected' | 'confirmed' | 'refuted';
+  source: string;
+  note?: string;
+  at: number;
+}
+
+/**
  * One captured golden-set candidate: a reference to a judge run (by digest)
- * plus provenance fields (verdict, tier, model when available).
+ * plus provenance fields (verdict, tier, model when available). When an
+ * exogenous `golden-label` for the same tree (goalId) exists, `label` carries
+ * the ground truth the candidate can be curated and calibrated against.
  */
 export interface GoldenCandidate {
   goalId: string;
@@ -782,21 +795,40 @@ export interface GoldenCandidate {
   tier: import('../contract/goal.js').Tier;
   model?: string;
   at: number;
+  /** The exogenous outcome, joined by goalId. Absent until a label arrives. */
+  label?: GoldenLabel;
 }
 
 /**
- * Fold `golden-candidate` events into a per-judgeType index.
+ * Fold `golden-candidate` events into a per-judgeType index, joining each
+ * candidate to its exogenous `golden-label` (by `goalId`) when one exists.
  *
- * Latest-appended order within each judgeType group is preserved. All other
- * event members are visited but do not contribute. Only `golden-candidate`
- * events contribute; all others are skipped via the type-guard if-check.
+ * A tree's golden candidates and its outcome label are separate append-only
+ * events (the label arrives later, from a merge/rejection or a human verdict —
+ * ADR-024). This projection is the join: every candidate for a labeled tree
+ * carries the label; the LAST label appended for a tree wins (a re-label
+ * corrects an earlier one). Latest-appended order within each judgeType group
+ * is preserved. Only `golden-candidate` and `golden-label` events contribute.
  */
 export function goldenCandidates(events: FactoryEvent[]): Record<string, GoldenCandidate[]> {
+  const labelByGoal = new Map<string, GoldenLabel>();
+  for (const e of events) {
+    if (e.type === 'golden-label') {
+      labelByGoal.set(e.goalId, {
+        outcome: e.outcome,
+        source: e.source,
+        at: e.at,
+        ...(e.note !== undefined ? { note: e.note } : {}),
+      });
+    }
+  }
+
   const result: Record<string, GoldenCandidate[]> = {};
 
   for (const e of events) {
     if (e.type === 'golden-candidate') {
       const bucket = result[e.judgeType];
+      const label = labelByGoal.get(e.goalId);
       const candidate: GoldenCandidate = {
         goalId: e.goalId,
         judgeType: e.judgeType,
@@ -806,6 +838,7 @@ export function goldenCandidates(events: FactoryEvent[]): Record<string, GoldenC
         tier: e.tier,
         at: e.at,
         ...(e.model !== undefined ? { model: e.model } : {}),
+        ...(label !== undefined ? { label } : {}),
       };
       if (bucket) {
         bucket.push(candidate);
@@ -815,5 +848,25 @@ export function goldenCandidates(events: FactoryEvent[]): Record<string, GoldenC
     }
   }
 
+  return result;
+}
+
+/**
+ * The labeled subset of {@link goldenCandidates}: only candidates joined to an
+ * exogenous outcome, grouped per judgeType. These are the pairs curation
+ * promotes into a versioned golden set — a candidate without a label is not yet
+ * ground truth, so it is filtered out here (empty judgeType groups are dropped).
+ */
+export function labeledGoldenCandidates(
+  events: FactoryEvent[],
+): Record<string, Array<GoldenCandidate & { label: GoldenLabel }>> {
+  const all = goldenCandidates(events);
+  const result: Record<string, Array<GoldenCandidate & { label: GoldenLabel }>> = {};
+  for (const [judgeType, candidates] of Object.entries(all)) {
+    const labeled = candidates.filter(
+      (c): c is GoldenCandidate & { label: GoldenLabel } => c.label !== undefined,
+    );
+    if (labeled.length > 0) result[judgeType] = labeled;
+  }
   return result;
 }

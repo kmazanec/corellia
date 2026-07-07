@@ -127,6 +127,20 @@ export type FactoryEvent =
    * here is provenance, not promotion.
    */
   | { type: 'golden-candidate'; at: number; goalId: string; judgeType: string; artifactDigest: string; rubricDigest: string; verdictPass: boolean; tier: Tier; model?: string }
+  /**
+   * An exogenous ground-truth outcome attached to a captured golden candidate
+   * (golden-outcome-labels): the operator's merge/rejection of the eventual PR,
+   * or a human verdict confirming/refuting a judged criterion. Joined to
+   * `golden-candidate` events by `goalId` (the tree/candidate reference), so the
+   * `goldenCandidates` projection can report labeled pairs ready for curation.
+   *
+   * Labels are exogenous BY CONSTRUCTION — never produced by any eval. This is
+   * the justification regress terminating outside the system (DESIGN.md): the
+   * label is the ground truth a judge is later calibrated against, never another
+   * judge's opinion. `source` records who/what delivered it (an operator, a
+   * PR-merge listener); `note` is optional free context.
+   */
+  | { type: 'golden-label'; at: number; goalId: string; outcome: 'merged' | 'rejected' | 'confirmed' | 'refuted'; source: string; note?: string }
   /** A granted leaf pushed its tree's branch to the bound repo's origin (ADR-025). */
   | { type: 'branch-pushed'; at: number; goalId: string; treeId: string; branch: string; remote: string }
   /** A granted leaf opened exactly one PR for its tree's branch; carries the URL (ADR-025). */

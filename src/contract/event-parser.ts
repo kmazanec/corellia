@@ -45,6 +45,7 @@ const EVENT_TYPES = new Set([
   'knowledge-facts-written',
   'knowledge-checked',
   'golden-candidate',
+  'golden-label',
   'branch-pushed',
   'pr-opened',
   'blocker-routed',
@@ -73,6 +74,7 @@ const KNOWLEDGE_CATEGORIES = new Set<KnowledgeCategory>([
 ]);
 const KNOWLEDGE_CHECK_OUTCOMES = new Set(['fresh', 'stale-validated', 'invalid']);
 const ROUND_OUTCOMES = new Set(['done', 'continue', 'halt-no-progress', 'halt-max-rounds', 'halt-ceiling', 'halt-deadline']);
+const LABEL_OUTCOMES = new Set(['merged', 'rejected', 'confirmed', 'refuted']);
 
 export function parseFactoryEvent(value: unknown): FactoryEvent | null {
   const event = baseEvent(value);
@@ -164,6 +166,10 @@ const EVENT_VALIDATORS = {
     hasBoolean(event, 'verdictPass') &&
     hasSetValue(event, 'tier', TIERS) &&
     hasOptionalString(event, 'model'),
+  'golden-label': (event) =>
+    hasSetValue(event, 'outcome', LABEL_OUTCOMES) &&
+    hasString(event, 'source') &&
+    hasOptionalString(event, 'note'),
   'branch-pushed': (event) => hasString(event, 'treeId') && hasString(event, 'branch') && hasString(event, 'remote'),
   'pr-opened': (event) => hasString(event, 'treeId') && hasString(event, 'branch') && hasString(event, 'url'),
   'blocker-routed': (event) => hasString(event, 'blocker') && hasString(event, 'commissionId'),

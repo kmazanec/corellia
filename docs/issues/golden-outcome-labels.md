@@ -42,3 +42,44 @@ is only about not losing the labels.
 After a live run ends in a merged (or rejected) PR, one command (or one observed
 event) attaches that outcome to the run's captured candidates, and the
 `goldenCandidates` projection shows labeled pairs ready for curation.
+
+---
+
+> **Fixed (2026-07-07, branch `issue/golden-calibration`; pending live proof /
+> operator use).** The append-only label ingestion path is built exactly as the
+> proposed direction sketched: labels are exogenous by construction — a new event
+> type, a CLI writer, and a projection join — never produced by any eval.
+>
+> **Mechanism.**
+> - **Event:** a `golden-label` member `{ goalId, outcome, source, note? }` added
+>   to the `FactoryEvent` union (`src/contract/events.ts`) and validated in the
+>   parser (`src/contract/event-parser.ts`, `LABEL_OUTCOMES`). `outcome` is one of
+>   `merged | rejected | confirmed | refuted`; `source` records who/what delivered
+>   it (an operator, a future PR-merge listener). Rendered in the log viewer
+>   (`src/eventlog/render.ts`).
+> - **CLI:** `corellia label <tree> <outcome> [--note ...] [--source ...] [<path>]`
+>   appends one `golden-label` to the store the daemon writes
+>   (`src/eventlog/label-cli.ts`, dispatched from `scripts/corellia.ts`). The tree
+>   ref is the `goalId` every `golden-candidate` already carries.
+> - **Projection join:** `goldenCandidates` (`src/eventlog/projections.ts`) now
+>   joins each candidate to its tree's `golden-label` by `goalId` (last label
+>   wins, so a re-label corrects), exposing `candidate.label`. A companion
+>   `labeledGoldenCandidates` returns only the labeled pairs — the curation-ready
+>   set.
+>
+> **Deviation from the sketch:** labels are keyed by `goalId` (the tree/candidate
+> reference the log already uses everywhere) rather than a synthetic
+> `candidateRef` — a tree's candidates and its outcome share one join key, so one
+> `label <tree>` command labels every candidate that tree produced, which is the
+> unit an operator actually knows about at merge time. The PR-merge listener path
+> is left as the future `source` (the event and projection already accept it); only
+> the human-verdict CLI writer is built now.
+>
+> **Tests** (`npx vitest run` green): `tests/eventlog/projections.test.ts` (label
+> join by goalId, unlabeled trees, re-label override, `labeledGoldenCandidates`
+> filtering); `tests/eventlog/label-cli.test.ts` (arg parse, event append with a
+> deterministic clock, note omission, malformed exit code);
+> `tests/eval/golden-calibration.test.ts` end-to-end (candidate + parsed label →
+> projection join → curate → replay). `npx tsc --noEmit` and `npm run lint` clean.
+> A live run whose PR an operator merges/rejects, then `corellia label`, is the
+> confirming proof.

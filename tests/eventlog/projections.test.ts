@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { projectMemory, traceStats, renderTree, costSummary, projectKnowledge, goldenCandidates, projectPatternTrust } from '../../src/eventlog/projections.js';
+import { projectMemory, traceStats, renderTree, costSummary, projectKnowledge, goldenCandidates, labeledGoldenCandidates, projectPatternTrust } from '../../src/eventlog/projections.js';
 import { writeKnowledge, writeRegionFacts, recordKnowledgeCheck } from '../../src/library/knowledge.js';
 import { InMemoryEventStore } from '../../src/eventlog/memory-store.js';
 import type { FactoryEvent } from '../../src/contract/events.js';
@@ -1036,6 +1036,99 @@ describe('goldenCandidates projection', () => {
     const result = goldenCandidates(events);
     expect(result['judge-x']).toHaveLength(1);
     expect(Object.keys(result)).toHaveLength(1);
+  });
+
+  const goldenEventForTree = (goalId: string, judgeType: string, verdictPass: boolean): FactoryEvent => ({
+    type: 'golden-candidate',
+    at: 1000,
+    goalId,
+    judgeType,
+    artifactDigest: 'a1',
+    rubricDigest: 'r1',
+    verdictPass,
+    tier: 'mid',
+  });
+
+  const labelEvent = (
+    goalId: string,
+    outcome: 'merged' | 'rejected' | 'confirmed' | 'refuted',
+    source = 'operator',
+    note?: string,
+    at = 2000,
+  ): FactoryEvent => ({
+    type: 'golden-label',
+    at,
+    goalId,
+    outcome,
+    source,
+    ...(note !== undefined ? { note } : {}),
+  });
+
+  it('joins a golden-label to every candidate of the same tree by goalId', () => {
+    const events: FactoryEvent[] = [
+      goldenEventForTree('tree-1', 'judge-impl', true),
+      goldenEventForTree('tree-1', 'judge-integration', true),
+      labelEvent('tree-1', 'merged', 'operator', 'shipped'),
+    ];
+    const result = goldenCandidates(events);
+    expect(result['judge-impl']![0]!.label).toEqual({ outcome: 'merged', source: 'operator', note: 'shipped', at: 2000 });
+    expect(result['judge-integration']![0]!.label!.outcome).toBe('merged');
+  });
+
+  it('leaves candidates of an unlabeled tree without a label', () => {
+    const events: FactoryEvent[] = [
+      goldenEventForTree('tree-1', 'judge-impl', true),
+      goldenEventForTree('tree-2', 'judge-impl', false),
+      labelEvent('tree-1', 'merged'),
+    ];
+    const result = goldenCandidates(events);
+    const [labeled, unlabeled] = result['judge-impl']!;
+    expect(labeled!.label!.outcome).toBe('merged');
+    expect(unlabeled!.label).toBeUndefined();
+  });
+
+  it('a later label for a tree overrides an earlier one (re-label corrects)', () => {
+    const events: FactoryEvent[] = [
+      goldenEventForTree('tree-1', 'judge-impl', true),
+      labelEvent('tree-1', 'merged', 'operator', undefined, 2000),
+      labelEvent('tree-1', 'rejected', 'operator', 'reverted', 3000),
+    ];
+    const result = goldenCandidates(events);
+    expect(result['judge-impl']![0]!.label!.outcome).toBe('rejected');
+    expect(result['judge-impl']![0]!.label!.note).toBe('reverted');
+  });
+});
+
+describe('labeledGoldenCandidates projection', () => {
+  const gc = (goalId: string, judgeType: string): FactoryEvent => ({
+    type: 'golden-candidate',
+    at: 1000,
+    goalId,
+    judgeType,
+    artifactDigest: 'a',
+    rubricDigest: 'r',
+    verdictPass: true,
+    tier: 'mid',
+  });
+  const label = (goalId: string): FactoryEvent => ({
+    type: 'golden-label',
+    at: 2000,
+    goalId,
+    outcome: 'merged',
+    source: 'operator',
+  });
+
+  it('returns only labeled candidates and drops empty judgeType groups', () => {
+    const events: FactoryEvent[] = [
+      gc('tree-1', 'judge-impl'),
+      gc('tree-2', 'judge-impl'),
+      gc('tree-3', 'judge-split'),
+      label('tree-1'),
+    ];
+    const result = labeledGoldenCandidates(events);
+    expect(result['judge-impl']).toHaveLength(1);
+    expect(result['judge-impl']![0]!.goalId).toBe('tree-1');
+    expect(result['judge-split']).toBeUndefined();
   });
 });
 

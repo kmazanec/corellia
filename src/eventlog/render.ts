@@ -114,6 +114,8 @@ export function describeEvent(e: FactoryEvent): string | null {
       return `produced (${e.usage.promptTokens}+${e.usage.completionTokens} tok)`;
     case 'golden-candidate':
       return `golden-candidate: ${e.judgeType} (${e.verdictPass ? 'pass' : 'fail'})`;
+    case 'golden-label':
+      return `golden-label: ${e.outcome} (source: ${e.source})${e.note ? ` — ${e.note}` : ''}`;
     case 'worktree-reaped':
       return `worktree-reaped: ${e.path}${e.branch ? ` (${e.branch})` : ''} — ${e.reason}`;
     case 'files-touched': {
