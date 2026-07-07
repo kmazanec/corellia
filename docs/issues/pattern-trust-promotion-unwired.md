@@ -45,3 +45,79 @@ In a test (and then a live run): the same spec-shape run twice yields a
 recurrence-backed promotion candidate; a signoff act promotes it with
 `signed_off_by` in the log; a third run walks the trusted memo verbatim and the
 log shows the skipped fresh derivation.
+
+---
+
+> **Fixed (2026-07-07, branch `issue/pattern-trust`; pending live proof).** The
+> split-memo flywheel is now wired end to end from the daemon through an operator
+> CLI.
+>
+> **Delta from the issue's framing — the gap was wider than "promotion has no
+> caller."** The issue assumed memos were already "recorded and consulted as
+> provisional hints" in a running system, with only the promotion tip dead. In
+> fact the *entire* flywheel was dead in production: `buildLiveEngine` never
+> constructed a `PatternStore`, so `Engine`'s `patterns` was always `undefined`
+> and the consult / record / short-circuit paths all silently no-opped. No
+> production code anywhere (`src/`, `examples/`, `scripts/`) built a pattern store
+> — only tests did. The engine-level machinery itself was already complete and
+> tested (the trusted-memo verbatim walk, the `pattern-consulted` short-circuit
+> event, the provisional `patternHint`, the outcome record — all in
+> `src/engine/decision/phase.ts`, `split-dispatch.ts`, and `flywheel.test.ts`).
+> So the honest wiring was: build the store in production, then add the operator
+> promotion/candidate surface.
+>
+> 1. **Production wiring (the load-bearing fix).** `buildPatternStore(store)`
+>    (`src/daemon/config.ts`) builds the flywheel's store on the daemon's own
+>    substrate — `PgPatternStore` when `DATABASE_URL` is set (a shared table the
+>    CLI and daemon both read/write), else an in-memory store **rehydrated from
+>    the JSONL event log** via the new `projectPatternMemos` projection
+>    (`src/eventlog/projections.ts`, joining `decided` + `pattern-recorded` +
+>    `pattern-trust-signed` on `goalId`). The daemon builds it in `start()` and
+>    threads it into `buildLiveEngine({ …, patterns })`, so recurring splits now
+>    actually memoize in a running system. Both substrates converge the CLI and
+>    daemon on the same durable state (Pg rows, or the shared append-only log).
+>
+> 2. **Promotion path — the authority gap, as an operator act.**
+>    `corellia trust "<shape>" --by <name>` and `corellia distrust "<shape>"
+>    --by <name>` (`scripts/corellia.ts` → `src/eventlog/patterns-cli.ts`) call
+>    the existing `promotePatternTrust`, which appends the `pattern-trust-signed`
+>    event (with `signer` provenance) *before* mutating the store. `--by` is
+>    mandatory — an anonymous promotion is refused (exit 2). Nothing automatic
+>    promotes; no eval, recurrence count, or outcome stat can. Demotion mirrors
+>    it (trusted → provisional), for deliberate review after golden divergence.
+>
+> 3. **Consult path — already built, now actually reached.** With a real store
+>    threaded in, the decide path walks a trusted memo verbatim (skipping fresh
+>    derivation) and records the short-circuit as the `pattern-consulted`
+>    (`status: 'trusted'`) event for replay/provenance — the pre-existing
+>    `phase.ts` machinery, dead until now for lack of a store. A provisional memo
+>    stays a suggestion the split eval still judges.
+>
+> 4. **Candidate surfacing.** `corellia patterns` lists every memo with its trust
+>    plane and recurrence/outcome stats (uses / ok / fail), sorted by exercise, so
+>    an operator can see what is worth trusting. `promotionCandidates()` exposes
+>    the provisional-and-recurred shortlist as a reusable helper.
+>
+> **Deviation from the sketch:** the issue proposed recurrence detection driving
+> `propose-pattern` to auto-create provisional memos. That already happens
+> implicitly — the engine records a provisional memo on first split
+> (`recordSplitPattern`), so a separate `propose-pattern` caller is not needed for
+> the flywheel to turn; it remains available for log-driven abstraction of shapes
+> that were never split directly. Recurrence *surfacing* is delivered via
+> `corellia patterns` rather than an automated candidate feed.
+>
+> Mechanism: `src/daemon/config.ts` (`buildPatternStore`), `src/daemon/daemon.ts`
+> (async `start()` wiring + SIGTERM close), `src/daemon/live-engine.ts`
+> (`patterns` option threaded to the engine), `src/eventlog/projections.ts`
+> (`projectPatternMemos`), `src/substrate/memory-pattern-store.ts`
+> (`InMemoryPatternStore.fromMemos`), `src/eventlog/patterns-cli.ts` +
+> `scripts/corellia.ts` (the operator commands). Proven at the ownership
+> boundaries: `tests/eventlog/patterns-cli.test.ts` (promotion event + provenance,
+> anonymous-refusal, unknown-shape, demotion, list, candidates),
+> `tests/eventlog/projections.test.ts` (`projectPatternMemos` reconstruct +
+> rehydrate round-trip), `tests/daemon/config.test.ts` (JSONL rehydration; the
+> full operator flow — run records a split, CLI `trust` appends to the shared log,
+> a restarted daemon rehydrates it as `trusted`). The engine-level verbatim-walk
+> and record are already covered by `tests/engine/flywheel.test.ts`. A live run
+> — same spec-shape twice, an operator `corellia trust`, a third run walking the
+> memo verbatim — is the confirming proof.
