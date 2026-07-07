@@ -17,6 +17,11 @@
 # SECRETS (ADR-012): every secret arrives via env_file ONLY. Copy .env.example
 # to .env on the host and populate it before `up`. CORELLIA_IMAGE is set in the
 # same .env (or exported) and pins the exact GHCR tag deployed.
+#
+# TRACING: the bundled Jaeger `observe` profile lives in compose.yaml (dev/watch),
+# NOT here. A production host should not run an unauthenticated all-in-one trace
+# UI; point CORELLIA_OTLP_ENDPOINT (via .env) at a real backend — Honeycomb,
+# Grafana Tempo, an OTel collector — per docs/observability.md instead.
 # ──────────────────────────────────────────────────────────────────────────────
 
 services:

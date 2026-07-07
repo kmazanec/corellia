@@ -44,6 +44,15 @@ services:
     # secret literals (ADR-012).
     env_file:
       - .env
+    environment:
+      # Trace backend, opt-in via `--profile observe`. The default is EMPTY, so a
+      # plain `docker compose up` (no profile) leaves the OTLP sink off and
+      # default deploys unchanged (config.ts: an empty endpoint builds no sink).
+      # With the profile, set the var to the bundled Jaeger's OTLP receiver:
+      #   CORELLIA_OTLP_ENDPOINT=http://jaeger:4318 docker compose --profile observe up
+      # then browse the run at http://localhost:16686. A collector URL is not a
+      # secret (ADR-012 governs secret literals only), so it may live here.
+      CORELLIA_OTLP_ENDPOINT: '${CORELLIA_OTLP_ENDPOINT:-}'
     ports:
       # Publish the front door. FRONT_DOOR_PORT defaults to 8080 in the daemon;
       # the host-side port is operator-overridable via HOST_PORT in .env.
@@ -77,6 +86,26 @@ services:
       timeout: 5s
       retries: 6
       start_period: 15s
+
+  # ── Optional trace backend (profile: observe) ──────────────────────────────
+  # Jaeger all-in-one — the cheapest graphical view of a run. It is in the
+  # `observe` profile, so it starts ONLY with `--profile observe` and default
+  # `docker compose up` stays two containers (daemon + postgres). Point the
+  # daemon at it with CORELLIA_OTLP_ENDPOINT=http://jaeger:4318 (see the daemon
+  # service). Traces land as a waterfall of every goal, attempt, and judge
+  # verdict at http://localhost:16686. All-in-one is in-memory only — a fresh
+  # start drops prior traces; it is a live-watch surface, not durable storage.
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    profiles: ['observe']
+    restart: unless-stopped
+    environment:
+      # Enable the OTLP receiver so the daemon's dependency-free OTLP/HTTP sink
+      # can post straight to Jaeger with no separate collector.
+      COLLECTOR_OTLP_ENABLED: 'true'
+    ports:
+      - '16686:16686' # Jaeger UI — open this to watch a run.
+      - '4318:4318'   # OTLP/HTTP receiver (the daemon posts here in-network).
 
 volumes:
   corellia-pgdata:
