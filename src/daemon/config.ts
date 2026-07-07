@@ -15,11 +15,15 @@
 import { basename, join } from 'node:path';
 import { JsonlEventStore } from '../eventlog/jsonl-store.js';
 import { PgEventStore } from '../substrate/pg-event-store.js';
+import { PgPatternStore } from '../substrate/pg-pattern-store.js';
+import { InMemoryPatternStore } from '../substrate/memory-pattern-store.js';
 import { SinkFanoutStore } from '../eventlog/sink-fanout-store.js';
 import { StdoutSink } from '../eventlog/stdout-sink.js';
 import { OtlpSink } from '../eventlog/otlp-sink.js';
 import { NotificationSink } from '../eventlog/notification-sink.js';
+import { projectPatternMemos } from '../eventlog/projections.js';
 import type { EventSink, EventStore } from '../contract/events.js';
+import type { PatternStore } from '../contract/pattern.js';
 import type { StandingEnvelope } from '../contract/brief.js';
 
 // ── Substrate ──────────────────────────────────────────────────────────────
@@ -64,6 +68,47 @@ export function buildStore(opts: BuildStoreOptions = {}): StoreHandle {
   const jsonl = new JsonlEventStore(eventsPath);
   return {
     store: wrapWithSinks(jsonl, sinks),
+    close: () => Promise.resolve(),
+  };
+}
+
+// ── Pattern store (the split-memo flywheel) ────────────────────────────────
+
+export interface PatternStoreHandle {
+  patterns: PatternStore;
+  /** Close the underlying connection (no-op for the in-memory store). */
+  close: () => Promise<void>;
+}
+
+/**
+ * Build the split-memo pattern store from the current environment, matching the
+ * event store's substrate so the daemon and the `corellia trust`/`patterns` CLI
+ * converge on the same durable state:
+ *
+ *   DATABASE_URL set → PgPatternStore (one shared table; survives restarts and
+ *                      is visible across processes — the CLI and the daemon read
+ *                      and write the same rows).
+ *   else             → an in-memory store rehydrated from the JSONL event log via
+ *                      projectPatternMemos. The durable record is the log itself:
+ *                      the CLI appends the signoff event to the shared log, and a
+ *                      restarted daemon rebuilds its memory from that log. Within
+ *                      one process, live record/promote calls keep it warm.
+ *
+ * Wiring this is what makes the flywheel real in production: without a pattern
+ * store the engine's consult/record/short-circuit paths all no-op (patterns is
+ * undefined), so every matching subtree pays full fresh-derivation cost forever.
+ */
+export async function buildPatternStore(store: EventStore): Promise<PatternStoreHandle> {
+  const dbUrl = process.env['DATABASE_URL'];
+  if (dbUrl) {
+    const pg = new PgPatternStore(dbUrl);
+    await pg.ensureSchema();
+    return { patterns: pg, close: () => pg.close() };
+  }
+
+  const memos = projectPatternMemos(await store.list());
+  return {
+    patterns: InMemoryPatternStore.fromMemos(memos),
     close: () => Promise.resolve(),
   };
 }

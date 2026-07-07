@@ -5,8 +5,10 @@
  */
 
 import type { FactoryEvent } from '../contract/events.js';
+import type { Decision } from '../contract/decision.js';
 import type { MemoryPointer, Tier, Usage } from '../contract/goal.js';
 import type { MemoryQueryContext, MemoryView } from '../contract/memory.js';
+import type { SplitMemo } from '../contract/pattern.js';
 import type { KnowledgeArtifact, KnowledgeCategory, RegionFacts } from '../contract/knowledge.js';
 
 // ──────────────────────────────────────────────
@@ -140,6 +142,83 @@ export function projectPatternTrust(
   }
 
   return trust;
+}
+
+// ──────────────────────────────────────────────
+// projectPatternMemos
+// ──────────────────────────────────────────────
+
+/**
+ * Reconstruct the full split-memo state from the event log alone: one
+ * {@link SplitMemo} per recorded shape, with its trust status, use/outcome
+ * tally, and the split decision it keys on.
+ *
+ * The log carries the memo across three event types, joined on goalId:
+ *   - `decided`             — the split Decision the goal took (keyed by goalId).
+ *   - `pattern-recorded`    — the shape that decision resolved and its outcome
+ *                             (keyed by goalId; the join edge to the decision).
+ *   - `pattern-trust-signed`— a human signoff moving the shape's trust plane.
+ *
+ * This is the rehydration source for an in-memory pattern store: a fresh daemon
+ * (JSONL substrate) rebuilds the flywheel's memory from its own log, and the CLI
+ * reads the same log to surface promotion candidates. A memo with no matching
+ * `decided` split (log truncated before the decision) is emitted with a synthetic
+ * empty split so its stats still surface; its shape and status remain accurate.
+ */
+export function projectPatternMemos(events: FactoryEvent[]): SplitMemo[] {
+  // goalId → the split decision that goal took, so pattern-recorded can attach it.
+  const splitByGoal = new Map<string, Extract<Decision, { kind: 'split' }>>();
+  for (const e of events) {
+    if (e.type === 'decided' && e.decision.kind === 'split') {
+      splitByGoal.set(e.goalId, e.decision);
+    }
+  }
+
+  const memos = new Map<string, SplitMemo>();
+  const emptySplit: Extract<Decision, { kind: 'split' }> = { kind: 'split', children: [] };
+
+  for (const e of events) {
+    if (e.type === 'pattern-recorded') {
+      const existing = memos.get(e.shape);
+      const decision = splitByGoal.get(e.goalId) ?? existing?.decision ?? emptySplit;
+      if (existing === undefined) {
+        memos.set(e.shape, {
+          shape: e.shape,
+          decision,
+          status: 'provisional',
+          uses: 1,
+          successes: e.outcome === 'success' ? 1 : 0,
+          failures: e.outcome === 'failure' ? 1 : 0,
+        });
+      } else {
+        memos.set(e.shape, {
+          ...existing,
+          decision,
+          uses: existing.uses + 1,
+          successes: existing.successes + (e.outcome === 'success' ? 1 : 0),
+          failures: existing.failures + (e.outcome === 'failure' ? 1 : 0),
+        });
+      }
+    } else if (e.type === 'pattern-trust-signed') {
+      const existing = memos.get(e.shape);
+      if (existing === undefined) {
+        // A signoff with no prior record (log truncated) — carry the status so
+        // the trust plane is still visible; stats stay zero.
+        memos.set(e.shape, {
+          shape: e.shape,
+          decision: emptySplit,
+          status: e.to,
+          uses: 0,
+          successes: 0,
+          failures: 0,
+        });
+      } else {
+        memos.set(e.shape, { ...existing, status: e.to });
+      }
+    }
+  }
+
+  return Array.from(memos.values());
 }
 
 // ──────────────────────────────────────────────

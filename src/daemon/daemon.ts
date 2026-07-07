@@ -31,8 +31,9 @@ import { preserveTree, sanitizeTreeId } from '../engine/worktree.js';
 import type { Engine } from '../engine/engine.js';
 import { FrontDoorServer } from './http-server.js';
 import { maybeStartRepl } from './repl.js';
-import { buildStore, buildStandingEnvelope } from './config.js';
+import { buildStore, buildStandingEnvelope, buildPatternStore } from './config.js';
 import { buildLiveEngine, deriveRepoSlug } from './live-engine.js';
+import type { PatternStore } from '../contract/pattern.js';
 import { join } from 'node:path';
 
 // ── Load env ─────────────────────────────────────────────────────────────────
@@ -41,11 +42,14 @@ loadDotEnv();
 
 // ── Token guard ───────────────────────────────────────────────────────────────
 
-const token = process.env['FRONT_DOOR_TOKEN'];
-if (!token) {
+const tokenEnv = process.env['FRONT_DOOR_TOKEN'];
+if (!tokenEnv) {
   console.error('FRONT_DOOR_TOKEN is required — set it and restart');
   process.exit(1);
 }
+// Narrowed to string past the guard; start() (below) reads it after the async
+// pattern-store build, where control-flow narrowing on the const would be lost.
+const token: string = tokenEnv;
 
 // ── Substrate selection (AC 7) ────────────────────────────────────────────────
 
@@ -91,7 +95,7 @@ function buildNullEngine(): Engine {
  * If the repo root is not a git repository, the daemon logs a warning and falls
  * back to the null engine rather than crashing — the HTTP surface stays up.
  */
-function selectEngine(): Engine {
+function selectEngine(patterns: PatternStore): Engine {
   const apiKey = process.env['OPENROUTER_API_KEY'];
   if (!apiKey) {
     console.log('[daemon] engine: null engine — commissions will be rejected; set OPENROUTER_API_KEY to enable delivery');
@@ -120,8 +124,9 @@ function selectEngine(): Engine {
           }
         : {}),
     };
-    const engine = buildLiveEngine({ store, sandbox, goldenCapture: true });
+    const engine = buildLiveEngine({ store, sandbox, goldenCapture: true, patterns });
     console.log('[daemon] engine: live engine — commissions will be processed via OpenRouter');
+    console.log('[daemon] flywheel: split-memo pattern store wired — recurring splits memoize');
     if (repoSlug) {
       console.log(`[daemon] engine: target repo slug: ${repoSlug}`);
       if (factoryRepoSlugEnv) {
@@ -148,14 +153,17 @@ function selectEngine(): Engine {
  * instance — there is no second Listener anywhere in the process (ADR-008
  * invariant).
  */
-const listener = new Listener({ engine: selectEngine(), store });
+// The Listener, engine, HTTP server, and pattern store are all built in start()
+// because the pattern store's construction is async (Pg schema / event-log
+// rehydration). They are module-scoped so the SIGTERM handler can reach them.
+let listener: Listener;
+let server: FrontDoorServer;
+let closePatternStore: () => Promise<void> = () => Promise.resolve();
 
-// ── HTTP server ───────────────────────────────────────────────────────────────
+// ── HTTP server config ──────────────────────────────────────────────────────
 
 const port = parseInt(process.env['FRONT_DOOR_PORT'] ?? '8080', 10);
 const host = process.env['FRONT_DOOR_HOST'] ?? '0.0.0.0';
-
-const server = new FrontDoorServer({ listener, token });
 
 // ── Tick clock (AC 4) ─────────────────────────────────────────────────────────
 
@@ -216,6 +224,12 @@ async function onSigterm(): Promise<void> {
     clearInterval(tickTimer);
   }
 
+  // SIGTERM before start() finished wiring the listener — nothing in flight.
+  if (listener === undefined) {
+    console.log('[daemon] shutdown complete (pre-startup)');
+    process.exit(0);
+  }
+
   // Close the interactive REPL if one is running (no-op on the headless path).
   if (repl !== undefined) {
     repl.close();
@@ -244,9 +258,16 @@ async function onSigterm(): Promise<void> {
 
   // Close the HTTP server (stops accepting new connections).
   try {
-    await server.close();
+    await server?.close();
   } catch {
     // Ignore close errors — we're shutting down anyway.
+  }
+
+  // Close the pattern store (flushes its Pg pool if applicable).
+  try {
+    await closePatternStore();
+  } catch {
+    // Ignore close errors.
   }
 
   // Close the store (flushes Pg pool if applicable).
@@ -271,6 +292,14 @@ async function start(): Promise<void> {
   if (store instanceof PgEventStore) {
     await store.ensureSchema();
   }
+
+  // Build the split-memo pattern store (async: Pg schema or event-log rehydration),
+  // then wire the engine + listener + server on top of it.
+  const patternHandle = await buildPatternStore(store);
+  closePatternStore = patternHandle.close;
+
+  listener = new Listener({ engine: selectEngine(patternHandle.patterns), store });
+  server = new FrontDoorServer({ listener, token });
 
   await server.listen(port, host);
   startTick();

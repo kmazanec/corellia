@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { projectMemory, unionMemoryViews, traceStats, renderTree, costSummary, projectKnowledge, goldenCandidates, labeledGoldenCandidates, projectPatternTrust } from '../../src/eventlog/projections.js';
+import { projectMemory, unionMemoryViews, traceStats, renderTree, costSummary, projectKnowledge, goldenCandidates, labeledGoldenCandidates, projectPatternTrust, projectPatternMemos } from '../../src/eventlog/projections.js';
 import { writeKnowledge, writeRegionFacts, recordKnowledgeCheck } from '../../src/library/knowledge.js';
 import { InMemoryEventStore } from '../../src/eventlog/memory-store.js';
 import type { FactoryEvent } from '../../src/contract/events.js';
@@ -281,6 +281,76 @@ describe('projectPatternTrust', () => {
 
     expect(projectPatternTrust(events, { upToIndex: 1 }).get('shape-a')).toBe('provisional');
     expect(projectPatternTrust(events, { upToIndex: 2 }).get('shape-a')).toBe('trusted');
+  });
+});
+
+// ──────────────────────────────────────────────
+// projectPatternMemos
+// ──────────────────────────────────────────────
+
+describe('projectPatternMemos', () => {
+  const split = (childId: string) =>
+    ({
+      kind: 'split',
+      children: [
+        { localId: childId, type: 'leaf', title: 'c', spec: {}, dependsOn: [], scope: [], budgetShare: 1 },
+      ],
+    }) as const;
+
+  it('reconstructs a full memo with stats and the joined split decision', () => {
+    const decision = split('a');
+    const events: FactoryEvent[] = [
+      { type: 'decided', at: 1, goalId: 'g1', decision },
+      { type: 'pattern-recorded', at: 2, goalId: 'g1', shape: 'shape-a', outcome: 'success' },
+      { type: 'decided', at: 3, goalId: 'g2', decision },
+      { type: 'pattern-recorded', at: 4, goalId: 'g2', shape: 'shape-a', outcome: 'failure' },
+    ];
+
+    const memos = projectPatternMemos(events);
+    expect(memos).toHaveLength(1);
+    const memo = memos[0];
+    expect(memo?.shape).toBe('shape-a');
+    expect(memo?.uses).toBe(2);
+    expect(memo?.successes).toBe(1);
+    expect(memo?.failures).toBe(1);
+    expect(memo?.status).toBe('provisional');
+    expect(memo?.decision).toEqual(decision);
+  });
+
+  it('carries a signed-off trust plane onto the projected memo', () => {
+    const decision = split('a');
+    const events: FactoryEvent[] = [
+      { type: 'decided', at: 1, goalId: 'g1', decision },
+      { type: 'pattern-recorded', at: 2, goalId: 'g1', shape: 'shape-a', outcome: 'success' },
+      {
+        type: 'pattern-trust-signed',
+        at: 3,
+        goalId: 'operator:cli',
+        shape: 'shape-a',
+        from: 'provisional',
+        to: 'trusted',
+        signer: 'keith',
+        rationale: 'reviewed',
+      },
+    ];
+
+    const memos = projectPatternMemos(events);
+    expect(memos[0]?.status).toBe('trusted');
+    expect(memos[0]?.decision).toEqual(decision);
+  });
+
+  it('rehydrates round-trip: a projected memo re-seeds a store that matches by shape', async () => {
+    const { InMemoryPatternStore } = await import('../../src/substrate/memory-pattern-store.js');
+    const decision = split('a');
+    const events: FactoryEvent[] = [
+      { type: 'decided', at: 1, goalId: 'g1', decision },
+      { type: 'pattern-recorded', at: 2, goalId: 'g1', shape: 'shape-a', outcome: 'success' },
+    ];
+
+    const store = InMemoryPatternStore.fromMemos(projectPatternMemos(events));
+    const memo = await store.match('shape-a');
+    expect(memo?.decision).toEqual(decision);
+    expect(memo?.uses).toBe(1);
   });
 });
 

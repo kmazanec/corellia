@@ -13,6 +13,19 @@ import type { Decision } from '../contract/decision.js';
 export class InMemoryPatternStore implements PatternStore {
   readonly #memos = new Map<string, SplitMemo>();
 
+  /**
+   * Seed a store from memos projected off an event log. Used to rehydrate the
+   * flywheel's memory when a process (daemon or CLI) starts against a JSONL log:
+   * the durable record is the log, and this store is its in-memory view.
+   */
+  static fromMemos(memos: readonly SplitMemo[]): InMemoryPatternStore {
+    const store = new InMemoryPatternStore();
+    for (const memo of memos) {
+      store.#memos.set(memo.shape, { ...memo });
+    }
+    return store;
+  }
+
   async match(shape: string): Promise<SplitMemo | null> {
     return this.#memos.get(shape) ?? null;
   }

@@ -37,6 +37,7 @@ import {
 import { projectMemory, unionMemoryViews } from '../eventlog/projections.js';
 import { buildSharedStore } from './config.js';
 import type { EventStore } from '../contract/events.js';
+import type { PatternStore } from '../contract/pattern.js';
 import type { FetchTransport } from '../engine/pr-tools.js';
 import { extractRepoSlug } from '../engine/pr-tools.js';
 import { execFileSync } from 'node:child_process';
@@ -93,6 +94,13 @@ export interface LiveEngineOptions {
    * use the real global fetch. Supply a stub in operator-run integration tests.
    */
   fetchTransport?: FetchTransport;
+  /**
+   * The split-memo pattern store (the flywheel). When supplied, the decide path
+   * consults it — walking a trusted memo verbatim and recording split outcomes —
+   * so recurring structure compounds into reusable memos. Omit to disable the
+   * flywheel (every split is derived fresh). The daemon supplies buildPatternStore().
+   */
+  patterns?: PatternStore;
 }
 
 // ── Builder ────────────────────────────────────────────────────────────────────
@@ -144,6 +152,7 @@ export function buildLiveEngine(opts: LiveEngineOptions): Engine {
     // the run-mode choice, kept separate behind opts.knowledge.
     sandbox: { ...opts.sandbox, knowledge: true },
     goldenCapture: opts.goldenCapture ?? true,
+    ...(opts.patterns !== undefined ? { patterns: opts.patterns } : {}),
   };
 
   if (opts.knowledge) {
