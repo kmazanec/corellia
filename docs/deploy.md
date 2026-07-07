@@ -243,6 +243,27 @@ its worktrees and history are durable.
     psql -U "$POSTGRES_USER" -c "SELECT at, goal_id, type FROM corellia_events ORDER BY id DESC LIMIT 20"'
   ```
 
+- **Watch a run graphically (dev/self-host)** — the `observe` compose profile
+  bundles a Jaeger all-in-one so a run renders as a trace waterfall with zero
+  external backend. It is a profile, so default deploys stay two containers.
+
+  ```bash
+  CORELLIA_OTLP_ENDPOINT=http://jaeger:4318 docker compose --profile observe up
+  # then open the trace UI:  http://localhost:16686
+  ```
+
+  The profile lives in `compose.yaml`, **not** in `compose.deploy.yaml`: a
+  production host should not run an unauthenticated all-in-one UI. For a durable
+  backend on a real host, set `CORELLIA_OTLP_ENDPOINT` (via `.env`) to Honeycomb,
+  Grafana Tempo, or an OTel collector — see docs/observability.md.
+
+- **Get pushed the moments that matter** — set `CORELLIA_NOTIFY_WEBHOOK` (via
+  `.env`) to a webhook URL and the daemon POSTs a compact JSON payload when a tree
+  blocks on a decision brief, parks, resumes, opens a PR, or reaches a terminal
+  outcome (done/failed/partial) — so an operator is not polling `GET /status`.
+  Optional `CORELLIA_NOTIFY_HEADERS` (a JSON object) carries webhook auth. Payload
+  schema and the curated event set are in docs/observability.md.
+
 Pluggable external tracing is tracked separately
 ([observability-pluggable-tracing](issues/observability-pluggable-tracing.md));
 this covers the basic "is it alive, what is it doing" path.

@@ -173,6 +173,70 @@ export CORELLIA_OTLP_HEADERS='{"Authorization":"Basic <base64(instanceID:token)>
 A local collector (Grafana Tempo, an OpenTelemetry Collector, Jaeger's OTLP
 receiver) needs only `CORELLIA_OTLP_ENDPOINT="http://localhost:4318"`.
 
+### Notification webhook (shipped) — `src/eventlog/notification-sink.ts`
+
+The trace sinks above export *everything* for later inspection. `NotificationSink`
+is the complement: a **push** for the small set of moments a human needs to *know
+about* right now, so an operator can walk away from the terminal instead of
+polling `GET /status`. It POSTs one compact JSON payload per curated event to a
+configured webhook (Slack, Discord, ntfy, an email bridge — all speak an incoming
+webhook), and ignores every other event.
+
+**The curated event set** — the only events that fire a POST:
+
+| Event | Payload `kind` | Salient fields |
+| --- | --- | --- |
+| `blocked` | `blocked` | `question`, `options`, `deadline` (absolute ms), `onTimeout`, `resolution`, `answerRoute` (`/intents/<id>/answer`) |
+| `parked` | `parked` | `question`, `deadline` (from `ttlMs`), `answerRoute` |
+| `resumed` | `resumed` | `answer` |
+| `pr-opened` | `pr-opened` | `url`, `branch` |
+| `emitted` **at a tree root** | `tree-done` / `tree-failed` | `blockers` when failed |
+| `partial-delivered` | `tree-partial` | `blockedModules` |
+
+Every payload also carries `goalId`, `at`, and a ready-to-render `text` one-liner
+(the field most webhook bridges display directly). A tree terminal notifies **only
+for the root goal** (`goal.parentId === null`, tracked from `goal-received`), never
+for a child emitting its report on the way up.
+
+**Failure discipline** mirrors the OTLP sink: `emit()` never blocks a run (the POST
+is fire-and-forget under a short timeout, default 5 s), every network error is
+caught and logged **at most once per burst**, and the sink never throws into the
+fan-out. There is **no retry** — a notification is best-effort and the durable
+record is always the event log; observability never blocks durability.
+
+**Config** (env-gated in `buildSinks()`):
+
+| Env var | Effect |
+| --- | --- |
+| `CORELLIA_NOTIFY_WEBHOOK` | Presence **enables** the sink. The URL every payload is POSTed to. |
+| `CORELLIA_NOTIFY_HEADERS` | Optional JSON object of `{ header: value }` for webhook auth (a token, a shared secret). A malformed value disables auth (with a warning), not the whole sink — the same lenient parse as `CORELLIA_OTLP_HEADERS`. |
+
+```bash
+export CORELLIA_NOTIFY_WEBHOOK="https://hooks.slack.com/services/T000/B000/XXXX"
+# optional auth, e.g. a bearer token or a shared secret the receiver checks:
+export CORELLIA_NOTIFY_HEADERS='{"Authorization":"Bearer YOUR_TOKEN"}'
+```
+
+### Watch a run in Jaeger (bundled, profile `observe`)
+
+`compose.yaml` carries an optional **`observe` profile** that adds a Jaeger
+all-in-one container — the cheapest graphical view of a run, no external backend
+needed. It is a profile, so a plain `docker compose up` stays two containers
+(daemon + postgres) and default deploys are unchanged.
+
+```bash
+CORELLIA_OTLP_ENDPOINT=http://jaeger:4318 docker compose --profile observe up
+# then open the Jaeger UI:
+open http://localhost:16686
+```
+
+The daemon's OTLP sink posts straight to Jaeger's in-network OTLP/HTTP receiver
+(`http://jaeger:4318`), and every goal, attempt, and judge verdict appears as a
+trace waterfall. All-in-one is **in-memory only** — a fresh start drops prior
+traces; it is a live-watch surface, not durable storage. For a durable/production
+backend, point `CORELLIA_OTLP_ENDPOINT` at Honeycomb or Grafana Tempo (above); the
+`observe` profile deliberately does **not** ship in the production `compose.deploy.yaml`.
+
 ### LangSmith adapter (remains open)
 
 The LangSmith run-tree adapter (gated on `LANGSMITH_API_KEY`) is still the one
