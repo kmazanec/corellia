@@ -291,3 +291,60 @@ describe('repair robustness', () => {
     expect(await store.list({ type: 'repair-applied' })).toHaveLength(0);
   });
 });
+
+describe('transport failure at the top rung', () => {
+  const transportVerdict = failVerdict('Step loop failed: timeout', undefined, undefined, 'step-loop:transport');
+
+  it('grants one same-tier retry when there is no next rung', async () => {
+    const result = await resolveAttemptFailure({
+      goal: makeGoal(),
+      artifact: textArtifact('partial'),
+      verdict: transportVerdict,
+      budget,
+      tier: 'high',
+      tierIndex: 0,
+      tierLadder: ['high'],
+      priorAttempt: undefined,
+      brain: new ScriptedBrain(),
+      store: new MemoryEventStore(),
+      now: () => 8,
+      onBrief: undefined,
+      debitUsage: () => {},
+      hasReachedCeiling: () => false,
+      onCeilingReached: async () => {
+        throw new Error('ceiling should not run');
+      },
+    });
+
+    expect(result.kind).toBe('escalated');
+    expect(result.kind === 'escalated' ? result.tier : undefined).toBe('high');
+  });
+
+  it('blocks on the SECOND consecutive transport failure at the top rung', async () => {
+    const store = new MemoryEventStore();
+    const result = await resolveAttemptFailure({
+      goal: makeGoal(),
+      artifact: textArtifact('partial'),
+      verdict: transportVerdict,
+      budget,
+      tier: 'high',
+      tierIndex: 0,
+      tierLadder: ['high'],
+      priorAttempt: { artifact: textArtifact('prior'), verdict: transportVerdict },
+      brain: new ScriptedBrain(),
+      store,
+      now: () => 9,
+      onBrief: undefined,
+      debitUsage: () => {},
+      hasReachedCeiling: () => false,
+      onCeilingReached: async () => {
+        throw new Error('ceiling should not run');
+      },
+    });
+
+    expect(result.kind).toBe('blocked');
+    expect(result.kind === 'blocked' ? result.report.blockers[0] : '').toContain('cannot converge');
+    // The block still names the transport cause via findings.
+    expect(result.kind === 'blocked' ? result.report.findings.join(' ') : '').toContain('timeout');
+  });
+});

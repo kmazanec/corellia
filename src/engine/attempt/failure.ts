@@ -124,6 +124,19 @@ export async function resolveAttemptFailure(params: {
     return { kind: 'escalated', tier: nextTier, budget: params.budget };
   }
 
+  // A transport failure at the TOP rung gets exactly one same-tier retry: the
+  // fault was the endpoint, not the model, and for a single-rung type (e.g.
+  // author-acceptance-criteria, ladder ['high']) with a subdivided attempt
+  // budget of 1, a lone provider hang was otherwise instantly terminal —
+  // live-tail run 16 died exactly here. A SECOND consecutive transport failure
+  // (visible via priorAttempt's signature) falls through and blocks honestly.
+  if (
+    params.verdict.failureSignature === 'step-loop:transport' &&
+    params.priorAttempt?.verdict.failureSignature !== 'step-loop:transport'
+  ) {
+    return { kind: 'escalated', tier: params.tier, budget: params.budget };
+  }
+
   const brief = nonConvergenceBrief(params.goal);
   return blockWithReport({
     goal: params.goal,
