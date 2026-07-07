@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import type { Brain, BrainContext } from '../../src/contract/brain.js';
+import type { DeclaredCaptures } from '../../src/contract/capture.js';
+import type { CheckContext } from '../../src/contract/goal-type.js';
+import { resolveModel, DEFAULT_CATALOG } from '../../src/brains/model-catalog.js';
+import { ZERO_USAGE } from '../../src/contract/goal.js';
 import { assessMilestoneRound } from '../../src/engine/milestone/round-assessment.js';
 import {
   buildRegistry,
@@ -105,6 +110,75 @@ describe('milestone round assessment', () => {
 
     expect(usageDebited).toBe(true);
     expect(store.types()).toEqual(['judge-verdict', 'golden-candidate']);
+  });
+
+  it('sets needs.vision on the judge call when a criterion names an image-producing capture, and the need resolves only to a vision-capable model', async () => {
+    let judgeCtx: BrainContext | undefined;
+    const brain: Brain = {
+      ...new ScriptedBrain().queueJudge(passVerdict()),
+      async judge(_goal, _subject, _rubric, ctx) {
+        judgeCtx = ctx;
+        return { value: passVerdict(), usage: ZERO_USAGE };
+      },
+    } as Brain;
+
+    const declaredCaptures: DeclaredCaptures = {
+      shot: {
+        kind: 'screenshot-ui',
+        startScript: 'start',
+        port: 3000,
+        route: '/',
+        outputPath: 'shot.png',
+      },
+    };
+    const checkContext: CheckContext = { declaredCaptures };
+
+    await assessMilestoneRound({
+      goal: makeGoal({ type: 'deliver-intent', scope: ['src/'] }),
+      criteriaArtifact: textArtifact(JSON.stringify({
+        criteria: [{ id: 'ui', claim: 'the page renders the total', check: { capture: 'shot' } }],
+      })),
+      mergedArtifact: filesArtifact([{ path: 'src/x.ts', content: '// x\n' }]),
+      registry: registry(),
+      brain,
+      store: new MemoryEventStore(),
+      now: () => 5,
+      checkContext,
+      goldenCapture: false,
+      debitUsage: () => {},
+    });
+
+    expect(judgeCtx?.needs?.vision).toBe(true);
+    // The vision need resolves only to a vision-capable catalog entry: a non-vision
+    // band is skipped past, never selected, for this call site.
+    const resolved = resolveModel(judgeCtx!.tier, judgeCtx!.needs, DEFAULT_CATALOG);
+    expect(resolved.vision).toBe(true);
+  });
+
+  it('leaves needs unset when criteria are pure script/file checks (no image judge)', async () => {
+    let judgeCtx: BrainContext | undefined;
+    const brain: Brain = {
+      ...new ScriptedBrain().queueJudge(passVerdict()),
+      async judge(_goal, _subject, _rubric, ctx) {
+        judgeCtx = ctx;
+        return { value: passVerdict(), usage: ZERO_USAGE };
+      },
+    } as Brain;
+
+    await assessMilestoneRound({
+      goal: makeGoal({ type: 'deliver-intent', scope: ['src/'] }),
+      criteriaArtifact: criteriaArtifact('DONE'),
+      mergedArtifact: filesArtifact([{ path: 'src/x.ts', content: '// DONE\n' }]),
+      registry: registry(),
+      brain,
+      store: new MemoryEventStore(),
+      now: () => 6,
+      checkContext: undefined,
+      goldenCapture: false,
+      debitUsage: () => {},
+    });
+
+    expect(judgeCtx?.needs).toBeUndefined();
   });
 
   it('returns a failing empty judge verdict when no merged artifact exists', async () => {

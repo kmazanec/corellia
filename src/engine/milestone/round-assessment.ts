@@ -1,4 +1,5 @@
 import type { Brain, BrainContext } from '../../contract/brain.js';
+import type { DeclaredCaptures } from '../../contract/capture.js';
 import type { EventStore } from '../../contract/events.js';
 import type { Goal, Tier, Usage } from '../../contract/goal.js';
 import type { CheckContext, Registry } from '../../contract/goal-type.js';
@@ -9,6 +10,7 @@ import {
   parseAcceptanceCriteria,
   type AcceptanceCriterion,
 } from '../../library/acceptance-criteria.js';
+import { criteriaNeedVision } from '../../library/capture-vision.js';
 import { appendGoldenCandidate, enrichRubric } from '../judge-support.js';
 
 export interface RoundAssessment {
@@ -47,6 +49,7 @@ export async function assessMilestoneRound(params: {
     ...params,
     criteria,
     checkResults,
+    declaredCaptures: params.checkContext?.declaredCaptures,
   });
   const diffDigest = checkResults
     .filter((result) => !result.ok)
@@ -95,6 +98,7 @@ async function judgeAcceptanceIfAvailable(params: {
   now: () => number;
   goldenCapture: boolean;
   brainConfig?: { modelByTier?: Record<string, string> };
+  declaredCaptures: DeclaredCaptures | undefined;
   debitUsage: (usage: Usage) => void;
 }): Promise<Verdict> {
   const judgeType = iterativeAcceptanceJudge(params.registry, params.goal.type);
@@ -112,6 +116,12 @@ async function judgeAcceptanceIfAvailable(params: {
   const judgeCtx: BrainContext = {
     tier: judgeTier,
     memories: params.goal.memories,
+    // A `{ capture }` criterion feeding the judge an image (render-document,
+    // screenshot-ui) forces a vision-capable model regardless of band (ADR-042 ×
+    // ADR-044); absent an image-producing capture the judge resolves as usual.
+    ...(criteriaNeedVision(params.criteria, params.declaredCaptures)
+      ? { needs: { vision: true } }
+      : {}),
   };
   const { value, usage } = await params.brain.judge(
     params.goal,
