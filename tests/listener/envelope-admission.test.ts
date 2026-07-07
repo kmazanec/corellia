@@ -348,6 +348,111 @@ describe('envelope-admission: parked improvement retried after product clears', 
   });
 });
 
+describe('envelope-admission: USD accounting — an expensive tree defers the next improvement root', () => {
+  it('a first improvement tree that spends most of the allowance parks the next, while product runs freely', async () => {
+    const store = new MemStore();
+    let tick = 0;
+    const now = () => ++tick;
+    const ranGoals: string[] = [];
+
+    // The product run and every improvement tree report blockers, so completing
+    // one mints the next (runaway guard aside — improvement runs mint no further
+    // improvement, so the chain is: product → improvement #1, and #1's completion
+    // does NOT mint #2). To force a SECOND improvement admission attempt we
+    // commission a second product run whose blockers mint improvement #2; by then
+    // improvement #1 has charged $9 of the $10 allowance, so #2 must park for lack
+    // of dollars — not slots.
+    const scripts = new Map<string, Report>([
+      ['prod-a', makeReport({ blockers: ['broken a'] })],
+      ['prod-b', makeReport({ blockers: ['broken b'] })],
+    ]);
+    const engine = {
+      async run(goal: Goal): Promise<Report> {
+        ranGoals.push(goal.id);
+        await store.append({ type: 'goal-received', at: now(), goalId: goal.id, goal });
+        if (goal.id.startsWith('improve-')) {
+          await store.append({
+            type: 'produced',
+            at: now(),
+            goalId: goal.id,
+            usage: { promptTokens: 0, completionTokens: 0, costUsd: 9 },
+          });
+        }
+        const report = scripts.get(goal.id) ?? makeReport();
+        await store.append({ type: 'emitted', at: now(), goalId: goal.id, report });
+        return report;
+      },
+    } as unknown as InstanceType<typeof import('../../src/engine/engine.js').Engine>;
+
+    const listener = new Listener({
+      engine,
+      store,
+      now,
+      // $10 window, $5 reserved per tree: after one $9 tree only $1 remains, which
+      // cannot fund another tree's reserve, so the next improvement root parks.
+      standingEnvelope: { budget: defaultEnvelope.budget, spendCeilingUsd: 10, perTreeCeilingUsd: 5 },
+    });
+
+    // prod-a → improvement #1 runs (remaining $10 >= reserve $5), spends $9.
+    await listener.commission(makeInput('prod-a'));
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    // prod-b → improvement #2 attempted, but only $1 remains (< $5 reserve) → parked.
+    await listener.commission(makeInput('prod-b'));
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+
+    // Exactly one improvement tree ran; the second was parked for lack of DOLLARS
+    // (not slots) — $9 consumed of a $10 allowance leaves < the tree's need.
+    const improvementRuns = ranGoals.filter((id) => id.startsWith('improve-'));
+    expect(improvementRuns).toHaveLength(1);
+
+    const s = listener.status();
+    expect(s.improvementEnvelope?.consumedUsd).toBe(9);
+    expect(s.improvementEnvelope?.remainingUsd).toBe(1);
+    expect(s.parkedImprovement.length).toBeGreaterThan(0);
+  });
+
+  it('exposes consumed/remaining USD in status once a tree has spent', async () => {
+    const store = new MemStore();
+    let tick = 0;
+    const now = () => ++tick;
+    const ranGoals: string[] = [];
+
+    const scripts = new Map<string, Report>([
+      ['prod-status', makeReport({ blockers: ['broken'] })],
+    ]);
+    const engine = {
+      async run(goal: Goal): Promise<Report> {
+        ranGoals.push(goal.id);
+        await store.append({ type: 'goal-received', at: now(), goalId: goal.id, goal });
+        if (goal.id.startsWith('improve-')) {
+          await store.append({
+            type: 'produced',
+            at: now(),
+            goalId: goal.id,
+            usage: { promptTokens: 0, completionTokens: 0, costUsd: 2.5 },
+          });
+        }
+        const report = scripts.get(goal.id) ?? makeReport();
+        await store.append({ type: 'emitted', at: now(), goalId: goal.id, report });
+        return report;
+      },
+    } as unknown as InstanceType<typeof import('../../src/engine/engine.js').Engine>;
+
+    const listener = new Listener({
+      engine,
+      store,
+      now,
+      standingEnvelope: { budget: defaultEnvelope.budget, spendCeilingUsd: 10 },
+    });
+
+    await listener.commission(makeInput('prod-status'));
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+
+    const s = listener.status();
+    expect(s.improvementEnvelope).toEqual({ consumedUsd: 2.5, allowanceUsd: 10, remainingUsd: 7.5 });
+  });
+});
+
 describe('envelope-admission: status().parkedImprovement visibility', () => {
   it('GET /status shows parkedImprovement when envelope is exhausted', async () => {
     const store = new MemStore();

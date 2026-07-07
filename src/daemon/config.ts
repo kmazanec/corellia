@@ -222,7 +222,10 @@ export function defaultSharedLogPath(): string {
  * Build the standing envelope from the environment if both vars are present.
  *
  * STANDING_BUDGET_JSON — JSON-encoded Budget
- * STANDING_SPEND_CEILING_USD — number (dollars)
+ * STANDING_SPEND_CEILING_USD — number (dollars): the window's total USD allowance
+ * STANDING_PER_TREE_CEILING_USD — number (dollars), optional: the dollar ceiling
+ *   one improvement tree runs under and the headroom the admission gate reserves
+ *   before admitting one. Absent → no reserve (admit while any dollars remain).
  *
  * F-63 owns the admission-gate semantics (ADR-027); the daemon carries the
  * envelope on its config surface and logs it at startup.
@@ -237,7 +240,16 @@ export function buildStandingEnvelope(): StandingEnvelope | undefined {
   try {
     const budget = JSON.parse(budgetJson) as StandingEnvelope['budget'];
     const spendCeilingUsd = parseFloat(ceilingStr);
-    return { budget, spendCeilingUsd };
+    const perTreeStr = process.env['STANDING_PER_TREE_CEILING_USD'];
+    const perTreeCeilingUsd =
+      perTreeStr !== undefined && perTreeStr !== '' ? parseFloat(perTreeStr) : undefined;
+    return {
+      budget,
+      spendCeilingUsd,
+      ...(perTreeCeilingUsd !== undefined && Number.isFinite(perTreeCeilingUsd)
+        ? { perTreeCeilingUsd }
+        : {}),
+    };
   } catch {
     console.warn('[config] STANDING_BUDGET_JSON is not valid JSON — standing envelope disabled');
     return undefined;

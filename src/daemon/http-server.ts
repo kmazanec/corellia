@@ -169,6 +169,10 @@ function projectStatus(listener: Listener): FrontDoorStatus {
   if (s.parkedImprovement.length > 0) {
     status.parkedImprovement = s.parkedImprovement;
   }
+  // Surface the USD envelope's consumed/remaining when an envelope is configured.
+  if (s.improvementEnvelope !== undefined) {
+    status.improvementEnvelope = s.improvementEnvelope;
+  }
   return status;
 }
 

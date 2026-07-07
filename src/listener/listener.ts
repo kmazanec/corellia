@@ -33,6 +33,7 @@ import type { Intent, MemoryPointer } from '../contract/goal.js';
 import type { Report } from '../contract/report.js';
 import type { DecisionBrief } from '../contract/decision.js';
 import { verifyEntryPoints } from '../library/script-runner.js';
+import { costSummary } from '../eventlog/projections.js';
 import type { CommissionInput, StandingEnvelope } from '../contract/brief.js';
 
 // ── Public input types ────────────────────────────────────────────────────────
@@ -328,6 +329,22 @@ async function lastBlockedEvent(
   return null;
 }
 
+/**
+ * The measured USD a whole tree spent, read from the same usage-bearing events
+ * the per-tree dollar ceiling debits (ADR-017: measured spend, never estimated).
+ * A tree's goals all share the root id as a prefix — children are minted as
+ * `${parent.id}/${localId}` — so folding every event whose goalId is the root or
+ * a `root/…` descendant yields the tree-wide cost. Cost-silent endpoints report
+ * no `costUsd`, so their contribution is 0; that shortfall is noted at the call
+ * site (the envelope errs toward under-charging, never over-charging, spend it
+ * cannot see).
+ */
+async function treeSpendUsd(store: EventStore, rootId: string): Promise<number> {
+  const all = await store.list();
+  const inTree = all.filter((e) => e.goalId === rootId || e.goalId.startsWith(`${rootId}/`));
+  return costSummary(inTree).tree.costUsd ?? 0;
+}
+
 // ── Listener ──────────────────────────────────────────────────────────────────
 
 export class Listener {
@@ -524,6 +541,7 @@ export class Listener {
     queued: string[];
     parked: { id: string; question: string; deadline: number }[];
     parkedImprovement: string[];
+    improvementEnvelope?: { consumedUsd: number; allowanceUsd: number; remainingUsd: number };
   } {
     return {
       running: [...this.reservations.keys()],
@@ -535,6 +553,17 @@ export class Listener {
       })),
       // Improvement commissions waiting on envelope headroom + empty product queue.
       parkedImprovement: this.parkedImprovement.map((c) => c.id),
+      // The USD standing envelope's consumed/remaining, when an envelope is
+      // configured (ADR-027). Absent when the improvement loop is disabled.
+      ...(this.standingEnvelope !== undefined
+        ? {
+            improvementEnvelope: {
+              consumedUsd: this.envelopeSpentUsd,
+              allowanceUsd: this.standingEnvelope.spendCeilingUsd,
+              remainingUsd: Math.max(0, this.standingEnvelope.spendCeilingUsd - this.envelopeSpentUsd),
+            },
+          }
+        : {}),
     };
   }
 
@@ -722,15 +751,23 @@ export class Listener {
   }
 
   /**
-   * True when the standing envelope has headroom for another improvement tree.
-   * The envelope's budget does not directly map to USD spend (actual spend is
-   * tracked by the engine); we compare envelopeSpentUsd against the ceiling.
+   * True when the standing envelope has USD headroom for another improvement
+   * tree. Admission checks REMAINING DOLLARS, not remaining slots — one expensive
+   * tree can exhaust the window that many cheap trees would have shared (ADR-027's
+   * "improvement never starves product" is now a cost property, not a count
+   * property). When `perTreeCeilingUsd` is set the gate RESERVES a tree's worth
+   * of dollars: it admits only when remaining >= perTreeCeilingUsd, so a window
+   * whose remainder cannot fund a whole tree defers the next root. Absent the
+   * reserve, the gate admits while any dollars remain — the pre-existing shape.
    *
-   * Conservative: if spend tracking is imprecise, we err on the side of parking.
+   * Conservative: cost-silent spend counts as 0 (see {@link treeSpendUsd}), so
+   * the envelope can under-charge but never over-charge; it errs toward admitting.
    */
   private hasEnvelopeHeadroom(): boolean {
     if (!this.standingEnvelope) return false;
-    return this.envelopeSpentUsd < this.standingEnvelope.spendCeilingUsd;
+    const remaining = this.standingEnvelope.spendCeilingUsd - this.envelopeSpentUsd;
+    const reserve = this.standingEnvelope.perTreeCeilingUsd;
+    return reserve !== undefined ? remaining >= reserve : remaining > 0;
   }
 
   /**
@@ -751,40 +788,53 @@ export class Listener {
   }
 
   /**
-   * Run an improvement commission, decrementing the envelope on completion.
+   * Run an improvement commission, charging the envelope its MEASURED USD spend
+   * on completion — the same spend stream the per-tree dollar ceiling debits
+   * (ADR-017), read back from the event log after the tree finishes. A tree that
+   * spends most of the allowance defers the next improvement root; a cheap tree
+   * barely moves the total. ADR-027: top-up is operator config only — the
+   * listener never auto-tops-up.
    *
-   * The envelope spend ceiling decrements per improvement tree (budget + actual
-   * spend as tracked). ADR-027: top-up is operator config only — the listener
-   * never auto-tops-up.
+   * A failed run still charges whatever it spent before failing (a crashed tree
+   * that burned dollars must not be free), read from the log the same way.
    */
   private async runImprovementIntent(commission: CommissionInput): Promise<Report | undefined> {
     if (!this.standingEnvelope) return undefined;
 
     // Use the envelope's budget for the improvement tree, not the commission's
     // own default budget. The envelope budget is the operator-configured allowance.
+    // Bound the tree's dollar spend to what the window can actually fund: the
+    // smaller of the per-tree ceiling (if configured) and the remaining window, so
+    // a single tree can never overspend the envelope it draws against (ADR-017).
+    const remaining = this.standingEnvelope.spendCeilingUsd - this.envelopeSpentUsd;
+    const treeCeiling = this.standingEnvelope.perTreeCeilingUsd;
+    const spendCeilingUsd = treeCeiling !== undefined ? Math.min(treeCeiling, remaining) : remaining;
     const enveloped: CommissionInput = {
       ...commission,
       budget: this.standingEnvelope.budget,
+      ...(spendCeilingUsd > 0 ? { spendCeilingUsd } : {}),
     };
 
-    let report: Report;
     try {
-      report = await this.runIntent(enveloped, []);
+      const report = await this.runIntent(enveloped, []);
+      await this.chargeEnvelope(commission.id);
+      return report;
     } catch {
-      // Improvement run failed — decrement a nominal amount to track the attempt.
-      this.envelopeSpentUsd += 0;
+      // The run failed, but any dollars it spent before failing are real and
+      // must count against the window — read them from the log like a success.
+      await this.chargeEnvelope(commission.id);
       return undefined;
     }
+  }
 
-    // Decrement the envelope by a nominal amount per tree. Actual cost tracking
-    // requires USD-denominated usage data from the engine (not available in v1 of
-    // the loop — the spendCeilingUsd is a conservative bound). The decrement
-    // prevents runaway: each completion consumes a slot. A future iteration will
-    // wire the engine's `Usage.costUsd` into this path.
-    //
-    // ADR-027: top-up is operator config only (no auto-increment here).
-    this.envelopeSpentUsd += 1; // Nominal per-tree spend unit.
-    return report;
+  /**
+   * Add an improvement tree's measured USD spend to the envelope's consumed
+   * total. Read from the same usage-bearing events the per-tree ceiling debits;
+   * cost-silent spend counts as 0 (the envelope under-charges rather than
+   * over-charges spend it cannot see). Never auto-tops-up (ADR-027).
+   */
+  private async chargeEnvelope(rootId: string): Promise<void> {
+    this.envelopeSpentUsd += await treeSpendUsd(this.store, rootId);
   }
 
   /** Record the park: release reservation, write parked event, add to parked map. */

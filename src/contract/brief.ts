@@ -82,6 +82,13 @@ export interface FrontDoorStatus {
    * improvement loop is backed up waiting for headroom or product idle.
    */
   parkedImprovement?: string[];
+  /**
+   * The improvement loop's USD standing envelope: dollars consumed, the total
+   * allowance, and dollars remaining (ADR-027). Present only when an envelope is
+   * configured, so operators can see how close the window is to deferring the
+   * next improvement root. Absent when the improvement loop is disabled.
+   */
+  improvementEnvelope?: { consumedUsd: number; allowanceUsd: number; remainingUsd: number };
 }
 
 // ── The standing envelope ──────────────────────────────────────────────────────
@@ -91,8 +98,26 @@ export interface FrontDoorStatus {
  * dollar ceiling that improvement commissions draw against. It is operator
  * config — top-up is manual only — and it can never starve product work: the
  * admission gate requires both envelope headroom AND an empty product queue.
+ *
+ * The envelope is charged in MEASURED USD: on completion each improvement tree
+ * adds its actual dollar spend (the same spend stream the per-tree ceiling
+ * debits, ADR-017) to the window's consumed total, and admission of a new
+ * improvement root checks REMAINING DOLLARS, not remaining slots — so one
+ * expensive tree can defer the next, which a count of trees could never express.
  */
 export interface StandingEnvelope {
   budget: Budget;
+  /** The window's total USD allowance. Consumed by measured tree spend; manual top-up only. */
   spendCeilingUsd: number;
+  /**
+   * The dollar ceiling a single improvement tree runs under, and the headroom
+   * the admission gate reserves before admitting one: a new improvement root is
+   * admitted only when the window's remaining dollars are at least this much, and
+   * the admitted tree runs bounded by it (never more than the remaining window).
+   * Absent → no per-tree reserve: the window admits while any dollars remain
+   * (`consumed < allowance`) and a tree runs under the engine default ceiling —
+   * the pre-existing behaviour, preserved for configs that set only
+   * `spendCeilingUsd`.
+   */
+  perTreeCeilingUsd?: number;
 }
