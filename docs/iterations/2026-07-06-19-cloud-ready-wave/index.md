@@ -4,7 +4,7 @@ title: "Iteration 21 — The cloud-ready wave: deploy path, model catalog, tree 
 description: One orchestrated wave (nine hand-built features on parallel worktree branches, reviewed and folded into feat/cloud-ready) closing the highest-leverage gaps between the factory and unattended cloud operation — package/ship/run the daemon anywhere, pick models by capability and cost, stop wall-clock starvation, watch a run live, export traces, and stop the four run-killing failure modes (integration-seam blocks, null-dive cascades, empty-artifact blocks, all-or-nothing roots).
 tags: [iteration, factory, deploy, model-catalog, wall-clock, observability, partial-delivery, repair-integration, bootstrap]
 timestamp: 2026-07-06
-status: on feat/cloud-ready, pending operator review + live proof
+status: merged to main; live proofs pending
 ---
 
 # Iteration 21 — The cloud-ready wave
