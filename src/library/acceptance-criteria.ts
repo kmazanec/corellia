@@ -150,6 +150,28 @@ export function criteriaWellFormed(): DeterministicCheck {
             detail: `criterion "${id}" names capture "${check['capture']}" which is not declared — declared captures: ${known}`,
           };
         }
+        // A script check must name a DECLARED script, for the same reason: the
+        // runner refuses undeclared names, so a criterion minted with raw
+        // command text ("npm run test", "vitest run --exclude ...") can never
+        // pass at run time (live-tail run 18: 4 of 11 criteria were dead on
+        // arrival this way). Reject at author-time, naming the declared set,
+        // while the author can still fix it. Skipped when the context does not
+        // carry the declared names (artifact-only callers).
+        const declaredScripts = ctx?.declaredScriptNames;
+        if (
+          typeof check['script'] === 'string' &&
+          declaredScripts !== undefined &&
+          !declaredScripts.includes(check['script'])
+        ) {
+          const known = declaredScripts.length > 0 ? declaredScripts.join(', ') : '(none declared)';
+          return {
+            ok: false,
+            detail:
+              `criterion "${id}" names script "${check['script']}" which is not in the declared set — ` +
+              `a {script} check must be exactly one of the declared script NAMES (${known}), ` +
+              `never a shell command line`,
+          };
+        }
       }
       return { ok: true, detail: `all ${criteria.length} criteria name a runnable predicate` };
     },

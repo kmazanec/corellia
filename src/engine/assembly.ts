@@ -351,6 +351,7 @@ export async function openSandboxAssembly(
       // whose suite takes minutes (observed: live-tail commission run, 2026-07-01).
       runScript: (name: string): Promise<ScriptResult> =>
         perGoalRunner.run(name, undefined, CHECK_SCRIPT_TIME_LIMIT_MS),
+      declaredScriptNames: Object.keys(config.declaredScripts),
       // A capture criterion runs its declared capture through a worktree-pinned,
       // env-scrubbed, time-bounded runner (ADR-042). The render/start scripts go
       // through the same per-goal logging script runner, so a capture's subprocess

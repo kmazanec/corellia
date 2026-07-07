@@ -21,6 +21,15 @@ export interface CheckContext {
   /** Run one repo-declared script by name in the sandbox, returning its result. */
   runScript?: (name: string) => Promise<ScriptResult>;
   /**
+   * The names of the scripts declared for this tree. A `{ script }` acceptance
+   * criterion validates its name against this set at AUTHOR time, exactly as a
+   * `{ capture }` criterion validates against declaredCaptures — a minted
+   * criterion naming an undeclared script (e.g. raw command text like
+   * "npm run test") can never pass at run time, so it is rejected with the
+   * declared names while the author can still fix it.
+   */
+  declaredScriptNames?: readonly string[];
+  /**
    * The captures declared for this tree (ADR-042), parallel to declaredScripts.
    * A `{ capture }` criterion validates its name against this map. Absent for any
    * goal that declares no captures; a `{ capture }` criterion then fails safe.

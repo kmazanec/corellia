@@ -6,7 +6,7 @@
  */
 
 import { normalize, isAbsolute, join } from 'node:path';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import type { DeterministicCheck, CheckContext } from '../contract/goal-type.js';
 import type { Goal } from '../contract/goal.js';
@@ -192,6 +192,18 @@ export function sandboxFileContains(path: string, needle: string): Deterministic
       try {
         content = await readFile(join(ctx.sandboxRoot, path), 'utf8');
       } catch {
+        // A bare existence check (empty needle) tolerates a DIRECTORY target —
+        // criteria routinely assert "docs/iterations/ exists" (run 18).
+        if (needle.length === 0) {
+          try {
+            const st = await stat(join(ctx.sandboxRoot, path));
+            if (st.isDirectory()) {
+              return { ok: true, detail: `Directory "${path}" exists in the worktree.` };
+            }
+          } catch {
+            // fall through to the not-found failure
+          }
+        }
         return { ok: false, detail: `File "${path}" not found in the worktree.` };
       }
       if (content.includes(needle)) {

@@ -554,3 +554,30 @@ describe('captureSucceeded', () => {
     expect(r.detail).toContain('did not produce output');
   });
 });
+
+describe('sandboxFileContains directory tolerance', () => {
+  it('a bare existence check passes on a DIRECTORY target', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'corellia-sandboxdir-'));
+    try {
+      mkdirSync(join(root, 'docs', 'iterations'), { recursive: true });
+      const ctx: CheckContext = { sandboxRoot: root };
+      const r = await sandboxFileContains('docs/iterations/', '').run(baseGoal, null, ctx);
+      expect(r.ok).toBe(true);
+      expect(r.detail).toContain('Directory');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('a needle check still fails on a directory target', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'corellia-sandboxdir2-'));
+    try {
+      mkdirSync(join(root, 'docs'), { recursive: true });
+      const ctx: CheckContext = { sandboxRoot: root };
+      const r = await sandboxFileContains('docs', 'needle').run(baseGoal, null, ctx);
+      expect(r.ok).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

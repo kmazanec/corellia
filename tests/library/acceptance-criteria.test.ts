@@ -332,3 +332,31 @@ describe('criterionToCheck', () => {
     expect(r.detail).toContain('no capture context');
   });
 });
+
+describe('declared-script validation at author time', () => {
+  const criteriaText = (script: string): Artifact => ({
+    kind: 'text',
+    text: JSON.stringify({
+      criteria: [{ id: 'c1', claim: 'suite green', check: { script } }],
+    }),
+  });
+
+  it('rejects a {script} criterion naming an undeclared script, listing the declared set', async () => {
+    const ctx: CheckContext = { declaredScriptNames: ['test', 'typecheck', 'lint'] };
+    const r = await criteriaWellFormed().run(baseGoal, criteriaText('npm run test'), ctx);
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('npm run test');
+    expect(r.detail).toContain('test, typecheck, lint');
+  });
+
+  it('accepts a {script} criterion naming a declared script', async () => {
+    const ctx: CheckContext = { declaredScriptNames: ['test', 'typecheck', 'lint'] };
+    const r = await criteriaWellFormed().run(baseGoal, criteriaText('test'), ctx);
+    expect(r.ok).toBe(true);
+  });
+
+  it('skips the validation when the context carries no declared names', async () => {
+    const r = await criteriaWellFormed().run(baseGoal, criteriaText('anything'), {});
+    expect(r.ok).toBe(true);
+  });
+});
