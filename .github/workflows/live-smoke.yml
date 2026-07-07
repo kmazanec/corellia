@@ -1,0 +1,84 @@
+name: live-smoke
+
+# NON-REQUIRED live-model smoke: sends ONE greeting-sized goal end-to-end through
+# the real low-band model, bounded by a per-tree dollar ceiling of a few cents and
+# a short wall clock. It exists to catch regressions the ScriptedBrain suite cannot
+# see — skill files, the model catalog, prompt assembly, OpenRouter request
+# encoding — before they surface mid-live-run.
+#
+# WHY IT IS NOT PER-PUSH:
+#   Real spend and real-model flake must never block the main gate (build-image.yml).
+#   This runs on a nightly schedule and on manual dispatch only, and is a separate,
+#   non-required workflow. A red run here is a signal to investigate, not a merge block.
+#
+# OPERATOR STEP — required for this workflow to actually run the smoke:
+#   Add an `OPENROUTER_API_KEY` repository secret (Settings → Secrets and variables →
+#   Actions). Until then, every run SKIPS cleanly (exit 0): the script prints a SKIP
+#   and the job goes green without spending. Adding the secret is deliberately an
+#   operator action so no key lands in the repo.
+
+on:
+  schedule:
+    # 07:17 UTC nightly — off the hour to dodge the cron rush.
+    - cron: '17 7 * * *'
+  workflow_dispatch:
+    inputs:
+      cap_usd:
+        description: 'Per-tree dollar ceiling (USD)'
+        required: false
+        default: '0.25'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Gate by secret presence: skip cleanly (not fail) when the key is absent.
+      # The script itself also self-skips (exit 0) with no key, but checking here
+      # keeps the log honest and avoids even installing intent when unconfigured.
+      - name: Report secret presence
+        id: secret
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -z "${OPENROUTER_API_KEY}" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "OPENROUTER_API_KEY secret is not set — the smoke will SKIP (exit 0)."
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "OPENROUTER_API_KEY secret is present — running the live smoke."
+          fi
+
+      - name: Run live smoke
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          CORELLIA_SMOKE_CAP_USD: ${{ github.event.inputs.cap_usd || '0.25' }}
+          CORELLIA_SMOKE_EVENTS_OUT: ${{ github.workspace }}/smoke-events.jsonl
+        run: npm run smoke:live
+
+      # Upload the run's event log for diagnosis, but only when the smoke failed.
+      - name: Upload events.jsonl on failure
+        if: failure() && steps.secret.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-smoke-events
+          path: smoke-events.jsonl
+          if-no-files-found: ignore

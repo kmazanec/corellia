@@ -22,6 +22,7 @@
     "live:self": "tsx examples/live-self.ts",
     "live:foreign": "tsx examples/live-foreign.ts",
     "live:tiutni": "tsx examples/live-tiutni.ts",
+    "smoke:live": "tsx scripts/smoke-live.ts",
     "commission:run": "tsx examples/run-commission.ts",
     "commission:watch": "tsx examples/watch-commission.ts",
     "docker:build": "docker compose -f compose.yaml build",
