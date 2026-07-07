@@ -39,6 +39,13 @@ export function openRouterConfig(env: NodeJS.ProcessEnv = process.env): LlmBrain
   return {
     baseUrl: 'https://openrouter.ai/api/v1',
     apiKey,
+    // High-band headroom: structured authoring calls (author-acceptance-criteria)
+    // compose large artifacts over big prompts and are slower per token; the flat
+    // 120s default aborted every attempt (run ee51401d, and daemon proof runs 2-4:
+    // the criteria leaf churned 120s-abort/retry cycles for ~9 minutes). The tree
+    // deadline (ADR-046) is the runaway bound; per-request headroom lets a slow
+    // legitimate call finish.
+    requestTimeoutMsByTier: { high: 300_000 },
     catalog,
     // The pins double as the legacy `modelByTier` map: the band's preferred model
     // id, read by engine sites that report the resolved model on events.

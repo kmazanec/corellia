@@ -90,6 +90,15 @@ const TOOL_CALLING_RANK: Record<ModelSpec['toolCalling'], number> = {
   strong: 2,
 };
 
+/**
+ * The baseline needs applied to AUTOMATIC resolution: the factory's work is
+ * tool-loop- and structured-emit-heavy, so a model tagged toolCalling 'weak'
+ * is never auto-selected — it is reachable only through an explicit operator
+ * pin (pins bypass this floor) or a CORELLIA_MODELS_JSON re-tag. Callers fold
+ * this under their own needs so an explicit minToolCalling still wins.
+ */
+export const BASELINE_NEEDS: ModelNeeds = { minToolCalling: 'ok' };
+
 /** True when a spec satisfies every present need. An absent need does not constrain. */
 export function satisfiesNeeds(spec: ModelSpec, needs: ModelNeeds | undefined): boolean {
   if (!needs) return true;
@@ -210,13 +219,20 @@ export const DEFAULT_CATALOG: readonly ModelSpec[] = [
     toolCalling: 'ok',
   },
   {
+    // toolCalling re-tagged 'weak' from live evidence (2026-07-07 daemon proof
+    // runs 2-3): as the unpinned low/mid defaults, the qwen entries stalled
+    // 4-12 minutes per structured call and no real work happened; the same
+    // intents on the deepseek trio built and characterized within minutes.
+    // 'weak' excludes them from automatic selection (the resolution floor is
+    // minToolCalling 'ok'); an explicit pin or CORELLIA_MODELS_JSON re-tag can
+    // still opt in.
     id: 'qwen/qwen3-30b-a3b',
     capability: 2,
     costInPerMtok: 0.08,
     costOutPerMtok: 0.29,
     context: 128_000,
     vision: false,
-    toolCalling: 'ok',
+    toolCalling: 'weak',
   },
   // ── mid band (capability 4–6): the workhorse band ──
   {
@@ -229,13 +245,14 @@ export const DEFAULT_CATALOG: readonly ModelSpec[] = [
     toolCalling: 'strong',
   },
   {
+    // 'weak' per the same 2026-07-07 live evidence as qwen3-30b above.
     id: 'qwen/qwen3-235b-a22b',
     capability: 5,
     costInPerMtok: 0.2,
     costOutPerMtok: 0.85,
     context: 256_000,
     vision: false,
-    toolCalling: 'ok',
+    toolCalling: 'weak',
   },
   {
     id: 'moonshotai/kimi-k2',
@@ -411,9 +428,10 @@ export function assembleCatalog(
 
   const catalog = [...byId.values()];
 
-  // Fill any band whose pin was not explicitly set with the banded default.
+  // Fill any band whose pin was not explicitly set with the banded default —
+  // under the BASELINE_NEEDS floor, so a 'weak' model never becomes a default.
   for (const band of BANDS_ASCENDING) {
-    if (pins[band] === undefined) pins[band] = resolveModel(band, undefined, catalog).id;
+    if (pins[band] === undefined) pins[band] = resolveModel(band, BASELINE_NEEDS, catalog).id;
   }
 
   return { catalog, pins };

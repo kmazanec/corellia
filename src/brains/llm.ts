@@ -24,7 +24,7 @@ import { ZERO_USAGE } from '../contract/goal.js';
 import type { Tier } from '../contract/goal.js';
 import type { MemoryPointer } from '../contract/goal.js';
 import type { ModelSpec } from './model-catalog.js';
-import { resolveModel, satisfiesNeeds } from './model-catalog.js';
+import { BASELINE_NEEDS, resolveModel, satisfiesNeeds } from './model-catalog.js';
 import type { Decision, ChildPlan, DecisionBrief } from '../contract/decision.js';
 import type { Artifact, EmptyDiagnosis } from '../contract/report.js';
 import type { ToolDef, ToolCall } from '../contract/tool.js';
@@ -1340,7 +1340,11 @@ export class LlmBrain implements Brain {
     const pinnedId = this.config.modelByTier[tier];
     const pinned = this.modelCatalog.find((s) => s.id === pinnedId);
     if (pinned && satisfiesNeeds(pinned, needs)) return pinned;
-    return resolveModel(tier, needs, this.modelCatalog);
+    // Automatic (non-pinned) resolution carries the BASELINE_NEEDS floor: a
+    // 'weak'-tool-calling model is never auto-selected. The pin check above
+    // deliberately uses the RAW needs — an operator's explicit pin of a weak
+    // model is their call to make.
+    return resolveModel(tier, { ...BASELINE_NEEDS, ...needs }, this.modelCatalog);
   }
 
   // -------------------------------------------------------------------------

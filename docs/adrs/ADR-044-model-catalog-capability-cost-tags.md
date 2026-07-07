@@ -172,3 +172,24 @@ only remembers.
   event carries the model id or the tier on a step, the signal replays anchors and
   buckets the unobservable as `unknown`. It is a directional health signal, not an
   exact ledger; the reported tier→model mapping is what makes it actionable.
+
+## Amendment (2026-07-07) — weak tool-callers are excluded from automatic selection
+
+The first live daemon runs on the catalog defaults were the proof. With unpinned
+bands resolving cheapest-in-band, the qwen low/mid defaults stalled 4–12 minutes
+per structured call and produced no real work (proof runs 2–3); the same intent
+with the deepseek trio pinned built and characterized its deliverable within
+minutes (run 4). Changes, from that evidence:
+
+- The qwen entries are re-tagged `toolCalling: 'weak'` — the signal loop this
+  ADR promised, exercised on its first live data.
+- Automatic resolution now carries a `BASELINE_NEEDS` floor
+  (`minToolCalling: 'ok'`): a weak-tagged model is never auto-selected, at
+  either the per-call fallback or the banded-default fill. Explicit pins bypass
+  the floor — pinning a weak model is the operator's call.
+- The unpinned defaults are therefore the proven trio again (deepseek-v4-flash /
+  deepseek-v4-pro / glm-5.2), with the catalog machinery intact.
+- `openRouterConfig` finally sets the high-band request-timeout headroom
+  (300s) that the ee51401d note assumed: the author-acceptance-criteria leaf was
+  churning flat-120s aborts for ~9 minutes per round (runs 2–4); the ADR-046
+  tree deadline is the runaway bound, so per-request headroom is safe.

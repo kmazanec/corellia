@@ -157,8 +157,10 @@ describe('assembleCatalog — default + MODELS_JSON merge + legacy pins', () => 
     expect(catalog).toHaveLength(DEFAULT_CATALOG.length);
     // Each pin is the cheapest satisfying model in its band (no explicit pin set).
     expect(pins.high).toBe('z-ai/glm-5.2');
-    expect(pins.low).toBe('qwen/qwen3-30b-a3b');
-    expect(pins.mid).toBe('qwen/qwen3-235b-a22b');
+    // The BASELINE_NEEDS floor excludes 'weak'-tagged models (the qwen entries,
+    // re-tagged from 2026-07-07 live evidence) from banded defaults.
+    expect(pins.low).toBe('deepseek/deepseek-v4-flash');
+    expect(pins.mid).toBe('deepseek/deepseek-v4-pro');
   });
 
   it('patches an existing default entry by id (partial merge)', () => {

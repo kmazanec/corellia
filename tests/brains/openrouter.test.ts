@@ -69,18 +69,19 @@ describe('openRouterConfig', () => {
   });
 
   // With no pin set, a band resolves to its CHEAPEST satisfying default (ADR-044
-  // banding), which is the qwen flash / qwen 235b entries — cheaper than the
+  // banding) UNDER the BASELINE_NEEDS floor (weak tool-callers excluded), which
+  // is the deepseek flash / v4-pro entries — the proven trio — rather than the
   // deepseek entries that were the hardwired defaults before the catalog. The
   // high band's cheapest default remains glm-5.2. A `CORELLIA_MODEL_<BAND>` pin
   // still forces an exact model (covered by the override tests below).
   it('uses the cheapest low-band model when no low pin is set', () => {
     const cfg = openRouterConfig({ OPENROUTER_API_KEY: 'k' });
-    expect(cfg.modelByTier['low']).toBe('qwen/qwen3-30b-a3b');
+    expect(cfg.modelByTier['low']).toBe('deepseek/deepseek-v4-flash');
   });
 
   it('uses the cheapest mid-band model when no mid pin is set', () => {
     const cfg = openRouterConfig({ OPENROUTER_API_KEY: 'k' });
-    expect(cfg.modelByTier['mid']).toBe('qwen/qwen3-235b-a22b');
+    expect(cfg.modelByTier['mid']).toBe('deepseek/deepseek-v4-pro');
   });
 
   it('uses the cheapest high-band model when no high pin is set', () => {

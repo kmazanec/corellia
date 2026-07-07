@@ -34,6 +34,13 @@ final gate runs on the merged `feat/cloud-ready` branch on an otherwise idle
 machine still tripped 2–4 of them (`convergence*`), each passing 8/8 isolated
 immediately after.
 
+> **Addendum (2026-07-07).** A second flake mode in the same family:
+> `tests/daemon/config-sinks.test.ts` mutates `process.env` and fails under
+> parallel suite runs (3 notification-sink tests) while passing 9/9 isolated —
+> env-var pollution between concurrently-running files, not load. The fix
+> should isolate env mutation (vitest env stubbing or a serial project) along
+> with the timeout work.
+
 ## Proposed direction
 
 (Rough, not committed.) One or more of: raise the per-test timeouts on the
