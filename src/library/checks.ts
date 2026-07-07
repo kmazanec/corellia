@@ -33,6 +33,36 @@ export function isInScope(rawPath: string, scope: string[]): boolean {
   });
 }
 
+/** Human phrase per empty-artifact diagnosis reason. */
+const EMPTY_CAUSE: Record<NonNullable<Artifact['emptyDiagnosis']>['reason'], string> = {
+  truncated: 'the provider cut the output off at the token limit (truncation)',
+  refusal: 'the model refused to produce the content',
+  'parse-drop': 'the model returned content that post-processing dropped to nothing (parse-drop)',
+  'empty-response': 'the provider returned no content at all (empty response)',
+};
+
+/**
+ * Render the producer's empty-artifact diagnosis into a STABLE detail suffix: the
+ * cause phrase only, no raw sample. This becomes part of the finding title and
+ * thus the deterministic failure signature, so it must be stable — two empty
+ * attempts with different raw samples must still share a signature to be detected
+ * as isomorphic. The variable raw sample is carried to the block brief separately
+ * (see engine/attempt/failure.ts), not here. Empty when there is no diagnosis.
+ */
+function emptyDiagnosisDetail(artifact: Artifact): string {
+  const diagnosis = artifact.emptyDiagnosis;
+  if (diagnosis === undefined) return '';
+  return (
+    ` Diagnosis: ${EMPTY_CAUSE[diagnosis.reason]}, and a targeted re-ask plus a ` +
+    `mid-tier fallback did not recover content.`
+  );
+}
+
+/** Human phrase for an empty-artifact diagnosis reason, for the block brief. */
+export function emptyDiagnosisCause(reason: NonNullable<Artifact['emptyDiagnosis']>['reason']): string {
+  return EMPTY_CAUSE[reason];
+}
+
 /**
  * Pass when the artifact is non-null and non-empty — either it has at least
  * one file, or its text body is a non-empty string.
@@ -63,7 +93,10 @@ export const artifactPresent: DeterministicCheck = {
         if (wroteToWorktree) {
           return { ok: true, detail: 'Empty files artifact, but the leaf wrote files within scope.' };
         }
-        return { ok: false, detail: 'Artifact has kind "files" but no files were provided.' };
+        return {
+          ok: false,
+          detail: 'Artifact has kind "files" but no files were provided.' + emptyDiagnosisDetail(artifact),
+        };
       }
       return { ok: true, detail: `Artifact contains ${files.length} file(s).` };
     }
@@ -73,7 +106,10 @@ export const artifactPresent: DeterministicCheck = {
       if (wroteToWorktree) {
         return { ok: true, detail: 'Empty text artifact, but the leaf wrote files within scope.' };
       }
-      return { ok: false, detail: 'Artifact has kind "text" but the text body is empty.' };
+      return {
+        ok: false,
+        detail: 'Artifact has kind "text" but the text body is empty.' + emptyDiagnosisDetail(artifact),
+      };
     }
     return { ok: true, detail: 'Artifact contains a non-empty text body.' };
   },

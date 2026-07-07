@@ -61,6 +61,32 @@ describe('artifactPresent', () => {
     expect(r.ok).toBe(false);
   });
 
+  it('names the producer diagnosis in the detail for an empty artifact that carries one', async () => {
+    const r = await artifactPresent.run(baseGoal, {
+      kind: 'text',
+      text: '',
+      emptyDiagnosis: { reason: 'refusal', rawSample: "I can't do that" },
+    });
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('Diagnosis');
+    expect(r.detail).toContain('refused');
+  });
+
+  it('keeps the detail STABLE (no variable raw sample) so the failure signature is stable', async () => {
+    const a = await artifactPresent.run(baseGoal, {
+      kind: 'text',
+      text: '',
+      emptyDiagnosis: { reason: 'truncated', rawSample: 'sample ONE' },
+    });
+    const b = await artifactPresent.run(baseGoal, {
+      kind: 'text',
+      text: '',
+      emptyDiagnosis: { reason: 'truncated', rawSample: 'a completely DIFFERENT sample two' },
+    });
+    // Same reason, different raw sample → identical detail (the signature-bearing text).
+    expect(a.detail).toBe(b.detail);
+  });
+
   it('passes on files artifact with at least one file', async () => {
     const r = await artifactPresent.run(
       baseGoal,

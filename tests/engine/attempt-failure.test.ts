@@ -220,6 +220,47 @@ describe('attempt failure resolver', () => {
     expect(result.kind === 'blocked' ? result.report.blockers[0] : '').toContain('cannot converge');
     expect(store.types()).toEqual(['blocked', 'emitted']);
   });
+
+  it('names the empty-artifact diagnosis in the non-convergent block brief', async () => {
+    const store = new MemoryEventStore();
+    let seenBrief: string | undefined;
+
+    const result = await resolveAttemptFailure({
+      goal: makeGoal(),
+      // The failing artifact carries a producer diagnosis: it came back empty and
+      // the producer determined the cause was a length truncation.
+      artifact: {
+        kind: 'text',
+        text: '',
+        emptyDiagnosis: { reason: 'truncated', rawSample: 'BEGINNING OF THE ADR that got' },
+      },
+      verdict: failVerdict('artifact-present: Artifact has kind "text" but the text body is empty.'),
+      budget,
+      tier: 'high',
+      tierIndex: 0,
+      tierLadder: ['high'],
+      priorAttempt: undefined,
+      brain: new ScriptedBrain(),
+      store,
+      now: () => 8,
+      onBrief: async (brief) => {
+        seenBrief = brief.question;
+        return brief.onTimeout;
+      },
+      debitUsage: () => {},
+      hasReachedCeiling: () => false,
+      onCeilingReached: async () => {
+        throw new Error('ceiling should not run');
+      },
+    });
+
+    expect(result.kind).toBe('blocked');
+    // The brief names the WHY (truncation) and carries the raw sample, not the
+    // generic "no actionable repair".
+    expect(seenBrief).toContain('cut the output off');
+    expect(seenBrief).toContain('BEGINNING OF THE ADR');
+    expect(seenBrief).not.toContain('no actionable repair');
+  });
 });
 
 describe('transport failures and isomorphism', () => {

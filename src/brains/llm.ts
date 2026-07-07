@@ -26,7 +26,7 @@ import type { MemoryPointer } from '../contract/goal.js';
 import type { ModelSpec } from './model-catalog.js';
 import { resolveModel, satisfiesNeeds } from './model-catalog.js';
 import type { Decision, ChildPlan, DecisionBrief } from '../contract/decision.js';
-import type { Artifact } from '../contract/report.js';
+import type { Artifact, EmptyDiagnosis } from '../contract/report.js';
 import type { ToolDef, ToolCall } from '../contract/tool.js';
 import type { Verdict, Finding } from '../contract/verdict.js';
 import { renderPersonaBlock } from '../library/personas.js';
@@ -239,6 +239,25 @@ export function readUsage(data: { usage?: ChatUsage }): Usage {
     ...(cachedPromptTokens !== undefined ? { cachedPromptTokens } : {}),
   };
   return u.cost !== undefined ? { ...base, costUsd: u.cost } : base;
+}
+
+/**
+ * Add two provider-usage records for a multi-call path (a re-ask, a fallback).
+ * Tokens sum; `costUsd` is present only when at least one side reported it,
+ * matching the inline accumulation callJson does across its re-ask.
+ */
+export function sumUsage(a: Usage, b: Usage): Usage {
+  const merged: Usage = {
+    promptTokens: a.promptTokens + b.promptTokens,
+    completionTokens: a.completionTokens + b.completionTokens,
+  };
+  if (a.cachedPromptTokens !== undefined || b.cachedPromptTokens !== undefined) {
+    merged.cachedPromptTokens = (a.cachedPromptTokens ?? 0) + (b.cachedPromptTokens ?? 0);
+  }
+  if (a.costUsd !== undefined || b.costUsd !== undefined) {
+    merged.costUsd = (a.costUsd ?? 0) + (b.costUsd ?? 0);
+  }
+  return merged;
 }
 
 // ---------------------------------------------------------------------------
@@ -761,6 +780,93 @@ function parseFileBlocks(text: string): { path: string; content: string }[] {
     }
   }
   return files;
+}
+
+/** Max characters of the raw completion carried on an {@link EmptyDiagnosis} sample. */
+const EMPTY_RAW_SAMPLE_CAP = 200;
+
+/**
+ * Classify why a producer completion could not be delivered. Called on the raw
+ * FIRST completion whenever `produce()` decides it is a non-delivery (see
+ * {@link nonDeliveryReason}), so it distinguishes the causes the issue calls for:
+ *
+ * - `truncated`      — the provider signalled a length cutoff (`truncated` flag).
+ * - `refusal`        — short prose opening with a refusal phrase ("I can't", "sorry").
+ * - `parse-drop`     — non-empty content that produced no usable artifact (all fences
+ *   were language-tagged / half-open and dropped, leaving nothing deliverable).
+ * - `empty-response` — nothing but whitespace came back.
+ *
+ * Precedence: truncation first (a length cutoff explains a dropped/blank body
+ * regardless of what little text survived), then refusal, then genuinely-empty,
+ * then parse-drop for a non-empty body that produced no artifact.
+ */
+export function diagnoseEmpty(rawContent: string, truncated: boolean | undefined): EmptyDiagnosis {
+  const rawSample = rawContent.slice(0, EMPTY_RAW_SAMPLE_CAP);
+  const trimmed = rawContent.trim();
+  if (truncated) return { reason: 'truncated', rawSample };
+  if (isRefusalProse(trimmed)) return { reason: 'refusal', rawSample };
+  if (trimmed.length === 0) return { reason: 'empty-response', rawSample };
+  // Non-empty content that still produced no artifact: post-processing dropped it.
+  return { reason: 'parse-drop', rawSample };
+}
+
+/**
+ * True when a short body opens with a refusal phrase. Bounded to a short body so a
+ * legitimate document that merely mentions "I cannot" mid-text is not misread as a
+ * refusal — a real refusal is terse and leads with the decline.
+ */
+export function isRefusalProse(trimmed: string): boolean {
+  if (trimmed.length > 400) return false;
+  const opening = trimmed.slice(0, 60).toLowerCase();
+  return (
+    opening.startsWith("i can't") ||
+    opening.startsWith('i cannot') ||
+    opening.startsWith('i cant') ||
+    opening.startsWith("i'm sorry") ||
+    opening.startsWith('im sorry') ||
+    opening.startsWith('sorry') ||
+    opening.startsWith('i am sorry') ||
+    opening.startsWith('i am unable') ||
+    opening.startsWith("i'm unable") ||
+    opening.startsWith('i am not able') ||
+    opening.startsWith('unable to')
+  );
+}
+
+/** Parse a producer completion into an Artifact: fenced files, else non-empty text. */
+function parseArtifactFromContent(content: string): Artifact {
+  const files = parseFileBlocks(content);
+  if (files.length > 0) return { kind: 'files', files };
+  return { kind: 'text', text: content };
+}
+
+/** True when a parsed artifact carries no deliverable content (no files, blank text). */
+function isEmptyArtifact(artifact: Artifact): boolean {
+  if (artifact.kind === 'files') return (artifact.files ?? []).length === 0;
+  return (artifact.text ?? '').trim().length === 0;
+}
+
+/**
+ * The non-delivery reason for a producer completion, or null when the completion
+ * is a genuine artifact to return. A completion is a NON-DELIVERY when it is
+ * empty (no files, blank text), was truncated to nothing, or is a bare refusal —
+ * the cases where returning it as an artifact would strand the tree at the
+ * artifact-present gate or the judge with no diagnosis. Refusal is included even
+ * though its text is non-empty: a terse "I can't …" is not a deliverable, and
+ * catching it here lets the re-ask try to recover real content before the leaf
+ * blocks (issue design-arch-empty-artifact-block).
+ */
+function nonDeliveryReason(
+  artifact: Artifact,
+  rawContent: string,
+  truncated: boolean | undefined,
+): EmptyDiagnosis | null {
+  if (isEmptyArtifact(artifact)) return diagnoseEmpty(rawContent, truncated);
+  if (truncated) return diagnoseEmpty(rawContent, truncated);
+  if (artifact.kind === 'text' && isRefusalProse((artifact.text ?? '').trim())) {
+    return diagnoseEmpty(rawContent, truncated);
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1583,10 +1689,76 @@ export class LlmBrain implements Brain {
           `Do not truncate or summarize file content — emit every line.`,
       },
     ];
-    const result = await this.callCompletions(target, messages, false);
-    const files = parseFileBlocks(result.content);
-    const value: Artifact = files.length > 0 ? { kind: 'files', files } : { kind: 'text', text: result.content };
-    return { value, usage: result.usage };
+    const first = await this.callCompletions(target, messages, false);
+    const firstArtifact = parseArtifactFromContent(first.content);
+    const firstReason = nonDeliveryReason(firstArtifact, first.content, first.truncated);
+    if (firstReason === null) {
+      return { value: firstArtifact, usage: first.usage };
+    }
+    // A non-delivery (empty, truncated-to-nothing, or a bare refusal): recover
+    // before returning it. One targeted re-ask on the SAME model, then a mid-band
+    // fallback (the same posture callJson uses for an empty/truncated structured
+    // response); if none delivers, return the last artifact carrying a DIAGNOSIS
+    // of the FIRST completion so the block brief names why.
+    return this.recoverNonDelivery({ goal, ctx, target, messages, first, firstReason });
+  }
+
+  /**
+   * Recover a produce() non-delivery, or diagnose why it could not. Re-asks the
+   * same model once with an explicit "you returned no usable content" nudge; if
+   * still a non-delivery, resolves the mid-band model (catalog- and pin-aware,
+   * needs preserved) and tries once more; if that too fails, returns the last
+   * artifact tagged with the {@link EmptyDiagnosis} of the FIRST completion (the
+   * original cause — a later re-ask's blankness is a symptom, not the diagnosis).
+   * Usage accumulates across every call made.
+   */
+  private async recoverNonDelivery(params: {
+    goal: Goal;
+    ctx: BrainContext;
+    target: ResolvedModel;
+    messages: ChatMessage[];
+    first: { content: string; usage: Usage; truncated?: boolean };
+    firstReason: EmptyDiagnosis;
+  }): Promise<Metered<Artifact>> {
+    const { ctx, target, messages, first, firstReason } = params;
+    const nudge: ChatMessage[] = [
+      ...messages,
+      { role: 'assistant', content: '(no usable content)' },
+      {
+        role: 'user',
+        content:
+          `Your previous response contained NO usable deliverable` +
+          (first.truncated ? ` and was CUT OFF by the output-length limit` : '') +
+          (firstReason.reason === 'refusal' ? ` (it read as a refusal)` : '') +
+          `. Emit the FULL document body now as plain text` +
+          (first.truncated ? ` — be terser so it fits within the limit` : '') +
+          `. No fences, no preamble, no apology — just the deliverable itself.`,
+      },
+    ];
+
+    const second = await this.callCompletions(target, nudge, false);
+    const secondArtifact = parseArtifactFromContent(second.content);
+    if (nonDeliveryReason(secondArtifact, second.content, second.truncated) === null) {
+      return { value: secondArtifact, usage: sumUsage(first.usage, second.usage) };
+    }
+
+    // Still a non-delivery on the same model — fall back to the mid band (needs
+    // preserved). Skip the extra call when mid resolves to the target just used.
+    const midTarget = this.resolve('mid', ctx.needs);
+    if (midTarget.model === target.model) {
+      return {
+        value: { ...secondArtifact, emptyDiagnosis: firstReason },
+        usage: sumUsage(first.usage, second.usage),
+      };
+    }
+
+    const third = await this.callCompletions(midTarget, nudge, false);
+    const thirdArtifact = parseArtifactFromContent(third.content);
+    const usage = sumUsage(sumUsage(first.usage, second.usage), third.usage);
+    if (nonDeliveryReason(thirdArtifact, third.content, third.truncated) === null) {
+      return { value: thirdArtifact, usage };
+    }
+    return { value: { ...thirdArtifact, emptyDiagnosis: firstReason }, usage };
   }
 
   async judge(

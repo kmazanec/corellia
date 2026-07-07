@@ -16,6 +16,31 @@ export interface Artifact {
   files?: { path: string; content: string }[];
   /** The text body, when `kind` is `text`. */
   text?: string;
+  /**
+   * Set ONLY on an empty artifact the producer could not fill: the diagnosed
+   * reason it came back empty, after a targeted re-ask and a mid-band fallback
+   * failed to recover content. Lets the deterministic artifact-present gate and
+   * the resulting block brief name WHY the artifact is empty (truncation, a
+   * refusal, a parse-drop, or a bare empty response) instead of a generic "no
+   * actionable repair." Absent on any non-empty artifact.
+   */
+  emptyDiagnosis?: EmptyDiagnosis;
+}
+
+/**
+ * Why a producer's artifact came back empty. A diagnosable failure mode plus a
+ * short raw sample so an operator can see what the provider actually returned:
+ *
+ * - `truncated`      — the provider cut the output off (finish_reason 'length').
+ * - `refusal`        — the model declined ("I can't / I cannot / sorry …").
+ * - `parse-drop`     — the model returned content, but post-processing (fenced-block
+ *   parsing) dropped it all to nothing.
+ * - `empty-response` — the provider returned no content at all (whitespace or blank).
+ */
+export interface EmptyDiagnosis {
+  reason: 'truncated' | 'refusal' | 'parse-drop' | 'empty-response';
+  /** A short excerpt of the raw completion (bounded) for the block brief and the log. */
+  rawSample: string;
 }
 
 /**

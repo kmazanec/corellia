@@ -4,10 +4,31 @@ title: "design-arch leaf emits an empty artifact and terminally blocks at the hi
 description: A design-arch leaf produced empty text repeatedly, failed the deterministic artifact-present gate at the top tier with no actionable repair, and terminally blocked the whole delivery instead of surfacing why it could not produce.
 tags: [engine, brain, design-arch, robustness, partial-delivery]
 timestamp: 2026-06-25
-status: open
+status: fixed-pending-live-proof
 kind: bug
 severity: medium
 ---
+
+> **Diagnosis half fixed-pending-live-proof (2026-07-06, feat/empty-artifact).**
+> `produce()` (`src/brains/llm.ts`) now treats an empty artifact as a diagnosable
+> failure: on an empty completion it issues one targeted re-ask on the same model
+> ("you returned no content; emit the full body now, plain text"), then falls back
+> to the mid band (catalog- and pin-aware, needs preserved, reusing the existing
+> retry plumbing); if all still come back empty it tags the returned artifact with
+> an `Artifact.emptyDiagnosis` — `reason: 'truncated' | 'refusal' | 'parse-drop' |
+> 'empty-response'` plus a bounded raw sample. `artifactPresent`
+> (`src/library/checks.ts`) names the cause in its finding detail (the STABLE part
+> only, so the deterministic failure signature stays stable and isomorphic
+> detection still fires), and `nonConvergenceBrief` (`src/engine/reports.ts`, via
+> `src/engine/attempt/failure.ts`) carries the cause + raw sample into the block
+> brief — so an empty-artifact block names the WHY, never a bare "no actionable
+> repair". Covered by `tests/brains/produce-empty-diagnosis.test.ts`,
+> `tests/library/checks.test.ts`, and `tests/engine/attempt-failure.test.ts`.
+> Awaiting a live run to confirm the diagnosis fires on a real empty-producer stall.
+>
+> **Degraded-delivery half** (ship the passing siblings when one blocks) is being
+> built separately on `feat/ship-green` (its ADR-048, landing in this wave) and is
+> NOT covered here.
 
 # design-arch leaf emits an empty artifact and terminally blocks at the highest tier
 

@@ -98,9 +98,18 @@ export function isomorphicBrief(goal: Goal, signature: string): DecisionBrief {
   };
 }
 
-export function nonConvergenceBrief(goal: Goal): DecisionBrief {
+export function nonConvergenceBrief(goal: Goal, diagnosis?: string): DecisionBrief {
+  // When the producer diagnosed WHY it could not converge (canonically an empty
+  // artifact it could not fill — truncation, refusal, parse-drop), name that cause
+  // in the brief instead of the bare "no actionable repair", so the operator sees
+  // the real failure mode (issue design-arch-empty-artifact-block).
+  const base = `Goal "${goal.title}" failed at the highest tier`;
+  const question =
+    diagnosis !== undefined
+      ? `${base} — ${diagnosis} How should it be handled?`
+      : `${base} with no actionable repair — it cannot converge. How should it be handled?`;
   return {
-    question: `Goal "${goal.title}" failed at the highest tier with no actionable repair — it cannot converge. How should it be handled?`,
+    question,
     options: ['deny', 'park', 'bounce'],
     links: [goal.id],
     deadlineMs: 30_000,

@@ -10,6 +10,7 @@ import {
   isomorphicBrief,
   nonConvergenceBrief,
 } from '../reports.js';
+import { emptyDiagnosisCause } from '../../library/checks.js';
 
 export type AttemptFailureResolution =
   | { kind: 'repaired'; artifact: Artifact; budget: Budget }
@@ -137,7 +138,7 @@ export async function resolveAttemptFailure(params: {
     return { kind: 'escalated', tier: params.tier, budget: params.budget };
   }
 
-  const brief = nonConvergenceBrief(params.goal);
+  const brief = nonConvergenceBrief(params.goal, emptyDiagnosisSentence(params.artifact));
   return blockWithReport({
     goal: params.goal,
     store: params.store,
@@ -152,6 +153,24 @@ export async function resolveAttemptFailure(params: {
     ),
     brief,
   });
+}
+
+/**
+ * A block-brief sentence naming why an empty artifact could not be produced, or
+ * undefined when the failing artifact carries no such diagnosis. Includes a short
+ * raw sample of the provider's response (the variable part deliberately kept out
+ * of the deterministic failure SIGNATURE, surfaced here for the operator instead).
+ */
+function emptyDiagnosisSentence(artifact: Artifact): string | undefined {
+  const diagnosis = artifact.emptyDiagnosis;
+  if (diagnosis === undefined) return undefined;
+  const sample = diagnosis.rawSample.trim();
+  const sampleNote = sample.length > 0 ? ` Raw sample: ${JSON.stringify(sample)}.` : '';
+  return (
+    `the producer returned an empty artifact and could not converge: ` +
+    `${emptyDiagnosisCause(diagnosis.reason)}, and a targeted re-ask plus a mid-tier ` +
+    `fallback did not recover content.${sampleNote}`
+  );
 }
 
 function isomorphicFailure(
