@@ -483,7 +483,9 @@ describe('convergence-eyes — SHA drift triggers verify-on-read', () => {
     expect(mapChildren.length).toBeGreaterThanOrEqual(1);
     const written = events.filter((e) => e.type === 'knowledge-written');
     expect(written.some((e) => e.type === 'knowledge-written' && e.artifact.generatedAtSha === sha)).toBe(true);
-  });
+    // Git-subprocess-heavy: times out at the 30s default under full-suite load
+    // (it poisoned run 19's suite-green acceptance criterion as a flake).
+  }, 120_000);
 });
 
 // ───────────────────────────────────────────────────────────────────────────
