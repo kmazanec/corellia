@@ -1019,6 +1019,35 @@ describe('step response_format: json_schema when ctx.outputSchema present', () =
     expect(body.tools).toBeUndefined();
   });
 
+  it('renders tool history as plain text on a tool-less request (no tool_calls, no tool role)', async () => {
+    // Tool machinery in the messages of a request with no `tools` defined is a
+    // shape providers wedge on — the emit hung at every tier, runs 1–15.
+    const { fetch, calls } = stubFetch({ status: 200, body: contentResponse('{"ok":true}') });
+    const brain = new LlmBrain({ baseUrl: BASE, apiKey: KEY, modelByTier, fetchImpl: fetch });
+    const transcript: StepTranscript = [
+      { role: 'context', content: 'sys' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'read_file', args: { path: 'a.ts' } }] },
+      { role: 'tool', callId: 'c1', content: 'export const a = 1;' },
+      { role: 'context', content: 'Emit now.' },
+    ];
+    const ctxWithSchema: BrainContext = {
+      tier: 'mid',
+      memories: [],
+      outputSchema: { type: 'object', properties: { ok: { type: 'boolean' } } },
+    };
+    await brain.step(baseGoal, transcript, [], ctxWithSchema);
+
+    const body = JSON.parse(calls[0]!.options.body as string);
+    expect(body.tools).toBeUndefined();
+    const roles = body.messages.map((m: { role: string }) => m.role);
+    expect(roles).not.toContain('tool');
+    expect(body.messages.every((m: { tool_calls?: unknown }) => m.tool_calls === undefined)).toBe(true);
+    // The history still carries the information, as text.
+    const allText = body.messages.map((m: { content: string }) => m.content).join('\n');
+    expect(allText).toContain('read_file');
+    expect(allText).toContain('export const a = 1;');
+  });
+
   it('tools array is still present in request when ctx.outputSchema is set', async () => {
     const { fetch, calls } = stubFetch({ status: 200, body: contentResponse('{}') });
     const brain = new LlmBrain({ baseUrl: BASE, apiKey: KEY, modelByTier, fetchImpl: fetch });

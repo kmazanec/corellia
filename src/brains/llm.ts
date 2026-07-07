@@ -348,6 +348,15 @@ function buildStepRequest(
 ): StepRequest {
   let contextCount = 0;
   const messages: WireMessage[] = [];
+  // On a TOOL-LESS request (the dedicated emit call), tool machinery must not
+  // appear in the messages either: assistant `tool_calls` turns and tool-role
+  // results sent with no `tools` defined is a shape providers' chat templating
+  // wedges on — the emit hung at every tier across live-tail runs 1–15 while
+  // the same transcript's tool-bearing exploration steps completed fine
+  // (isolated by elimination: schema flattening, strict:false, and json_object
+  // each left the hang in place). Render the history as plain text instead, so
+  // the provider sees an ordinary chat.
+  const plainTextHistory = tools.length === 0;
 
   for (const msg of transcript) {
     if (msg.role === 'context') {
@@ -359,28 +368,45 @@ function buildStepRequest(
       contextCount++;
     } else if (msg.role === 'assistant') {
       if (msg.toolCalls && msg.toolCalls.length > 0) {
-        const wireCalls: WireToolCall[] = msg.toolCalls.map((tc) => ({
-          id: tc.id,
-          type: 'function' as const,
-          function: {
-            name: tc.name,
-            arguments: JSON.stringify(tc.args),
-          },
-        }));
-        messages.push({
-          role: 'assistant',
-          content: msg.content,
-          tool_calls: wireCalls,
-        });
+        if (plainTextHistory) {
+          const callsText = msg.toolCalls
+            .map((tc) => `${tc.name}(${JSON.stringify(tc.args)})`)
+            .join(', ');
+          messages.push({
+            role: 'assistant',
+            content: `${msg.content}\n[called tools: ${callsText}]`.trim(),
+          });
+        } else {
+          const wireCalls: WireToolCall[] = msg.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: 'function' as const,
+            function: {
+              name: tc.name,
+              arguments: JSON.stringify(tc.args),
+            },
+          }));
+          messages.push({
+            role: 'assistant',
+            content: msg.content,
+            tool_calls: wireCalls,
+          });
+        }
       } else {
         messages.push({ role: 'assistant', content: msg.content });
       }
     } else {
-      messages.push({
-        role: 'tool',
-        tool_call_id: msg.callId,
-        content: msg.content,
-      });
+      if (plainTextHistory) {
+        messages.push({
+          role: 'user',
+          content: `[tool result ${msg.callId}]\n${msg.content}`,
+        });
+      } else {
+        messages.push({
+          role: 'tool',
+          tool_call_id: msg.callId,
+          content: msg.content,
+        });
+      }
     }
   }
 
