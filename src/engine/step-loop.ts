@@ -114,7 +114,7 @@ export async function runStepLoop(params: {
           forcedEmit.artifact,
         );
       }
-      return failedResult(params.budget, remainingToolCalls, transcript, forcedEmit.error);
+      return failedResult(params.budget, remainingToolCalls, transcript, forcedEmit.error, forcedEmit.transport);
     }
 
     await boundStepLoopTranscript({
@@ -193,7 +193,13 @@ export async function runStepLoop(params: {
           return ceilingResult(params.budget, remainingToolCalls, transcript);
         }
         if (structuredEmit.kind === 'failed') {
-          return failedResult(params.budget, remainingToolCalls, transcript, structuredEmit.error);
+          return failedResult(
+            params.budget,
+            remainingToolCalls,
+            transcript,
+            structuredEmit.error,
+            structuredEmit.transport,
+          );
         }
         return artifactResult(
           params.budget,
@@ -271,8 +277,15 @@ function failedResult(
   remainingToolCalls: number,
   transcript: StepTranscript,
   error: string,
+  transport?: boolean,
 ): Extract<StepLoopResult, { kind: 'failed' }> {
-  return { kind: 'failed', error, budget: loopBudget(budget, remainingToolCalls), transcript };
+  return {
+    kind: 'failed',
+    error,
+    ...(transport === true ? { failKind: 'transport' as const } : {}),
+    budget: loopBudget(budget, remainingToolCalls),
+    transcript,
+  };
 }
 
 function artifactResult(

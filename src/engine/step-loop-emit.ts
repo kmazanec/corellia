@@ -1,4 +1,5 @@
 import type { Brain, BrainContext, StepTranscript } from '../contract/brain.js';
+import { StepTransportError } from '../contract/brain.js';
 import type { EventStore } from '../contract/events.js';
 import type { Goal, Usage } from '../contract/goal.js';
 import type { GoalTypeDef } from '../contract/goal-type.js';
@@ -13,13 +14,13 @@ export interface StepEmitState {
 
 export type ForcedEmitResult =
   | { kind: 'artifact'; artifact: Artifact; state: StepEmitState }
-  | { kind: 'failed'; error: string; state: StepEmitState }
+  | { kind: 'failed'; error: string; transport?: boolean; state: StepEmitState }
   | { kind: 'ceiling'; state: StepEmitState };
 
 export type StructuredArtifactEmitResult =
   | { kind: 'artifact'; artifact: Artifact; state: StepEmitState }
   | { kind: 'exhausted'; state: StepEmitState }
-  | { kind: 'failed'; error: string; state: StepEmitState }
+  | { kind: 'failed'; error: string; transport?: boolean; state: StepEmitState }
   | { kind: 'ceiling'; state: StepEmitState };
 
 export interface ForcedEmitParams {
@@ -63,7 +64,7 @@ export async function runForcedEmit(params: ForcedEmitParams): Promise<ForcedEmi
 
   const forcedOutput = await runNoToolBrainStep(params.brain, params.goal, params.transcript, forceCtx);
   if (!forcedOutput.ok) {
-    return { kind: 'failed', error: forcedOutput.error, state };
+    return { kind: 'failed', error: forcedOutput.error, transport: forcedOutput.transport, state };
   }
 
   await recordStepOutput(params, state, forcedOutput.value);
@@ -120,7 +121,7 @@ export async function runStructuredArtifactEmit(
     outputSchema: params.outputSchema,
   });
   if (!emitOutput.ok) {
-    return { kind: 'failed', error: emitOutput.error, state };
+    return { kind: 'failed', error: emitOutput.error, transport: emitOutput.transport, state };
   }
 
   await recordStepOutput(params, state, emitOutput.value);
@@ -165,12 +166,20 @@ async function runNoToolBrainStep(
   ctx: BrainContext,
 ): Promise<
   | { ok: true; value: Awaited<ReturnType<Brain['step']>> }
-  | { ok: false; error: string }
+  | { ok: false; error: string; transport: boolean }
 > {
   try {
     return { ok: true, value: await brain.step(goal, transcript, [], ctx) };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    // The error KIND must survive stringification: a timed-out EMIT call
+    // classified as a plain 'failed' produced the isomorphic step-loop:failed
+    // signature and hard-blocked after two provider blips (live-tail run 20),
+    // bypassing every transport allowance (no isomorphism, top-rung retry).
+    const transport =
+      err instanceof StepTransportError ||
+      (err instanceof Error &&
+        (err.name === 'AbortError' || err.name === 'TimeoutError' || err.message.includes('timeout')));
+    return { ok: false, error: err instanceof Error ? err.message : String(err), transport };
   }
 }
 
