@@ -100,7 +100,8 @@ describe('step-loop step error handling', () => {
       now: () => 4,
       seenCalls: new Set(),
       callKeyByCallId: new Map(),
-      malformRecoveryUsed: false,
+      // recovery already burned: the classification is what's under test
+      malformRecoveryUsed: true,
     });
 
     expect(result.kind).toBe('failed');
@@ -131,10 +132,40 @@ describe('raw timeout classification', () => {
       now: () => 5,
       seenCalls: new Set(),
       callKeyByCallId: new Map(),
-      malformRecoveryUsed: false,
+      // recovery already burned: the classification is what's under test
+      malformRecoveryUsed: true,
     });
 
     expect(result.kind).toBe('failed');
     expect(result.kind === 'failed' ? result.result.failKind : undefined).toBe('transport');
+  });
+});
+
+describe('timeout in-loop recovery', () => {
+  it('recovers ONCE from a step timeout: evicts context and forces an emit', async () => {
+    const store = new MemoryEventStore();
+    const transcript: StepTranscript = [{ role: 'context', content: 'sys' }];
+
+    const result = await handleStepLoopStepError({
+      err: new StepTransportError('Step request timed out and did not recover after 3 retries'),
+      goal: makeGoal(),
+      budget,
+      remainingToolCalls: 5,
+      transcript,
+      scratchpad: newScratchpad(),
+      store,
+      now: () => 6,
+      seenCalls: new Set(),
+      callKeyByCallId: new Map(),
+      malformRecoveryUsed: false,
+    });
+
+    expect(result.kind).toBe('recover');
+    expect(result.kind === 'recover' ? result.forceEmitNext : false).toBe(true);
+    // The recovery is evented and the transcript carries the emit steer.
+    expect(await store.list({ type: 'malformation-reprompt' })).toHaveLength(1);
+    const last = transcript[transcript.length - 1];
+    expect(last?.role).toBe('context');
+    expect(last && 'content' in last ? last.content : '').toContain('Emit the final artifact');
   });
 });

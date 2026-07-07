@@ -29,6 +29,19 @@ export async function handleStepLoopStepError(params: {
     return { kind: 'recover', malformRecoveryUsed: true, forceEmitNext: true };
   }
 
+  // A step TIMEOUT gets the same one-shot in-loop recovery as a malformed
+  // step, with an eviction first: the dominant live cause is a transcript
+  // grown large enough that the provider cannot answer within the tier's
+  // timeout (runs 16–17: author-acceptance-criteria died mid-read at ~50
+  // reads / ~75K prompt tokens, every tier). Failing the ATTEMPT just replays
+  // the same oversized transcript tail into the same timeout; shrinking the
+  // context and forcing a best-effort emit converts a fatal timeout into a
+  // deliverable. A second timeout falls through and fails as transport.
+  if (stepFailureKind(params.err) === 'transport' && !params.malformRecoveryUsed) {
+    await recoverTimedOutStep(params);
+    return { kind: 'recover', malformRecoveryUsed: true, forceEmitNext: true };
+  }
+
   return {
     kind: 'failed',
     result: {
@@ -74,6 +87,37 @@ async function recoverMalformedStep(
       `and could not be parsed. Do NOT repeat it. Make a SMALLER move now: ` +
       `emit the final artifact directly (matching the required schema if one ` +
       `applies), not a large or partial tool call.`,
+  });
+}
+
+async function recoverTimedOutStep(
+  params: Omit<Parameters<typeof handleStepLoopStepError>[0], 'err'>,
+): Promise<void> {
+  await params.store.append({
+    type: 'malformation-reprompt',
+    at: params.now(),
+    goalId: params.goal.id,
+    detail: 'step request timed out — evicting context and forcing a clean emit',
+  });
+
+  await evictTranscriptAfterTruncation({
+    goal: params.goal,
+    transcript: params.transcript,
+    scratchpad: params.scratchpad,
+    store: params.store,
+    now: params.now,
+    seenCalls: params.seenCalls,
+    callKeyByCallId: params.callKeyByCallId,
+    ...(params.truncationEvictionCap !== undefined ? { cap: params.truncationEvictionCap } : {}),
+  });
+
+  params.transcript.push({
+    role: 'context',
+    content:
+      `The previous request could not complete (the provider timed out under the ` +
+      `accumulated context, which has now been trimmed). Do NOT read anything ` +
+      `else. Emit the final artifact directly from what you already know` +
+      `, matching the required schema if one applies.`,
   });
 }
 
