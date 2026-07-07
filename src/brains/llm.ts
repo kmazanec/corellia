@@ -234,8 +234,8 @@ interface WireJsonSchema {
 interface StepRequest {
   model: string;
   messages: WireMessage[];
-  tools: WireToolParam[];
-  response_format?: { type: 'json_schema'; json_schema: WireJsonSchema };
+  tools?: WireToolParam[];
+  response_format?: { type: 'json_object' };
   /**
    * Provider routing (ADR-005 / ADR-017 lineage): pin the provider order and
    * whether fallbacks are allowed, so prefix-cache affinity survives across a
@@ -393,33 +393,30 @@ function buildStepRequest(
     },
   }));
 
-  // Apply the json_schema response_format ONLY on a tool-less step (the
-  // dedicated emit call). Sending an output-schema grammar AND tools on the
-  // same request is a contradiction — "your message must match the criteria
-  // schema" vs "call a tool" — which providers handle inconsistently and which
-  // wedges/hangs the request, so an outputSchema leaf never produces a clean
-  // tool-less emit turn (run ee51401d: the author-acceptance-criteria leaf hung
-  // every attempt, criteriaTotal stayed 0). During exploration the model is free
-  // to call tools or return a plain message; the schema is enforced on the
-  // tool-less emit step that runStructuredArtifactEmit issues.
+  // Apply a response_format ONLY on a tool-less step (the dedicated emit
+  // call). Sending an output-schema grammar AND tools on the same request is a
+  // contradiction — "your message must match the criteria schema" vs "call a
+  // tool" — which providers handle inconsistently and which wedges/hangs the
+  // request (run ee51401d). During exploration the model is free to call tools
+  // or return a plain message.
   //
-  // strict is FALSE deliberately: grammar-constrained decode over a long
-  // step-loop prefill hangs these providers outright — the emit timed out at
-  // EVERY tier after ~19 exploration steps while the short-context decide/judge
-  // strict calls worked (live-tail run 13; runs 1–12 died the same way before
-  // the cause was isolated). The schema still travels with the request as
-  // guidance; the deterministic gate (e.g. criteriaWellFormed) remains the
-  // real validator, and a malformed emit takes the normal retry path instead
-  // of a provider hang.
+  // The mode is the lightweight `json_object`, NOT a `json_schema` grammar:
+  // schema-constrained decode over a long step-loop prefill (tool-call history,
+  // ~19 steps) hangs these providers outright at every tier, strict or not
+  // (live-tail runs 13–14 isolated this; runs 1–12 died the same way). The
+  // SCHEMA travels in the emit instruction text instead (step-loop-emit pushes
+  // it into the transcript), and the deterministic gate (criteriaWellFormed
+  // et al.) remains the real validator — a malformed emit takes the normal
+  // retry path instead of a provider hang.
   const responseFormat: StepRequest['response_format'] =
-    outputSchema !== undefined && wireTools.length === 0
-      ? { type: 'json_schema', json_schema: { name: 'artifact', strict: false, schema: outputSchema } }
-      : undefined;
+    outputSchema !== undefined && wireTools.length === 0 ? { type: 'json_object' } : undefined;
 
   return {
     model,
     messages,
-    tools: wireTools,
+    // Omit an EMPTY tools array: providers disagree on `tools: []` (some
+    // reject, some misbehave when tool history is present with no tools).
+    ...(wireTools.length > 0 ? { tools: wireTools } : {}),
     ...(responseFormat !== undefined ? { response_format: responseFormat } : {}),
     // Provider routing: include only when per-tier config is present (F-64 / ADR-005).
     // Absent config → field absent → wire-compatible with providers that ignore it.

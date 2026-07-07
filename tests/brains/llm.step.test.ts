@@ -999,7 +999,7 @@ describe('step response_format: json_schema when ctx.outputSchema present', () =
     expect(body.response_format).toBeUndefined();
   });
 
-  it('applies response_format.json_schema on a tool-less step (the emit call)', async () => {
+  it('applies the lightweight json_object mode (no schema grammar) on a tool-less emit, omitting empty tools', async () => {
     const { fetch, calls } = stubFetch({ status: 200, body: contentResponse('{"result":"done"}') });
     const brain = new LlmBrain({ baseUrl: BASE, apiKey: KEY, modelByTier, fetchImpl: fetch });
     const schema: Record<string, unknown> = {
@@ -1011,14 +1011,12 @@ describe('step response_format: json_schema when ctx.outputSchema present', () =
     await brain.step(baseGoal, [{ role: 'context', content: 'sys' }], [], ctxWithSchema);
 
     const body = JSON.parse(calls[0]!.options.body as string);
-    expect(body.response_format).toBeDefined();
-    expect(body.response_format.type).toBe('json_schema');
-    expect(body.response_format.json_schema.name).toBe('artifact');
-    // strict must be FALSE: grammar-constrained decode over a long step-loop
-    // prefill hangs providers (live-tail run 13 — the emit timed out at every
-    // tier). The schema travels as guidance; deterministic gates validate.
-    expect(body.response_format.json_schema.strict).toBe(false);
-    expect(body.response_format.json_schema.schema).toEqual(schema);
+    // json_object, NOT a json_schema grammar: schema-constrained decode over a
+    // long step-loop prefill hangs providers at every tier, strict or not
+    // (live-tail runs 13–14). The schema travels in the emit instruction text.
+    expect(body.response_format).toEqual({ type: 'json_object' });
+    // Empty tools arrays are omitted — providers disagree on `tools: []`.
+    expect(body.tools).toBeUndefined();
   });
 
   it('tools array is still present in request when ctx.outputSchema is set', async () => {

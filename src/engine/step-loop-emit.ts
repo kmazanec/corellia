@@ -91,9 +91,16 @@ export async function runStructuredArtifactEmit(
   params: StructuredArtifactEmitParams,
 ): Promise<StructuredArtifactEmitResult> {
   const state = { ...params.state };
+  // The schema must travel IN the instruction text: the wire request sends only
+  // the lightweight json_object mode (a json_schema grammar over a long
+  // step-loop prefill hangs providers — see buildStepRequest in llm.ts), so
+  // this transcript line is the model's only source for the required shape.
   params.transcript.push({
     role: 'context',
-    content: 'Emit the final artifact now: respond with ONLY the JSON object matching the required schema.',
+    content:
+      'Emit the final artifact now: respond with ONLY a JSON object matching exactly this schema ' +
+      '(no prose, no markdown fences):\n' +
+      JSON.stringify(params.outputSchema),
   });
 
   if (params.enforceToolCallBudget && state.remainingToolCalls <= 0) {
@@ -142,7 +149,12 @@ function forcedEmitInstruction(exploreReadCalls: number, typeDef: GoalTypeDef): 
     `Emit the artifact NOW from what you have already ` +
     `read — over-reading a bounded region is a failure, not thoroughness. ` +
     (typeDef.outputSchema !== undefined
-      ? 'Respond with ONLY the JSON object matching the required schema, no tool calls.'
+      ? // The schema must be spelled out here: the wire request carries only the
+        // json_object mode (see buildStepRequest), so this text is the model's
+        // only source for the required shape.
+        'Respond with ONLY a JSON object matching exactly this schema, no tool calls, ' +
+        'no prose, no markdown fences:\n' +
+        JSON.stringify(typeDef.outputSchema)
       : 'Respond with ONLY the artifact as your message content, no tool calls.');
 }
 
