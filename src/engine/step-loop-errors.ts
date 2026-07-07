@@ -111,6 +111,7 @@ async function recoverTimedOutStep(
     now: params.now,
     seenCalls: params.seenCalls,
     callKeyByCallId: params.callKeyByCallId,
+    readOutputCache: params.readOutputCache,
     ...(params.truncationEvictionCap !== undefined ? { cap: params.truncationEvictionCap } : {}),
   });
 
