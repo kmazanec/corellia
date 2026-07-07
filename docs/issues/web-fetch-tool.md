@@ -45,3 +45,70 @@ page (e.g. current version + one API fact of a named library), returns a finding
 whose claims carry fetched-URL citations, and the broker log shows the fetch ran
 under the grant — while a build-family goal attempting `web_fetch` is refused by
 the broker.
+
+---
+
+> **Fixed (2026-07-07, branch `issue/web-fetch`; pending live proof).** The
+> research grants now have a tool primitive behind them. `web_fetch(url)` is a
+> broker-mediated ToolImpl: an https-only GET, size-capped (2MB), time-capped
+> (20s via AbortController), redirect-limited (5 hops, each hop's host re-vetted),
+> that extracts readable text from HTML, passes text/JSON/XML through, refuses
+> binaries (external-asset-acquisition's job), and returns a citation header
+> carrying the final URL + retrievedAt so a finding's claims carry sources. Its
+> tool description instructs the model on that citation discipline. `web_search(query)`
+> is behind a pluggable, env-configured provider (`WEB_SEARCH_URL`, a generic
+> `{query}` JSON-endpoint template); when no provider is configured the tool is
+> simply not registered, so a research goal degrades to fetch-only rather than
+> erroring.
+>
+> **SSRF hygiene** mirrors run_command's "no network to the inside" floor: the
+> target host is refused if it is loopback, an RFC-1918 private range, link-local
+> (incl. the 169.254.169.254 cloud-metadata endpoint), CGNAT, unspecified, or the
+> IPv6 equivalents (ULA, v4-mapped) — checked both as a URL IP-literal AND after
+> DNS resolution (every A/AAAA record), closing the DNS-rebind hole. A redirect
+> cannot pivot inward: each hop is re-vetted. `WEB_FETCH_BLOCK_HOSTS` lets an
+> operator ADD refusals; it can never open a hole in the private-network floor.
+>
+> **Grant wiring:** `GRANT_TOOL_MAP` maps `web_fetch → web.fetch` and
+> `web_search → web.search`. Only `research-external` holds those grants in the
+> starter library (`investigate` gets web access by spawning `research-external`
+> children, not directly — its grants are unchanged). The tools are registered in
+> both the sandboxed broker (for `research-external` leaves spawned under
+> `investigate`) AND the read-only learn broker (for `research-external` as a
+> root); the broker's grant check — not registration — is what confines the
+> capability, so a build-family goal calling `web_fetch` is refused before any
+> request. The constitution lint is unaffected (`web.fetch`/`web.search` trip no
+> ceiling) and still passes.
+>
+> **Judgment calls (owned per the task):**
+> 1. *Registered broadly, confined by grant.* The web tools are registered in
+>    every broker rather than gated by a per-type registration flag, because the
+>    broker's exact-grant check is the real boundary (the same posture as
+>    `file_issue`). Registering them where an ungranted type can see them does not
+>    grant them — proven by the broker refusal test.
+> 2. *`investigate` grants left unchanged.* GOAL-TYPES.md gives `investigate` only
+>    `spawn` for its probes; it reaches the web through `research-external`
+>    children, not a direct grant. I did not add `web.fetch` to `investigate` —
+>    that would contradict its contract.
+> 3. *web_search shipped, but provider-gated.* A clean zero-dependency path exists
+>    (a generic JSON `SEARCH_URL` template over the same fetch path), so
+>    `web_search` is included — but only offered when configured, degrading to
+>    fetch-only otherwise, exactly as the issue's "absent key ⇒ tool not offered"
+>    direction requires.
+> 4. *Redirects followed manually.* `redirect: 'manual'` so each hop's host is
+>    re-resolved and re-vetted; the platform's automatic redirect following would
+>    bypass the per-hop SSRF check.
+>
+> **Mechanism:** `src/engine/web-tools.ts` (transport, caps, redirect-following
+> `performFetch`, the two ToolImpl factories, `webTools()` registration helper),
+> `src/engine/web-security.ts` (SSRF denylist, host resolver, URL vetting),
+> `src/engine/web-extract.ts` (content-type classification + HTML→text).
+> Grant map in `src/contract/tool.ts`; assembly wiring in `src/engine/assembly.ts`
+> (both `openSandboxAssembly` and `openLearnAssembly`). Unit-proven with an
+> injected transport + host resolver (never the live network) in
+> `tests/engine/web-tools.test.ts` (30 tests: happy path, caps, https-only, SSRF
+> refusals incl. DNS-resolved-private and redirect-into-private, binary refusal,
+> extraction, search gating) and `tests/engine/web-tools-broker.test.ts` (grant
+> refusal for build types, grant success for research-external); assembly
+> registration proven in `tests/engine/assembly.test.ts`. A live `research-external`
+> run fetching a real page and citing it is the confirming proof.
