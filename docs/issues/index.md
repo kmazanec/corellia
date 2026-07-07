@@ -61,6 +61,7 @@ Each issue is one OKF `type: issue` file with `kind` (bug | idea | future-work),
 | [verify-on-read-checkpoints](verify-on-read-checkpoints.md) | future-work | engine, knowledge, memory, verify-on-read, consistency |
 | [listener-missing-channels](listener-missing-channels.md) | future-work | listener, daemon, autonomous-seam, admission, knowledge-refresh |
 | [anthropic-direct-provider](anthropic-direct-provider.md) | idea | brain, provider, anthropic, resilience, cost |
+| [secret-value-diff-gate](secret-value-diff-gate.md) | bug | engine, deterministic-gate, secrets, security |
 
 ## Factory self-hosting (meta) — the factory participates in this discipline itself
 
