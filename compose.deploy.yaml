@@ -26,7 +26,7 @@ services:
     env_file:
       - .env
     volumes:
-      - corellia-pgdata:/var/lib/postgresql/data
+      - corellia-pgdata:/var/lib/postgresql
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER:-postgres}"']
       interval: 5s

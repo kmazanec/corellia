@@ -24,7 +24,7 @@ services:
     env_file:
       - .env
     volumes:
-      - corellia-pgdata:/var/lib/postgresql/data
+      - corellia-pgdata:/var/lib/postgresql
     healthcheck:
       # pg_isready gates the daemon's depends_on so migration never races an
       # unready database on cold boot.
