@@ -43,6 +43,8 @@ export async function runSplitRound(params: {
   brain: Brain;
   goldenCapture: boolean;
   store: EventStore;
+  /** The shared type/global memory store (ADR-049); omit to keep every layer in `store`. */
+  sharedStore?: EventStore;
   now: () => number;
   activeRepoRoot: string | undefined;
   worktree: TreeWorktree | undefined;
@@ -110,6 +112,7 @@ export async function runSplitRound(params: {
     childGoals,
     childReports,
     store: params.store,
+    ...(params.sharedStore !== undefined ? { sharedStore: params.sharedStore } : {}),
     now: params.now,
   });
   const report = buildSplitRoundReport({

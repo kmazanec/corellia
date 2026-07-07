@@ -40,6 +40,8 @@ export function createSplitRunner(deps: {
   brain: Brain;
   goldenCapture: boolean;
   store: EventStore;
+  /** The shared type/global memory store (ADR-049), threaded to the promote edge. */
+  sharedStore?: EventStore;
   now: () => number;
   activeWorktree: () => TreeWorktree | undefined;
   factsForRegions: FactsForRegions | undefined;
@@ -67,6 +69,7 @@ export function createSplitRunner(deps: {
       brain: deps.brain,
       goldenCapture: deps.goldenCapture,
       store: deps.store,
+      ...(deps.sharedStore !== undefined ? { sharedStore: deps.sharedStore } : {}),
       now: deps.now,
       activeRepoRoot: deps.activeWorktree()?.repoRoot,
       worktree: deps.activeWorktree(),

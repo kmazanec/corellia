@@ -46,6 +46,7 @@ export class Engine {
   private readonly registry: Registry;
   private readonly brain: Brain;
   private readonly store: EventStore;
+  private readonly sharedStore: EventStore | undefined;
   private readonly memory: MemoryView;
   private readonly now: () => number;
   private readonly goldenCapture: boolean;
@@ -146,6 +147,7 @@ export class Engine {
     this.registry = opts.registry;
     this.brain = opts.brain;
     this.store = opts.store;
+    this.sharedStore = opts.sharedStore;
     this.memory = opts.memory;
     this.now = opts.now ?? (() => Date.now());
     this.goldenCapture = opts.goldenCapture ?? false;
@@ -178,6 +180,7 @@ export class Engine {
       registry: this.registry,
       brain: this.brain,
       store: this.store,
+      sharedStore: this.sharedStore,
       memory: this.memory,
       now: this.now,
       goldenCapture: this.goldenCapture,

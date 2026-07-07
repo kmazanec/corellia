@@ -98,6 +98,13 @@ export interface MemoryPointer {
    * - `global`  — org-wide conventions, house style; ambient.
    */
   layer: 'project' | 'type' | 'global';
+  /**
+   * The goal-type this memory is scoped to, set ONLY on a `type`-layer pointer —
+   * type memory is "how *this operation* is done well," so it is namespaced by the
+   * operation (the goal-type name) and retrieved only for goals of that same type.
+   * Absent on `project` and `global` pointers, which are not type-scoped.
+   */
+  namespace?: string;
   /** The pointer text — what to recall and where to look, not the full body. */
   content: string;
   /**

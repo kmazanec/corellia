@@ -181,6 +181,41 @@ function sanitizeRepoSegment(repoRoot: string): string {
   return sanitized.length > 0 ? sanitized : 'repo';
 }
 
+// ── Shared type/global memory store (ADR-049) ───────────────────────────────
+
+/**
+ * Build the SHARED event store — the home of the compounding type/global memory
+ * layers (ADR-049), which must outlive any one project's log. Distinct from
+ * {@link buildStore}: its default path is NOT keyed per-target-repo but is a
+ * single shared sibling of the per-project logs, so a lesson promoted with
+ * type/global generality in one project is retrievable in the next.
+ *
+ * A pure factory over the environment, exactly like {@link buildStore}:
+ *   CORELLIA_SHARED_LOG set → JsonlEventStore at that path.
+ *   else                    → JsonlEventStore at defaultSharedLogPath().
+ *
+ * v1 is JSONL-only: even under DATABASE_URL (the per-project Pg path), the shared
+ * store falls back to the JSONL default so the compounding still works. A shared
+ * Pg table is a clean follow-on behind this same seam. Sinks are NOT fanned out
+ * here — the shared store carries only memory writes, and the per-project store
+ * already owns the observability fan-out for a run.
+ */
+export function buildSharedStore(): StoreHandle {
+  const path = process.env['CORELLIA_SHARED_LOG'] ?? defaultSharedLogPath();
+  const jsonl = new JsonlEventStore(path);
+  return { store: jsonl, close: () => Promise.resolve() };
+}
+
+/**
+ * The default shared memory-log path when CORELLIA_SHARED_LOG is unset:
+ * `<cwd>/out/_shared/memory.jsonl`. The `_shared` segment cannot collide with a
+ * sanitized repo basename (which never contains an underscore — see
+ * {@link sanitizeRepoSegment}), so it sits safely beside the per-project logs.
+ */
+export function defaultSharedLogPath(): string {
+  return join(process.cwd(), 'out', '_shared', 'memory.jsonl');
+}
+
 // ── Standing envelope (F-63 seam) ─────────────────────────────────────────
 
 /**

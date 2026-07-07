@@ -20,7 +20,9 @@ export async function buildSplitChildGoals(params: {
   );
 
   return Promise.all(params.children.map(async (child, index) => {
-    const childMemories = await params.memory.query(child.title, child.scope);
+    // Pass the child's goal-type so retrieval can union in the type-layer
+    // namespace for this operation alongside the project + global layers (ADR-049).
+    const childMemories = await params.memory.query(child.title, child.scope, { goalType: child.type });
     const childBudget = budgets[index] ?? {
       attempts: 1,
       tokens: 1,

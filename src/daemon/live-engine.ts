@@ -34,7 +34,8 @@ import {
   rebindKnowledgeScan,
   type SandboxConfig,
 } from '../engine/assembly.js';
-import { projectMemory } from '../eventlog/projections.js';
+import { projectMemory, unionMemoryViews } from '../eventlog/projections.js';
+import { buildSharedStore } from './config.js';
 import type { EventStore } from '../contract/events.js';
 import type { FetchTransport } from '../engine/pr-tools.js';
 import { extractRepoSlug } from '../engine/pr-tools.js';
@@ -57,6 +58,15 @@ export function buildLiveRegistry() {
 export interface LiveEngineOptions {
   /** The EventStore the engine appends events to. */
   store: EventStore;
+  /**
+   * The shared type/global memory store (ADR-049) — the home of the compounding
+   * layers, which outlives any one project's log. Defaults to `buildSharedStore()`
+   * (env-configured, a shared sibling of the per-project logs). Retrieval unions
+   * this store's type/global layers with the per-project store's project layer,
+   * and the promote edge routes type/global writes here. Supply an explicit store
+   * (e.g. an InMemoryEventStore) in tests; omit for the env-configured default.
+   */
+  sharedStore?: EventStore;
   /** SandboxConfig for the target repo. Must include repoRoot. */
   sandbox: SandboxConfig;
   /**
@@ -108,15 +118,25 @@ export function buildLiveEngine(opts: LiveEngineOptions): Engine {
   const { registry, types } = buildLiveRegistry();
   const brain = new LlmBrain(openRouterConfig(), types.map((t) => t.name));
 
+  // The shared store holds the compounding type/global layers (ADR-049); the
+  // per-project store holds the project layer. Retrieval unions both views so a
+  // child sees this repo's project memory plus its goal-type's type namespace and
+  // the global layer — with provenance and layer labels intact per view.
+  const sharedStore = opts.sharedStore ?? buildSharedStore().store;
+
   const memory = {
-    query: async (topic: string, scope: string[]) =>
-      projectMemory(await opts.store.list()).query(topic, scope),
+    query: async (topic: string, scope: string[], ctx?: import('../contract/memory.js').MemoryQueryContext) =>
+      unionMemoryViews(
+        projectMemory(await opts.store.list()),
+        projectMemory(await sharedStore.list()),
+      ).query(topic, scope, ctx),
   };
 
   const engineOpts = {
     registry,
     brain,
     store: opts.store,
+    sharedStore,
     memory,
     // Always register the read-only retrieval tools in the broker. They are a
     // per-leaf capability (grant-checked per call), not a run-mode choice, so a

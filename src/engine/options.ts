@@ -19,6 +19,14 @@ export interface EngineOptions {
   registry: Registry;
   brain: Brain;
   store: EventStore;
+  /**
+   * The shared type/global memory store (ADR-049) — a home for the compounding
+   * layers that outlives any one project's log. When present, the promote edge
+   * routes `type`/`global` memory writes here instead of the per-project `store`,
+   * so a lesson learned in one project can be retrieved in another. When absent,
+   * every layer stays in `store` (the pre-ADR-049 single-store behavior).
+   */
+  sharedStore?: EventStore;
   memory: MemoryView;
   now?: () => number;
   /**

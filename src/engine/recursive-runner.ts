@@ -52,6 +52,8 @@ export function createRecursiveRunner(deps: {
   registry: Registry;
   brain: Brain;
   store: EventStore;
+  /** The shared type/global memory store (ADR-049); undefined ⇒ single-store behavior. */
+  sharedStore: EventStore | undefined;
   memory: MemoryView;
   now: () => number;
   goldenCapture: boolean;
@@ -219,6 +221,7 @@ function createSplitRunnerFor(deps: RecursiveRunnerDeps) {
     brain: deps.brain,
     goldenCapture: deps.goldenCapture,
     store: deps.store,
+    ...(deps.sharedStore !== undefined ? { sharedStore: deps.sharedStore } : {}),
     now: deps.now,
     activeWorktree: deps.activeWorktree,
     factsForRegions: deps.knowledge?.factsForRegions,

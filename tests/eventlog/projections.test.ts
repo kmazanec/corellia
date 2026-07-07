@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { projectMemory, traceStats, renderTree, costSummary, projectKnowledge, goldenCandidates, labeledGoldenCandidates, projectPatternTrust } from '../../src/eventlog/projections.js';
+import { projectMemory, unionMemoryViews, traceStats, renderTree, costSummary, projectKnowledge, goldenCandidates, labeledGoldenCandidates, projectPatternTrust } from '../../src/eventlog/projections.js';
 import { writeKnowledge, writeRegionFacts, recordKnowledgeCheck } from '../../src/library/knowledge.js';
 import { InMemoryEventStore } from '../../src/eventlog/memory-store.js';
 import type { FactoryEvent } from '../../src/contract/events.js';
@@ -38,7 +38,7 @@ const memWritten = (id: string, content: string): FactoryEvent => ({
   goalId: 'g1',
   pointer: {
     id,
-    layer: 'type',
+    layer: 'project',
     content,
     provenance: 'provisional',
   } satisfies MemoryPointer,
@@ -154,6 +154,94 @@ describe('projectMemory', () => {
     ];
     const view = projectMemory(events);
     expect((await view.query('pattern', []))[0]?.provenance).toBe('provisional');
+  });
+});
+
+// ──────────────────────────────────────────────
+// projectMemory — layer routing at retrieval (ADR-049)
+// ──────────────────────────────────────────────
+
+const memWrittenLayer = (
+  id: string,
+  content: string,
+  layer: MemoryPointer['layer'],
+  namespace?: string,
+): FactoryEvent => ({
+  type: 'memory-written',
+  at: 100,
+  goalId: 'g1',
+  pointer: {
+    id,
+    layer,
+    ...(namespace !== undefined ? { namespace } : {}),
+    content,
+    provenance: 'provisional',
+  } satisfies MemoryPointer,
+});
+
+describe('projectMemory layer filtering', () => {
+  it('retrieves a type-layer memory only for a query naming its namespace', async () => {
+    const view = projectMemory([memWrittenLayer('t1', 'prefer table-driven tests', 'type', 'critique-code')]);
+
+    // Same-type goal sees it.
+    expect(await view.query('table-driven', [], { goalType: 'critique-code' })).toHaveLength(1);
+    // A different type does NOT.
+    expect(await view.query('table-driven', [], { goalType: 'implement-fn' })).toHaveLength(0);
+    // No goalType context (a legacy caller) excludes the type layer entirely.
+    expect(await view.query('table-driven', [])).toHaveLength(0);
+  });
+
+  it('always retrieves project and global layers regardless of goalType', async () => {
+    const view = projectMemory([
+      memWrittenLayer('p1', 'this repo uses postgres', 'project'),
+      memWrittenLayer('g1', 'house style: no default exports', 'global'),
+    ]);
+
+    const noCtx = await view.query('repo', []);
+    expect(noCtx.map((p) => p.id)).toEqual(['p1']);
+
+    const withType = await view.query('style', [], { goalType: 'anything' });
+    expect(withType.map((p) => p.id)).toEqual(['g1']);
+  });
+
+  it('carries the layer and namespace labels through on retrieved pointers', async () => {
+    const view = projectMemory([memWrittenLayer('t1', 'fetch fresh docs', 'type', 'implement-fn')]);
+    const [pointer] = await view.query('fetch', [], { goalType: 'implement-fn' });
+    expect(pointer?.layer).toBe('type');
+    expect(pointer?.namespace).toBe('implement-fn');
+  });
+});
+
+describe('unionMemoryViews', () => {
+  it('unions project, type-namespace, and global across two stores with labels intact', async () => {
+    // Store A: the per-project store (project layer only).
+    const projectView = projectMemory([memWrittenLayer('p1', 'this repo rejected SSR', 'project')]);
+    // Store B: the shared store (compounding type/global layers).
+    const sharedView = projectMemory([
+      memWrittenLayer('t1', 'critique: check exhaustive switch', 'type', 'critique-code'),
+      memWrittenLayer('g1', 'critique in the house voice', 'global'),
+    ]);
+
+    const union = unionMemoryViews(projectView, sharedView);
+    const results = await union.query('critique', [], { goalType: 'critique-code' });
+
+    // Both the shared type memory (namespace match) and the global memory come through.
+    expect(results.map((p) => p.id).sort()).toEqual(['g1', 't1']);
+    expect(results.find((p) => p.id === 't1')?.layer).toBe('type');
+    expect(results.find((p) => p.id === 'g1')?.layer).toBe('global');
+
+    // A different goal-type still gets global but not the foreign type namespace.
+    const other = await union.query('critique', [], { goalType: 'implement-fn' });
+    expect(other.map((p) => p.id)).toEqual(['g1']);
+  });
+
+  it('de-duplicates by pointer id, first view winning', async () => {
+    const first = projectMemory([memWrittenLayer('shared', 'from project store', 'project')]);
+    const second = projectMemory([memWrittenLayer('shared', 'from shared store', 'project')]);
+    const union = unionMemoryViews(first, second);
+    const results = await union.query('from', []);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.content).toBe('from project store');
   });
 });
 

@@ -6,7 +6,7 @@
 
 import type { FactoryEvent } from '../contract/events.js';
 import type { MemoryPointer, Tier, Usage } from '../contract/goal.js';
-import type { MemoryView } from '../contract/memory.js';
+import type { MemoryQueryContext, MemoryView } from '../contract/memory.js';
 import type { KnowledgeArtifact, KnowledgeCategory, RegionFacts } from '../contract/knowledge.js';
 
 // ──────────────────────────────────────────────
@@ -27,10 +27,14 @@ interface MemorySlot {
  * becomes 'trusted'. Decay rule: after 2 reinforced-failure events the pointer
  * is evicted from the projection entirely.
  *
- * query(topic, scope) returns pointers whose content contains the topic
- * (case-insensitive substring). The scope parameter is accepted for interface
- * compliance but is not used for filtering in this skeleton — content match is
- * the sole relevance signal.
+ * query(topic, scope, ctx) returns pointers whose content contains the topic
+ * (case-insensitive substring), narrowed by layer: `project` and `global`
+ * pointers always match on topic alone; a `type` pointer matches only when the
+ * caller supplies `ctx.goalType` equal to the pointer's `namespace` — type
+ * memory is "how *this operation* is done well," so it is retrieved only for
+ * goals of that same operation (ADR-049). The scope parameter is accepted for
+ * interface compliance but is not used for filtering in this skeleton — content
+ * match is the sole topical relevance signal.
  */
 export function projectMemory(events: FactoryEvent[]): MemoryView {
   const slots = new Map<string, MemorySlot>();
@@ -62,15 +66,54 @@ export function projectMemory(events: FactoryEvent[]): MemoryView {
   }
 
   return {
-    async query(topic: string, _scope: string[]): Promise<MemoryPointer[]> {
+    async query(topic: string, _scope: string[], ctx?: MemoryQueryContext): Promise<MemoryPointer[]> {
       const lower = topic.toLowerCase();
       const results: MemoryPointer[] = [];
       for (const { pointer } of slots.values()) {
-        if (pointer.content.toLowerCase().includes(lower)) {
-          results.push({ ...pointer });
-        }
+        if (!pointer.content.toLowerCase().includes(lower)) continue;
+        if (!layerEligible(pointer, ctx)) continue;
+        results.push({ ...pointer });
       }
       return results;
+    },
+  };
+}
+
+/**
+ * Whether a pointer's layer is eligible for a query with the given context.
+ * `project`/`global` are always eligible; a `type` pointer is eligible only when
+ * the query names the same goal-type namespace it was scoped to. This is what
+ * keeps one operation's compounding wisdom out of an unrelated operation's
+ * context (ADR-049).
+ */
+function layerEligible(pointer: MemoryPointer, ctx: MemoryQueryContext | undefined): boolean {
+  if (pointer.layer === 'type') {
+    return ctx?.goalType !== undefined && pointer.namespace === ctx.goalType;
+  }
+  return true;
+}
+
+/**
+ * Union several MemoryViews into one, concatenating their query results and
+ * de-duplicating by pointer id (first view wins on a collision). This is how the
+ * spawner retrieves across the per-project store AND the shared type/global store
+ * (ADR-049) behind the single {@link MemoryView} the engine consumes — the layer
+ * union DESIGN calls for, with provenance and layer labels intact on every
+ * returned pointer.
+ */
+export function unionMemoryViews(...views: MemoryView[]): MemoryView {
+  return {
+    async query(topic: string, scope: string[], ctx?: MemoryQueryContext): Promise<MemoryPointer[]> {
+      const seen = new Set<string>();
+      const merged: MemoryPointer[] = [];
+      for (const view of views) {
+        for (const pointer of await view.query(topic, scope, ctx)) {
+          if (seen.has(pointer.id)) continue;
+          seen.add(pointer.id);
+          merged.push(pointer);
+        }
+      }
+      return merged;
     },
   };
 }

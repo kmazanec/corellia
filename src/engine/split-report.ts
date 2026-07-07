@@ -2,6 +2,7 @@ import type { ChildPlan } from '../contract/decision.js';
 import type { EventStore } from '../contract/events.js';
 import type { Goal, MemoryPointer } from '../contract/goal.js';
 import type { Artifact, BlockedModule, Report } from '../contract/report.js';
+import { chooseMemoryLayer } from './memory-layer.js';
 
 export interface SplitPromotion {
   lessons: string[];
@@ -11,7 +12,15 @@ export interface SplitPromotion {
 export async function promoteChildReports(params: {
   childGoals: Goal[];
   childReports: Report[];
+  /** The per-project store — project-layer memory and all reinforcement writes. */
   store: EventStore;
+  /**
+   * The shared store that outlives any one project (ADR-049) — the home of the
+   * compounding type/global layers. Omitted ⇒ every layer falls back to the
+   * per-project store, so a caller without a shared store keeps the pre-ADR-049
+   * behavior (nothing regresses, the type layer simply does not compound).
+   */
+  sharedStore?: EventStore;
   now: () => number;
 }): Promise<SplitPromotion> {
   const allLessons: string[] = [];
@@ -23,29 +32,42 @@ export async function promoteChildReports(params: {
     const succeeded = report.blockers.length === 0;
 
     for (const lesson of report.lessons) {
+      const { layer, content } = chooseMemoryLayer(lesson);
       const pointer: MemoryPointer = {
-        id: `${childGoal.id}:lesson:${lesson.slice(0, 40)}`,
-        layer: 'project',
-        content: lesson,
+        id: `${childGoal.id}:lesson:${content.slice(0, 40)}`,
+        layer,
+        ...(layer === 'type' ? { namespace: childGoal.type } : {}),
+        content,
         provenance: 'provisional',
       };
-      await params.store.append({
+      // Type/global memory routes to the shared store so it survives the project
+      // it was learned in; project memory stays in the per-project log.
+      const target = layer === 'project' ? params.store : (params.sharedStore ?? params.store);
+      await target.append({
         type: 'memory-written',
         at: params.now(),
         goalId: childGoal.id,
         pointer,
       });
-      allLessons.push(lesson);
+      allLessons.push(content);
     }
 
     for (const memoryId of report.memoriesUsed) {
-      await params.store.append({
-        type: 'memory-reinforced',
+      // A used memory may live in either store and we only carry its id here, so
+      // reinforce in both. Each store's projection folds only reinforcements for a
+      // memory it actually wrote (`projectMemory` skips unknown ids), so the
+      // duplicate is a no-op on the store that never held the memory.
+      const event = {
+        type: 'memory-reinforced' as const,
         at: params.now(),
         goalId: childGoal.id,
         memoryId,
-        outcome: succeeded ? 'success' : 'failure',
-      });
+        outcome: (succeeded ? 'success' : 'failure') as 'success' | 'failure',
+      };
+      await params.store.append(event);
+      if (params.sharedStore && params.sharedStore !== params.store) {
+        await params.sharedStore.append({ ...event });
+      }
     }
 
     if (report.learned) allLearnedLines.push(report.learned);
