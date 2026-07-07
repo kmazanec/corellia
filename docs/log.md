@@ -14,6 +14,29 @@ the [iteration](iterations/index.md) or [ADR](adrs/index.md) that owns the detai
 This file replaces the former `STATUS.md`. Forward strategy is no longer a
 standalone roadmap — it lives as open issues.
 
+## 2026-07-07
+
+- **Runs 13–19 — the criteria-emit hang finally isolated and fixed; the
+  milestone loop iterates for the first time.** The `author-acceptance-criteria`
+  emit had hung at every tier in every run since run 1. Isolated by elimination
+  across runs 13–17: not the schema's `oneOf` (flattened, run 13 still hung),
+  not `strict` grammar (relaxed, run 14 still hung), not `json_schema` at all
+  (switched to `json_object` + schema-in-prompt, run 15 still hung) — the hang
+  was **tool-call history sent in a tool-less request**; providers' chat
+  templating wedges on that shape. Tool-less requests now render history as
+  plain text. Supporting fixes: one same-tier retry for a transport failure at
+  the top rung (single-rung types were one hang from death); a step timeout
+  recovers in-loop (evict + forced emit) instead of failing the attempt.
+  **Run 18 then minted 11 criteria and iterated the milestone loop at 7/11
+  passing — the first criteria assessment in eighteen runs** — with 8 goals
+  passing including code-shape critique and open-pr. Its 4 dead criteria drove
+  two author-time fixes: `{script}` names validate against the declared set
+  (as `{capture}` already did), and bare `{file}` existence checks tolerate
+  directories. Run 19 confirmed: criteria minted first-try, all runnable, the
+  suite-green criterion genuinely running the full suite in the worktree; it
+  died on a strict-judge characterize non-convergence plus a flaky test (now
+  given a real timeout).
+
 ## 2026-07-06
 
 - **Live-tail commission runs 10–12 — the provider-robustness wave.** Each run
