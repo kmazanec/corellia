@@ -139,3 +139,24 @@ effect was the starvation — a cost with no corresponding benefit.
   wide fan-out is no longer killed after ~95s while the tree is within its
   deadline. Unit tests prove the mechanism; a live `live:self` run over a wide
   comprehension fan-out is the confirming proof.
+
+## Amendment (2026-07-07) — the deadline must be checked inside the leaf, not only between attempts
+
+The first live proof (daemon commission `proof-word-count`, 15-minute grant)
+exposed an enforcement hole: the tree deadline was checked only at attempt-loop
+entry, so a leaf grinding through slow provider calls *inside one attempt*
+(4–12-minute stalls on the criteria leaf) ran ~90 minutes past the tree's
+expiry — and the milestone loop then started fresh rounds whose children all
+instantly blocked on entry. The backstop did not stop the runaway; it only
+priced it.
+
+Two enforcement points added, same honest block as the entry check:
+
+- **Step boundary:** `runStepLoop` takes `hasReachedTreeDeadline` and returns a
+  `deadline` result before each step once the tree deadline has passed; the
+  attempt loop maps it to the existing wallClockMs-exhaustion block. A single
+  in-flight provider request stays bounded by the per-request timeout; the loop
+  can no longer start another step after expiry.
+- **Round boundary:** the milestone loop consults the deadline beside the
+  ceiling check and halts with outcome `halt-deadline` instead of spawning a
+  round of instantly-dead children.

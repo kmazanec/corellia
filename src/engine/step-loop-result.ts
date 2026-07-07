@@ -9,7 +9,15 @@ export type StepLoopResult =
   | { kind: 'artifact'; artifact: Artifact; budget: Budget; transcript: StepTranscript; tokensUsed: number }
   | { kind: 'exhausted'; budget: Budget; transcript: StepTranscript }
   | { kind: 'failed'; error: string; failKind?: StepLoopFailKind; budget: Budget; transcript: StepTranscript }
-  | { kind: 'ceiling'; budget: Budget; transcript: StepTranscript };
+  | { kind: 'ceiling'; budget: Budget; transcript: StepTranscript }
+  /**
+   * The TREE's wall-clock deadline (ADR-046) passed mid-leaf. Checked at each
+   * step boundary so a leaf grinding through slow provider calls cannot outlive
+   * the tree's grant inside one attempt (the proof-word-count run overran a
+   * 15-minute grant by 90 minutes exactly this way). Routed to the same
+   * wallClockMs-exhaustion block as the attempt loop's entry check.
+   */
+  | { kind: 'deadline'; budget: Budget; transcript: StepTranscript };
 
 export type StepLoopTerminalFailure = Extract<StepLoopResult, { kind: 'exhausted' | 'failed' }>;
 

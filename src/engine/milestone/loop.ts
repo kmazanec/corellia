@@ -5,6 +5,7 @@ import type { Artifact, Report } from '../../contract/report.js';
 import { blockedReport } from '../reports.js';
 import {
   hasReachedSpendCeiling,
+  hasReachedTreeDeadline,
   type TreeState,
 } from '../tree-spend.js';
 import {
@@ -61,6 +62,21 @@ export async function runMilestoneLoop(params: {
       }
       await params.ceilingReachedOnce();
       outcome = 'halt-ceiling';
+      await appendRoundAssessed(params, roundIndex, lastAssessment, outcome);
+      break;
+    }
+
+    // The tree's wall-clock deadline (ADR-046) passed: starting another round
+    // would only spawn children that instantly block on entry (the
+    // proof-word-count run burned a whole round of instantly-dead children this
+    // way). Halt honestly instead.
+    if (hasReachedTreeDeadline(params.treeState, params.now())) {
+      if (lastAssessment === null) {
+        return blockedReport(
+          `Goal "${params.goal.title}" exhausted its wallClockMs budget before the first round completed.`,
+        );
+      }
+      outcome = 'halt-deadline';
       await appendRoundAssessed(params, roundIndex, lastAssessment, outcome);
       break;
     }

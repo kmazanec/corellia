@@ -40,7 +40,9 @@ export type AttemptArtifactProductionResult =
     }
   | { kind: 'retry'; state: AttemptLoopState }
   | { kind: 'return'; report: Report }
-  | { kind: 'ceiling' };
+  | { kind: 'ceiling' }
+  /** The tree's wall-clock deadline passed mid-step-loop (ADR-046). */
+  | { kind: 'deadline' };
 
 export async function produceAttemptArtifact(params: {
   goal: Goal;
@@ -59,6 +61,8 @@ export async function produceAttemptArtifact(params: {
   brainConfig?: { modelByTier?: Record<string, string> };
   debitUsage: (usage: Usage) => void;
   hasReachedCeiling: () => boolean;
+  /** True once the tree's shared wall-clock deadline (ADR-046) has passed. */
+  hasReachedTreeDeadline?: () => boolean;
   resolveStepLoopFailure: (
     failure: StepLoopFailureContext,
   ) => Promise<AttemptFailureResolution>;
@@ -90,10 +94,17 @@ async function produceWithStepLoop(
     enforceToolCallBudget: params.enforceToolCallBudget,
     debitUsage: params.debitUsage,
     hasReachedCeiling: params.hasReachedCeiling,
+    ...(params.hasReachedTreeDeadline !== undefined
+      ? { hasReachedTreeDeadline: params.hasReachedTreeDeadline }
+      : {}),
   });
 
   if (loopResult.kind === 'ceiling') {
     return { kind: 'ceiling' };
+  }
+
+  if (loopResult.kind === 'deadline') {
+    return { kind: 'deadline' };
   }
 
   if (loopResult.kind !== 'artifact') {

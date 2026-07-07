@@ -72,7 +72,7 @@ const KNOWLEDGE_CATEGORIES = new Set<KnowledgeCategory>([
   'credentials',
 ]);
 const KNOWLEDGE_CHECK_OUTCOMES = new Set(['fresh', 'stale-validated', 'invalid']);
-const ROUND_OUTCOMES = new Set(['done', 'continue', 'halt-no-progress', 'halt-max-rounds', 'halt-ceiling']);
+const ROUND_OUTCOMES = new Set(['done', 'continue', 'halt-no-progress', 'halt-max-rounds', 'halt-ceiling', 'halt-deadline']);
 
 export function parseFactoryEvent(value: unknown): FactoryEvent | null {
   const event = baseEvent(value);

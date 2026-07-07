@@ -7,7 +7,8 @@ export type MilestoneOutcome =
   | 'continue'
   | 'halt-no-progress'
   | 'halt-max-rounds'
-  | 'halt-ceiling';
+  | 'halt-ceiling'
+  | 'halt-deadline';
 
 export interface MilestoneOutcomeAssessment {
   passingCount: number;

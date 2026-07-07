@@ -176,6 +176,7 @@ async function produceArtifactForAttempt(
     ...(context.brainConfig !== undefined ? { brainConfig: context.brainConfig } : {}),
     debitUsage: (usage) => debitTreeState(context.treeState, usage),
     hasReachedCeiling: () => hasReachedSpendCeiling(context.treeState),
+    hasReachedTreeDeadline: () => hasReachedTreeDeadline(context.treeState, context.deps.now()),
     resolveStepLoopFailure: (failure) =>
       handleAttemptFailure({
         context,
@@ -199,6 +200,10 @@ async function continueAfterProduction(
         kind: 'report',
         report: await context.deps.ceilingReport(context.goal, context.treeState),
       };
+    case 'deadline':
+      // The tree deadline passed mid-step-loop: the same honest wallClockMs
+      // block as the entry check above (ADR-046).
+      return { kind: 'report', report: await blockOnWallClockBudget(context) };
     case 'return':
       return { kind: 'report', report: production.report };
     case 'retry':

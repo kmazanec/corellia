@@ -14,6 +14,26 @@ the [iteration](iterations/index.md) or [ADR](adrs/index.md) that owns the detai
 This file replaces the former `STATUS.md`. Forward strategy is no longer a
 standalone roadmap — it lives as open issues.
 
+## 2026-07-07 (merge + live proofs)
+
+- **Iteration 21 merged to main** (`bfaf6a4`, rebased over the runs-13–22
+  robustness wave; full suite green, 2,146 tests, exit 0) and the deployment
+  proofs ran: the first CI run built and pushed
+  `ghcr.io/kmazanec/corellia:{latest,sha-bfaf6a4}` (2,146 tests green on the
+  runner), and a live daemon commission (`proof-word-count`, POST /intents →
+  autonomous tree) proved the front door, the per-repo default event-log path,
+  `corellia logs --follow` on a live run, and the OTLP exporter end-to-end
+  (real spans over HTTP: one trace, nested child spans, honest ERROR status —
+  the ADR-047 repair rung visibly fired mid-run). The run itself BLOCKED and
+  exposed an ADR-046 enforcement hole: the tree deadline was only checked
+  between attempts, so a leaf grinding provider stalls ran ~90 min past a
+  15-min grant, and the milestone loop kept starting rounds of instantly-dead
+  children. Fixed same-day (ADR-046 amendment): the step loop checks the tree
+  deadline at every step boundary and the milestone loop halts with
+  `halt-deadline` at the round boundary. Remote-host deploy proof deferred:
+  no Hetzner host reachable from this machine; needs the operator to name the
+  target (one command once named — see docs/deploy.md).
+
 ## 2026-07-07 (later)
 
 - **Runs 20–22 — every goal green; 9/11 criteria; only anchor guesses left.**

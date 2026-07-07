@@ -31,6 +31,13 @@ export async function runStepLoop(params: {
   enforceToolCallBudget: boolean;
   debitUsage: (usage: Usage) => void;
   hasReachedCeiling: () => boolean;
+  /**
+   * True once the tree's shared wall-clock deadline (ADR-046) has passed.
+   * Checked at every step boundary; absent (tests, classic-produce callers)
+   * means no deadline. Without this check a leaf inside ONE attempt can outlive
+   * the whole tree's grant across slow provider calls and retries.
+   */
+  hasReachedTreeDeadline?: () => boolean;
 }): Promise<StepLoopResult> {
   const session = createStepLoopSession({
     goal: params.goal,
@@ -67,6 +74,10 @@ export async function runStepLoop(params: {
   } = session.counters;
 
   while (true) {
+    if (params.hasReachedTreeDeadline?.() === true) {
+      return deadlineResult(params.budget, remainingToolCalls, transcript);
+    }
+
     const budgetGate = await checkStepLoopToolBudget({
       goal: params.goal,
       budget: params.budget,
@@ -274,6 +285,14 @@ function ceilingResult(
   transcript: StepTranscript,
 ): Extract<StepLoopResult, { kind: 'ceiling' }> {
   return { kind: 'ceiling', budget: loopBudget(budget, remainingToolCalls), transcript };
+}
+
+function deadlineResult(
+  budget: Budget,
+  remainingToolCalls: number,
+  transcript: StepTranscript,
+): Extract<StepLoopResult, { kind: 'deadline' }> {
+  return { kind: 'deadline', budget: loopBudget(budget, remainingToolCalls), transcript };
 }
 
 function failedResult(

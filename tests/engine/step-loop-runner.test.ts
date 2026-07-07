@@ -115,6 +115,78 @@ describe('runStepLoop', () => {
   });
 });
 
+describe('runStepLoop tree deadline (ADR-046)', () => {
+  it('returns kind deadline before any brain step once the tree deadline has passed', async () => {
+    const store = new MemoryEventStore();
+    const brain = new StepBrain([]); // any step call would throw: no scripted output
+
+    const result = await runStepLoop({
+      goal: makeGoal({ type: 'implement' }),
+      grants: ['fs.read'],
+      budget: { attempts: 1, tokens: 100, toolCalls: 2, wallClockMs: 1000 },
+      ctx: lowContext(),
+      typeDef: leafTypeDef({ name: 'implement', grants: ['fs.read'] }),
+      broker: new RecordingBroker([], [READ_FILE_TOOL]),
+      sandboxRepoRoot: undefined,
+      priorTranscript: undefined,
+      brain,
+      store,
+      now: () => 1,
+      enforceToolCallBudget: false,
+      debitUsage: () => {},
+      hasReachedCeiling: () => false,
+      hasReachedTreeDeadline: () => true,
+    });
+
+    expect(result.kind).toBe('deadline');
+  });
+
+  it('stops at the NEXT step boundary when the deadline passes mid-loop', async () => {
+    // First iteration runs (a tool-call step); the deadline flips before the
+    // second iteration, so the loop must stop instead of stepping again — the
+    // proof-word-count run kept stepping 90 minutes past its grant.
+    const store = new MemoryEventStore();
+    const broker = new RecordingBroker(
+      [{ callId: 'ignored', ok: true, output: 'file contents' }],
+      [READ_FILE_TOOL],
+      store,
+    );
+    const brain = new StepBrain([
+      {
+        kind: 'tool-calls',
+        calls: [{ id: 'c1', name: 'read_file', args: { path: 'a.ts' } }],
+        usage: ZERO_USAGE,
+      },
+    ]);
+    let deadlinePassed = false;
+
+    const result = await runStepLoop({
+      goal: makeGoal({ type: 'implement' }),
+      grants: ['fs.read'],
+      budget: { attempts: 1, tokens: 100, toolCalls: 5, wallClockMs: 1000 },
+      ctx: lowContext(),
+      typeDef: leafTypeDef({ name: 'implement', grants: ['fs.read'] }),
+      broker,
+      sandboxRepoRoot: undefined,
+      priorTranscript: undefined,
+      brain,
+      store,
+      now: () => 1,
+      enforceToolCallBudget: false,
+      debitUsage: () => {},
+      hasReachedCeiling: () => false,
+      hasReachedTreeDeadline: () => {
+        const value = deadlinePassed;
+        deadlinePassed = true; // passes AFTER the first boundary check
+        return value;
+      },
+    });
+
+    expect(result.kind).toBe('deadline');
+    expect(broker.calls).toHaveLength(1); // exactly one step ran, none after expiry
+  });
+});
+
 function lowContext(): BrainContext {
   return { tier: 'low', memories: [] };
 }

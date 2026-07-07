@@ -146,7 +146,7 @@ export type FactoryEvent =
    */
   | { type: 'round-assessed'; at: number; goalId: string; round: number;
       passingCount: number; criteriaTotal: number; judgeVerdict: Verdict;
-      outcome: 'done' | 'continue' | 'halt-no-progress' | 'halt-max-rounds' | 'halt-ceiling';
+      outcome: 'done' | 'continue' | 'halt-no-progress' | 'halt-max-rounds' | 'halt-ceiling' | 'halt-deadline';
       diffDigest: string[] };
 
 /**

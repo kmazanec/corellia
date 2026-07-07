@@ -85,6 +85,61 @@ describe('milestone loop', () => {
     expect(store.types()).toEqual(['round-started', 'round-assessed', 'emitted']);
   });
 
+  it('halts with halt-deadline when the tree deadline passes at a round boundary', async () => {
+    // Regression (proof-word-count live run): after the tree deadline passed,
+    // the loop started fresh rounds whose children all instantly blocked on
+    // entry. The round boundary must consult the shared deadline and halt.
+    const store = new MemoryEventStore();
+    let clock = 2;
+    const treeState = createTreeState(100, 5); // deadline at t=5
+
+    const finalReport = await runMilestoneLoop({
+      goal: makeGoal(),
+      initialChildren: [criteriaChild],
+      effectiveMaxRounds: 5,
+      treeState,
+      store,
+      now: () => clock,
+      runRound: async () => ({
+        report: report(textArtifact('partial')),
+        mergedArtifact: textArtifact('partial'),
+        childOutcomes: [{ plan: criteriaChild, report: report(textArtifact('criteria')) }],
+      }),
+      reDecideRound: async () => {
+        throw new Error('deadline should halt before re-decision');
+      },
+      persistCriteria: async () => {},
+      commitRound: () => 'round-0',
+      assessRound: async () => {
+        clock = 10; // the round's work carried past the deadline
+        return assessment({
+          passingCount: 1,
+          criteriaTotal: 2,
+          judgeVerdict: failVerdict('not shippable'),
+          checkResults: [
+            { id: 'c1', ok: true, detail: 'done' },
+            { id: 'c2', ok: false, detail: 'missing docs' },
+          ],
+          diffDigest: ['unmet:c2'],
+        });
+      },
+      ceilingReachedOnce: async () => {
+        throw new Error('deadline halt must not report a ceiling');
+      },
+      ceilingReport: async () => {
+        throw new Error('deadline halt must not report a ceiling');
+      },
+    });
+
+    const assessed = await store.list({ type: 'round-assessed' });
+    expect(assessed).toHaveLength(2);
+    expect(assessed.at(-1)).toMatchObject({ outcome: 'halt-deadline' });
+    expect(finalReport.blockers).toEqual([
+      'Acceptance criteria not yet met (1/2): c2 (missing docs)',
+      'judge-acceptance did not pass: not shippable',
+    ]);
+  });
+
   it('halts with an honest partial when the ceiling trips after a round', async () => {
     const store = new MemoryEventStore();
     const treeState = createTreeState(1);
