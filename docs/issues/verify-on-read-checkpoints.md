@@ -42,3 +42,76 @@ suggestions and stay label-only).
 A test that moves the repo SHA (or rewrites a depended-on fact) between a split
 and its integrate sees the integrate checkpoint catch the drift and trigger
 refresh/re-decision instead of judging against the stale fact.
+
+---
+
+> **Fixed (2026-07-07, branch `issue/verify-checkpoints`; pending live proof).**
+> The existing split-checkpoint verify-on-read now fires at the decide and
+> integrate checkpoints too, so all three of DESIGN's consistency checkpoints
+> re-read the facts they depend on. No new machinery: both new checkpoints compose
+> the same `checkpointVerifyArtifacts` the split gate already uses (per-artifact SHA
+> short-circuit → self-validate the drifted → mint the same refresh child on
+> failure).
+>
+> **What was built.**
+> - A shared primitive `src/engine/checkpoint-verify.ts`
+>   (`verifyKnowledgeAtCheckpoint`) wraps `checkpointVerifyArtifacts` with the cheap
+>   head-SHA fast path the issue asks for: one per-tree `Map<repoRoot, sha>` memo
+>   (`CheckpointShaMemo`), keyed by repoRoot (unique per tree's worktree, so a new
+>   tree starts cold automatically). When HEAD equals the last-reconciled SHA, the
+>   checkpoint returns after a single `headSha` call — no artifact query, no
+>   self-validation. The memo advances once a HEAD is *processed* (clean, or its
+>   drift handed to a refresh), so a later checkpoint at the same HEAD never
+>   re-mints the same refresh — "bounded staleness, each HEAD reconciled once."
+> - **Decide checkpoint** (`src/engine/decision/phase.ts`, `verifyKnowledgeAtDecide`):
+>   fires before the decision is derived, for non-leaf goals. A caught drift is
+>   evented (`knowledge-checked`, `checkpoint: 'decide'`) and its refresh is
+>   sequenced ahead of fan-out by the split gate that follows, so the decomposition
+>   is planned against fresh facts. For a leaf that satisfies (no split gate), this
+>   is the verify-on-read it otherwise never got.
+> - **Integrate checkpoint** (`src/engine/integrate-checkpoint.ts`,
+>   `refreshDriftedKnowledgeBeforeIntegrate`, wired in `split-round.ts`'s
+>   `integrateWithRepair`): fires before `judge-integration` renders its verdict. A
+>   drift that fails self-validation spawns and runs its refresh comprehension child
+>   — evented and scheduled exactly like the repair rung's fixer — so the verdict is
+>   rendered against refreshed knowledge, not the stale fact. Self-validation is the
+>   guard against churn: a map whose anchors still resolve after the tree's own edits
+>   reads `stale-validated` and proceeds, so the tree's in-flight commits do not
+>   trigger a wasteful whole-repo re-map.
+> - The `knowledge-checked` event gained an optional `checkpoint: 'decide' | 'split'
+>   | 'integrate'` discriminator (`src/contract/events.ts`, validated in
+>   `event-parser.ts`) so the trace shows where a drift was caught; unlabelled events
+>   read as the original split wiring.
+>
+> **Threading.** `createRecursiveRunner` builds one memo per tree and threads it,
+> plus the freshness slice of the knowledge gateway (`checkpointGatewayFrom`), to
+> both the decide phase and the split runner → split round. Absent knowledge wiring,
+> every checkpoint is a no-op, so a run without knowledge is byte-identical to
+> before (regression guard: gates.test's "fresh knowledge does not add brain calls
+> vs no-wiring baseline" stays green).
+>
+> **Lesson-memory verify-on-read: left out of scope (as the issue permits).** The
+> anchored case did not compose cheaply: `MemoryPointer.content` is unstructured
+> free text ("what to recall and where to look"), with no typed `file:line` anchor
+> field and no existing anchor-extraction primitive — so re-checking an anchor at
+> decide/integrate would mean a new content-parser plus fs access threaded through
+> two more call sites (new machinery, which the issue asks to avoid). The
+> knowledge-artifact pointers ALREADY carry typed anchors and self-validate through
+> `validate()`, and that is what the three checkpoints now verify. Anchored
+> lesson-memory verify-on-read remains open follow-on: add a typed anchor to
+> `MemoryPointer` (or a parser) first, then reuse `verifyKnowledgeAtCheckpoint`'s
+> shape.
+>
+> **Tests (all green; tsc + lint clean).** `tests/engine/checkpoint-verify.test.ts`
+> proves the unchanged-SHA fast path (one head check, no re-query/validate) and the
+> handled-drift memoization. `tests/engine/checkpoint-integrate-decide.test.ts`
+> proves (a) decide-checkpoint drift is caught and evented before the decision, (b)
+> integrate-checkpoint drift spawns and runs the refresh BEFORE the integration
+> judge sees the artifact (run-order asserted), and the absent-gateway no-op. The
+> existing split-gate corpus (`gates.test.ts`, `coverage-checkpoint.test.ts`,
+> `coverage-split-gate.test.ts`, `repair-integration.test.ts`) stays green. Full
+> engine + contract suite: 957/957 on a clean run (the `convergence*` git-heavy
+> files flake only under full-suite parallel load, per
+> `docs/issues/test-suite-parallel-load-timeouts.md`; each passes in isolation). A
+> live run catching real lateral drift between a split and its integrate is the
+> confirming proof.

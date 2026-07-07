@@ -6,6 +6,11 @@ import type { GoalTypeDef, Registry } from '../../contract/goal-type.js';
 import type { SplitMemo, PatternStore } from '../../contract/pattern.js';
 import type { Report } from '../../contract/report.js';
 import { specShape } from '../../flywheel/shape.js';
+import type {
+  CheckpointShaMemo,
+  CheckpointVerifyGateway,
+} from '../checkpoint-verify.js';
+import { verifyKnowledgeAtCheckpoint } from '../checkpoint-verify.js';
 import type { KnowledgeCoverageGateway } from '../coverage/split-gate.js';
 import {
   buildDecisionContext,
@@ -42,6 +47,14 @@ export async function resolveDecisionPhase(params: {
   repoShapeForGoal: (goal: Goal) => string | undefined;
   repoRoot?: string;
   knowledge?: KnowledgeCoverageGateway;
+  /**
+   * The decide checkpoint's verify-on-read gateway (carries `headSha`, which the
+   * coverage gateway does not). Omit to skip the decide checkpoint — the decision
+   * is then derived exactly as before.
+   */
+  checkpointKnowledge?: CheckpointVerifyGateway | undefined;
+  /** The tree's shared HEAD-SHA memo across decide / split / integrate checkpoints. */
+  checkpointShaMemo?: CheckpointShaMemo;
   debitUsage: (usage: Usage) => void;
   hasReachedCeiling: () => boolean;
 }): Promise<DecisionPhaseResult> {
@@ -53,6 +66,12 @@ export async function resolveDecisionPhase(params: {
   if (goalShape === null) {
     decision = { kind: 'satisfy' };
   } else {
+    // Decide checkpoint (DESIGN "checkpoint consistency"): re-read the facts this
+    // decision depends on before deriving it, so a decomposition is never planned
+    // against a fact a sibling or a human already moved. A caught drift refreshes
+    // the fact first; the split gate that follows re-verifies and sequences the
+    // refresh children ahead of fan-out, so the decision acts on fresh knowledge.
+    await verifyKnowledgeAtDecide(params);
     const derived = await deriveDecision(params, goalShape);
     if (derived.kind === 'ceiling') {
       return derived;
@@ -224,6 +243,29 @@ async function deriveFreshDecision(
     decideUsage: decideResult.usage,
     terracedLoserFindings: [],
   };
+}
+
+/**
+ * Fire the decide checkpoint's verify-on-read. Records a `knowledge-checked`
+ * event (checkpoint: 'decide') for every fact that drifted since the last
+ * checkpoint, and — on a self-validation failure — mints the refresh the split
+ * gate will sequence ahead of fan-out. A no-op when no knowledge is wired, when
+ * there is no repo, or when HEAD has not moved (the SHA memo's fast path), so a
+ * run without knowledge is byte-identical to before.
+ */
+async function verifyKnowledgeAtDecide(
+  params: Parameters<typeof resolveDecisionPhase>[0],
+): Promise<void> {
+  if (params.checkpointKnowledge === undefined) return;
+  await verifyKnowledgeAtCheckpoint({
+    goal: params.goal,
+    repoRoot: params.repoRoot ?? '',
+    knowledge: params.checkpointKnowledge,
+    checkpoint: 'decide',
+    shaMemo: params.checkpointShaMemo ?? new Map<string, string>(),
+    store: params.store,
+    now: params.now,
+  });
 }
 
 async function appendDecided(

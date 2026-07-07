@@ -15,6 +15,11 @@ import {
   runBlock,
 } from './blocking.js';
 import {
+  createCheckpointShaMemo,
+  type CheckpointShaMemo,
+  type CheckpointVerifyGateway,
+} from './checkpoint-verify.js';
+import {
   resolveDecisionPhase,
   type DecisionPhaseResult,
 } from './decision/phase.js';
@@ -31,7 +36,10 @@ import {
 import type { TreeWorktree } from './worktree.js';
 
 type BriefResolution = 'deny' | 'park' | 'bounce' | 'answered';
-type RecursiveRunnerDeps = Parameters<typeof createRecursiveRunner>[0];
+type RecursiveRunnerDeps = Parameters<typeof createRecursiveRunner>[0] & {
+  /** The tree's HEAD-SHA memo for verify-on-read, injected by createRecursiveRunner. */
+  checkpointShaMemo: CheckpointShaMemo;
+};
 type GoalEntry = Awaited<ReturnType<typeof enterGoal>>;
 type ReadyGoalEntry = Extract<GoalEntry, { kind: 'ready' }>;
 type ReadyDecision = Extract<DecisionPhaseResult, { kind: 'ready' }> & {
@@ -71,8 +79,13 @@ export function createRecursiveRunner(deps: {
   decideSkillBlock: (goalType: string) => string | undefined;
   repoShapeHint: (goal: Goal) => string | undefined;
 }): RecursiveRunner {
+  // One HEAD-SHA memo shared across every checkpoint (decide / split / integrate)
+  // of every goal. Keyed by repoRoot — and each tree gets a unique worktree root
+  // — so an unchanged repo re-verifies at most once per HEAD move, and a new tree
+  // starts with a cold memo automatically.
+  const runnerDeps: RecursiveRunnerDeps = { ...deps, checkpointShaMemo: createCheckpointShaMemo() };
   return {
-    run: (goal, treeState) => runRecursiveGoal(deps, goal, treeState),
+    run: (goal, treeState) => runRecursiveGoal(runnerDeps, goal, treeState),
   };
 }
 
@@ -226,6 +239,8 @@ function createSplitRunnerFor(deps: RecursiveRunnerDeps) {
     activeWorktree: deps.activeWorktree,
     factsForRegions: deps.knowledge?.factsForRegions,
     headSha: deps.knowledge?.headSha,
+    checkpointKnowledge: checkpointGatewayFrom(deps.knowledge),
+    checkpointShaMemo: deps.checkpointShaMemo,
     regionScanner: fsRegionScanner(),
     checkContextFor: deps.checkContextFor,
     persistLeafKnowledge: deps.persistLeafKnowledge,
@@ -266,12 +281,33 @@ async function decideGoal(
       ? { repoRoot: deps.activeWorktree()!.repoRoot }
       : {}),
     ...(deps.knowledge !== undefined ? { knowledge: deps.knowledge } : {}),
+    checkpointKnowledge: checkpointGatewayFrom(deps.knowledge),
+    checkpointShaMemo: deps.checkpointShaMemo,
     debitUsage: (usage: Usage) => debitTreeState(treeState, usage),
     hasReachedCeiling: () => hasReachedSpendCeiling(treeState),
   });
   return decision.kind === 'ready'
     ? { ...decision, entry }
     : decision;
+}
+
+/**
+ * The checkpoint verify-on-read gateway is the freshness slice of the full
+ * knowledge wiring: re-read facts (`query`/`headSha`) and, on drift, self-validate
+ * (`validate`) or mint a refresh (`mintComprehension`). Undefined knowledge ⇒ no
+ * checkpoint, so the decide and integrate edges run exactly as before.
+ */
+function checkpointGatewayFrom(
+  knowledge: EngineKnowledge | undefined,
+): CheckpointVerifyGateway | undefined {
+  return knowledge === undefined
+    ? undefined
+    : {
+        query: knowledge.query,
+        headSha: knowledge.headSha,
+        validate: knowledge.validate,
+        mintComprehension: knowledge.mintComprehension,
+      };
 }
 
 function assertNever(value: never): never {

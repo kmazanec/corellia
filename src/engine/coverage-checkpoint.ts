@@ -22,7 +22,16 @@ export async function checkpointVerifyArtifacts(params: {
   knowledgeGateway: CoverageCheckpointKnowledge;
   store: EventStore;
   now: () => number;
+  /**
+   * Which of the three consistency checkpoints is firing (DESIGN "checkpoint
+   * consistency"): decide, split, or integrate. Recorded on every
+   * knowledge-checked event so the trace shows where a drift was caught. Omitted
+   * by the split gate, whose events read as the original (unlabelled) wiring.
+   */
+  checkpoint?: 'decide' | 'split' | 'integrate';
 }): Promise<CoverageCheckpointResult> {
+  const checkpointLabel =
+    params.checkpoint !== undefined ? { checkpoint: params.checkpoint } : {};
   const refreshChildren: ChildPlan[] = [];
   const validatedOk = new Set<KnowledgeCategory>();
   const refreshedCategories = new Set<KnowledgeCategory>();
@@ -49,6 +58,7 @@ export async function checkpointVerifyArtifacts(params: {
         category: artifact.category,
         sha: artifact.generatedAtSha,
         outcome: 'stale-validated',
+        ...checkpointLabel,
       });
       validatedOk.add(artifact.category);
       continue;
@@ -62,6 +72,7 @@ export async function checkpointVerifyArtifacts(params: {
       category: artifact.category,
       sha: artifact.generatedAtSha,
       outcome: 'invalid',
+      ...checkpointLabel,
     });
 
     const refreshMissing: MissingRequirement[] = [{

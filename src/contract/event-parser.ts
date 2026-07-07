@@ -73,6 +73,7 @@ const KNOWLEDGE_CATEGORIES = new Set<KnowledgeCategory>([
   'credentials',
 ]);
 const KNOWLEDGE_CHECK_OUTCOMES = new Set(['fresh', 'stale-validated', 'invalid']);
+const CHECKPOINTS = new Set(['decide', 'split', 'integrate']);
 const ROUND_OUTCOMES = new Set(['done', 'continue', 'halt-no-progress', 'halt-max-rounds', 'halt-ceiling', 'halt-deadline']);
 const LABEL_OUTCOMES = new Set(['merged', 'rejected', 'confirmed', 'refuted']);
 
@@ -158,7 +159,8 @@ const EVENT_VALIDATORS = {
     hasString(event, 'repoRoot') &&
     hasSetValue(event, 'category', KNOWLEDGE_CATEGORIES) &&
     hasString(event, 'sha') &&
-    hasSetValue(event, 'outcome', KNOWLEDGE_CHECK_OUTCOMES),
+    hasSetValue(event, 'outcome', KNOWLEDGE_CHECK_OUTCOMES) &&
+    hasOptionalSetValue(event, 'checkpoint', CHECKPOINTS),
   'golden-candidate': (event) =>
     hasString(event, 'judgeType') &&
     hasString(event, 'artifactDigest') &&
@@ -270,4 +272,8 @@ function hasStringArray(value: JsonObject, key: string): boolean {
 function hasSetValue(value: JsonObject, key: string, allowed: ReadonlySet<string>): boolean {
   const candidate = value[key];
   return typeof candidate === 'string' && allowed.has(candidate);
+}
+
+function hasOptionalSetValue(value: JsonObject, key: string, allowed: ReadonlySet<string>): boolean {
+  return value[key] === undefined || hasSetValue(value, key, allowed);
 }

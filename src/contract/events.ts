@@ -116,8 +116,13 @@ export type FactoryEvent =
   | { type: 'knowledge-written'; at: number; goalId: string; artifact: KnowledgeArtifact }
   /** A deep-dive's anchored region facts were appended — keeps dive output evented (ADR-003/ADR-019). */
   | { type: 'knowledge-facts-written'; at: number; goalId: string; facts: RegionFacts }
-  /** A consumer ran the checkpoint freshness check on an artifact (verify-on-read, ADR-019). */
-  | { type: 'knowledge-checked'; at: number; goalId: string; repoRoot: string; category: KnowledgeCategory; sha: string; outcome: 'fresh' | 'stale-validated' | 'invalid' }
+  /**
+   * A consumer ran the checkpoint freshness check on an artifact (verify-on-read,
+   * ADR-019). `checkpoint` names which of the three consistency checkpoints fired
+   * (DESIGN "checkpoint consistency"): decide, split, or integrate. Absent on
+   * pre-checkpoint-labelled events, which read as split (the original wiring).
+   */
+  | { type: 'knowledge-checked'; at: number; goalId: string; repoRoot: string; category: KnowledgeCategory; sha: string; outcome: 'fresh' | 'stale-validated' | 'invalid'; checkpoint?: 'decide' | 'split' | 'integrate' }
   /**
    * A judge verdict on a real (non-scripted) run was captured as a golden-set
    * candidate (ADR-024): the `goldenCandidates` projection collects these per

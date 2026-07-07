@@ -5,6 +5,12 @@ import type { Goal } from '../contract/goal.js';
 import type { CheckContext, Registry } from '../contract/goal-type.js';
 import type { MemoryView } from '../contract/memory.js';
 import type { Artifact, Report } from '../contract/report.js';
+import type {
+  CheckpointShaMemo,
+  CheckpointVerifyGateway,
+} from './checkpoint-verify.js';
+import { createCheckpointShaMemo } from './checkpoint-verify.js';
+import { refreshDriftedKnowledgeBeforeIntegrate } from './integrate-checkpoint.js';
 import type { FactsForRegions } from './knowledge-memory.js';
 import type { RegionScanner } from './structural-floor.js';
 import {
@@ -50,6 +56,14 @@ export async function runSplitRound(params: {
   worktree: TreeWorktree | undefined;
   factsForRegions: FactsForRegions | undefined;
   headSha: ((repoRoot: string) => Promise<string>) | undefined;
+  /**
+   * The integrate checkpoint's verify-on-read gateway. Omit (or undefined) to
+   * skip the checkpoint entirely — the integrate judge then runs exactly as
+   * before, so a caller without knowledge wiring is unaffected.
+   */
+  checkpointKnowledge?: CheckpointVerifyGateway | undefined;
+  /** The tree's shared HEAD-SHA memo; a fresh Map is used when omitted. */
+  checkpointShaMemo?: CheckpointShaMemo;
   regionScanner: RegionScanner | undefined;
   checkContext: CheckContext | undefined;
   persist: (goal: Goal, artifact: Artifact) => Promise<void>;
@@ -104,6 +118,7 @@ export async function runSplitRound(params: {
 
   const { mergedArtifact, integration } = await integrateWithRepair({
     ...params,
+    checkpointShaMemo: params.checkpointShaMemo ?? createCheckpointShaMemo(),
     comprehendMerge,
     childReports,
   });
@@ -159,11 +174,22 @@ async function integrateWithRepair(params: {
   goldenCapture: boolean;
   store: EventStore;
   now: () => number;
+  activeRepoRoot: string | undefined;
+  checkpointKnowledge?: CheckpointVerifyGateway | undefined;
+  checkpointShaMemo: CheckpointShaMemo;
   worktree: TreeWorktree | undefined;
   comprehendMerge: ComprehendMergeResult;
   childReports: Report[];
   runChild: (goal: Goal) => Promise<Report>;
 }): Promise<IntegrateResult> {
+  // Integrate checkpoint (DESIGN "checkpoint consistency"): re-read the facts this
+  // verdict depends on BEFORE rendering it. The tree's own round commits (and any
+  // lateral write) can move HEAD after the split verified — the integrate edge is
+  // the costliest place to trust a stale fact, since it is where the verdict is
+  // rendered. A caught drift refreshes the knowledge and re-integrates rather than
+  // judging the assembled work against a fact that is no longer true.
+  await refreshDriftedKnowledgeBeforeIntegrate(params);
+
   const first = await integrateAndJudge(params);
 
   const repair = await repairIntegration({

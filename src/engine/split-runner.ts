@@ -5,6 +5,10 @@ import type { Goal, Usage } from '../contract/goal.js';
 import type { CheckContext, Registry } from '../contract/goal-type.js';
 import type { MemoryView } from '../contract/memory.js';
 import type { Artifact, Report } from '../contract/report.js';
+import type {
+  CheckpointShaMemo,
+  CheckpointVerifyGateway,
+} from './checkpoint-verify.js';
 import type { FactsForRegions } from './knowledge-memory.js';
 import type { RegionScanner } from './structural-floor.js';
 import {
@@ -46,6 +50,14 @@ export function createSplitRunner(deps: {
   activeWorktree: () => TreeWorktree | undefined;
   factsForRegions: FactsForRegions | undefined;
   headSha: ((repoRoot: string) => Promise<string>) | undefined;
+  /**
+   * The full knowledge gateway the integrate checkpoint re-reads facts through
+   * (verify-on-read). Undefined ⇒ no knowledge wiring, so the checkpoint is a
+   * no-op and the integrate judge runs exactly as before.
+   */
+  checkpointKnowledge: CheckpointVerifyGateway | undefined;
+  /** The tree's HEAD-SHA memo, shared across decide / split / integrate checkpoints. */
+  checkpointShaMemo: CheckpointShaMemo;
   regionScanner: RegionScanner | undefined;
   checkContextFor: (goalId: string) => CheckContext | undefined;
   persistLeafKnowledge: (goal: Goal, artifact: Artifact) => Promise<void>;
@@ -75,6 +87,8 @@ export function createSplitRunner(deps: {
       worktree: deps.activeWorktree(),
       factsForRegions: deps.factsForRegions,
       headSha: deps.headSha,
+      checkpointKnowledge: deps.checkpointKnowledge,
+      checkpointShaMemo: deps.checkpointShaMemo,
       regionScanner: deps.regionScanner,
       checkContext: deps.checkContextFor(goal.id),
       persist: deps.persistLeafKnowledge,
