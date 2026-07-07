@@ -107,6 +107,99 @@ describe('sandbox finalization', () => {
     expect(existsSync(worktree.root)).toBe(false);
   });
 
+  it('ships the green subtree on a mixed green/blocked tree (A5 partial delivery)', async () => {
+    const { repo, worktree, store } = await openWorktree('mixed');
+    // Real green work exists in the worktree (a delivered file).
+    writeFileSync(join(worktree.root, 'green.ts'), 'export const shipped = true;\n');
+
+    const blocker = 'module B: step-loop:failed';
+    await finalizeSandboxedRun({
+      goal: makeGoal({ id: 'mixed', title: 'Deliver modules A–C' }),
+      report: report({
+        blockers: [blocker],
+        partialDelivery: {
+          blockedModules: [{ goalId: 'mixed/b', title: 'module B', blocker }],
+          childBlockers: [blocker],
+        },
+      }),
+      worktree,
+      store,
+      now: () => 1,
+    });
+
+    // Collected, not preserved: worktree gone, collect event present, no preserve.
+    expect(existsSync(worktree.root)).toBe(false);
+    expect(await store.list({ type: 'worktree-collected' })).toHaveLength(1);
+    expect(await store.list({ type: 'worktree-preserved' })).toHaveLength(0);
+
+    // The partial-delivered event enumerates the blocked module.
+    const partial = await store.list({ type: 'partial-delivered' });
+    expect(partial).toMatchObject([
+      { goalId: 'mixed', blockedModules: [{ goalId: 'mixed/b', title: 'module B', blocker }] },
+    ]);
+
+    // The blocked remainder is surfaced in the collect commit body.
+    const message = execFileSync('git', ['log', '-1', '--format=%B', worktree.branch], {
+      cwd: repo,
+      stdio: 'pipe',
+      encoding: 'utf-8',
+    });
+    expect(message).toContain('Partial delivery');
+    expect(message).toContain('module B');
+  });
+
+  it('preserves an all-blocked tree exactly as before (no green work)', async () => {
+    const { worktree, store } = await openWorktree('all-blocked');
+    // No files written — nothing green in the worktree.
+
+    const blocker = 'module A: blocked';
+    await finalizeSandboxedRun({
+      goal: makeGoal({ id: 'all-blocked' }),
+      report: report({
+        artifact: null,
+        blockers: [blocker],
+        partialDelivery: {
+          blockedModules: [{ goalId: 'all-blocked/a', title: 'module A', blocker }],
+          childBlockers: [blocker],
+        },
+      }),
+      worktree,
+      store,
+      now: () => 1,
+    });
+
+    expect(await store.list({ type: 'worktree-preserved' })).toMatchObject([
+      { goalId: 'all-blocked', reason: `tree blocked: ${blocker}` },
+    ]);
+    expect(await store.list({ type: 'partial-delivered' })).toHaveLength(0);
+    expect(existsSync(worktree.root)).toBe(true);
+  });
+
+  it('preserves when a root-level acceptance blocker rejects the green work', async () => {
+    const { worktree, store } = await openWorktree('acc-fail');
+    writeFileSync(join(worktree.root, 'green.ts'), 'export const x = 1;\n');
+
+    const childBlocker = 'module B: blocked';
+    await finalizeSandboxedRun({
+      goal: makeGoal({ id: 'acc-fail' }),
+      report: report({
+        blockers: [childBlocker, 'Integration eval failed: modules do not compose'],
+        partialDelivery: {
+          blockedModules: [{ goalId: 'acc-fail/b', title: 'module B', blocker: childBlocker }],
+          childBlockers: [childBlocker],
+        },
+      }),
+      worktree,
+      store,
+      now: () => 1,
+    });
+
+    // A root-level failure means the delivered work itself did not pass — preserve.
+    expect(await store.list({ type: 'worktree-preserved' })).toHaveLength(1);
+    expect(await store.list({ type: 'partial-delivered' })).toHaveLength(0);
+    expect(existsSync(worktree.root)).toBe(true);
+  });
+
   it('records a files-touched event marking each file in/out of declared scope (C1)', async () => {
     const { worktree, store } = await openWorktree('scoped');
     // In scope: public/. Out of scope: src/tax/engine.ts (the tiutni failure shape).

@@ -90,6 +90,12 @@ export type FactoryEvent =
    * in/out-of-scope marker in the report, without reading `git show`.
    */
   | { type: 'files-touched'; at: number; goalId: string; scope: string[]; files: { path: string; inScope: boolean }[] }
+  /**
+   * A root elected a ship-what's-green partial delivery (issue A5): it collected
+   * the green subtree and opened the PR path while enumerating the child modules
+   * that blocked producing nothing. `blockedModules` is the surfaced remainder.
+   */
+  | { type: 'partial-delivered'; at: number; goalId: string; blockedModules: { goalId: string; title: string; blocker: string }[] }
   /** A produce call completed, carrying its provider-reported usage. */
   | { type: 'produced'; at: number; goalId: string; usage: Usage }
   /** Measured tree spend reached the dollar ceiling — the tree halts. */

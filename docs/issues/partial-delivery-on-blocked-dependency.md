@@ -4,10 +4,25 @@ title: "A5. A blocked dependency silently kills its dependents with no degraded 
 description: Dependency edges are hard gates with no ship-what's-green partial-delivery mode, so a few blocked modules sink an otherwise-good tree.
 tags: [in-run-stall, engine, partial-delivery, collect]
 timestamp: 2026-06-25
-status: open
+status: fixed-pending-live-proof
 kind: idea
 severity: medium
 ---
+
+> **Downstream half fixed-pending-live-proof (2026-07-06) — [ADR-048](../adrs/ADR-048-ship-whats-green-partial-delivery.md).**
+> The root now elects a ship-what's-green partial delivery at collection
+> (`decidePartialDelivery` / `finalizeSandboxedRun`): when a tree carries real
+> green work AND the only blockers are child-module blocks (the root's own
+> acceptance/integration judges passed on the delivered artifact), it collects the
+> green subtree instead of preserving the whole tree, emits a `partial-delivered`
+> event, and folds the blocked-module enumeration into the collect commit body.
+> The split report carries the structured `partialDelivery` list
+> (`{blockedModules, childBlockers}`) built at `buildSplitRoundReport`. Honesty
+> constraints hold: a root-level acceptance failure still gates (preserve, don't
+> ship); an all-blocked tree preserves exactly as before; `report.blockers` stays
+> populated so the run is honestly partial and the blocked modules spawn follow-up
+> work. With the upstream half (ADR-037) and this downstream half, the issue is
+> fixed-pending-live-proof.
 
 # A5. A blocked dependency silently kills its dependents with no degraded path
 

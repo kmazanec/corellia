@@ -6,6 +6,7 @@ import {
   type ContributingGoal,
 } from './collect-commit-message.js';
 import { createIterationRecord, deleteProvenanceIssue } from './iteration-tools.js';
+import { decidePartialDelivery, renderBlockedModules } from './partial-delivery.js';
 import {
   collectTree,
   preserveTree,
@@ -20,16 +21,68 @@ export async function finalizeSandboxedRun(params: {
   store: EventStore;
   now: () => number;
 }): Promise<void> {
-  if (params.report === undefined || params.report.blockers.length > 0) {
-    await preserveTree(params.worktree, params.store, preservationReason(params.report));
+  const { report, worktree, store, goal, now } = params;
+  if (report === undefined) {
+    await preserveTree(worktree, store, preservationReason(report));
     return;
+  }
+
+  if (report.blockers.length > 0) {
+    // A blocked tree preserves as salvage — UNLESS ship-what's-green applies: a
+    // mix of green work and blocked-with-nothing modules, where the delivered
+    // green subtree passed the root's own gates. Then collect the green work and
+    // surface the blocked remainder rather than sink the whole tree (issue A5).
+    const decision = decidePartialDelivery({
+      report,
+      worktreeRoot: worktree.root,
+      baseSha: worktree.baseSha,
+      scope: goal.scope,
+    });
+    if (!decision.shipGreen) {
+      await preserveTree(worktree, store, preservationReason(report));
+      return;
+    }
+  }
+
+  await collectGreenSubtree({ goal, report, worktree, store, now });
+}
+
+/**
+ * Collect the worktree and record the collateral events. Shared by the clean and
+ * ship-what's-green paths; on a partial delivery it also emits `partial-delivered`
+ * and folds the blocked-module enumeration into the collect commit body so the
+ * partiality is unmissable to whoever merges the green work.
+ */
+async function collectGreenSubtree(params: {
+  goal: Goal;
+  report: Report;
+  worktree: TreeWorktree;
+  store: EventStore;
+  now: () => number;
+}): Promise<void> {
+  const partial = params.report.partialDelivery;
+  const isPartial = params.report.blockers.length > 0 && partial !== undefined;
+
+  if (isPartial) {
+    await params.store.append({
+      type: 'partial-delivered',
+      at: params.now(),
+      goalId: params.goal.id,
+      blockedModules: partial!.blockedModules,
+    });
   }
 
   integrateDeliveredIntent(params.goal, params.worktree.root, params.now);
   await recordFilesTouched(params);
   const contributing = await gatherContributingGoals(params.store, params.goal.id);
   const commitMessage = deriveCollectCommitMessage(params.goal, contributing);
-  await collectTree(params.worktree, params.store, commitMessage);
+  const finalMessage = isPartial
+    ? {
+        subject: commitMessage.subject,
+        body: `${commitMessage.body}\n\n${renderBlockedModules(params.report)}`,
+      }
+    : commitMessage;
+  await collectTree(params.worktree, params.store, finalMessage);
 }
 
 /**

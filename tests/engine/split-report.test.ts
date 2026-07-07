@@ -55,6 +55,7 @@ describe('split report assembly', () => {
   it('preserves blocker and finding ordering from integration, comprehend, then children', () => {
     const built = buildSplitRoundReport({
       mergedArtifact: textArtifact('merged'),
+      childGoals: [makeGoal({ id: 'root/a', title: 'module A' })],
       childReports: [
         report({ blockers: ['child blocker'], findings: ['child finding'], memoriesUsed: ['m1'] }),
       ],
@@ -74,6 +75,49 @@ describe('split report assembly', () => {
       findings: ['terraced loser', 'integration finding', 'comprehend finding', 'child finding'],
       learned: 'learned',
     });
+  });
+
+  it('enumerates blocked child modules in partialDelivery, keyed to their goals', () => {
+    const built = buildSplitRoundReport({
+      mergedArtifact: textArtifact('merged'),
+      childGoals: [
+        makeGoal({ id: 'root/green', title: 'green module' }),
+        makeGoal({ id: 'root/blocked', title: 'blocked module' }),
+      ],
+      childReports: [
+        report({ blockers: [] }),
+        report({ blockers: ['step-loop:failed'], artifact: null }),
+      ],
+      promotion: { lessons: [], learned: '' },
+      extraFindings: [],
+      integrationFindings: [],
+      integrationBlockers: [],
+      comprehendFindings: [],
+      comprehendBlockers: [],
+    });
+
+    expect(built.partialDelivery).toEqual({
+      blockedModules: [
+        { goalId: 'root/blocked', title: 'blocked module', blocker: 'step-loop:failed' },
+      ],
+      childBlockers: ['step-loop:failed'],
+    });
+  });
+
+  it('omits partialDelivery when no child blocked', () => {
+    const built = buildSplitRoundReport({
+      mergedArtifact: textArtifact('merged'),
+      childGoals: [makeGoal({ id: 'root/green', title: 'green module' })],
+      childReports: [report({ blockers: [] })],
+      promotion: { lessons: [], learned: '' },
+      extraFindings: [],
+      integrationFindings: [],
+      integrationBlockers: [],
+      comprehendFindings: [],
+      comprehendBlockers: [],
+    });
+
+    expect(built.partialDelivery).toBeUndefined();
   });
 
   it('pairs child plans with their reports', () => {

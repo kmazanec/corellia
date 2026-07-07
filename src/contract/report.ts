@@ -71,4 +71,33 @@ export interface Report {
    * an attempt. Absent means the work stayed in scope.
    */
   scopeInsufficiency?: string;
+  /**
+   * The ship-what's-green enumeration (issue A5): the child modules that blocked
+   * producing nothing usable, so a mixed green/blocked tree can collect the green
+   * subtree and surface the blocked remainder rather than an all-or-nothing block.
+   * Present on a split report whenever at least one child blocked; the decision to
+   * *elect* a partial collect (green work delivered, no root-level acceptance
+   * failure) is made downstream at collection. Absent means no child blocked.
+   */
+  partialDelivery?: PartialDelivery;
+}
+
+/** One child module that blocked producing nothing usable, for the report. */
+export interface BlockedModule {
+  goalId: string;
+  title: string;
+  blocker: string;
+}
+
+/**
+ * The structured ship-what's-green enumeration carried on a split report.
+ * `blockedModules` is the operator-facing list; `childBlockers` is the exact set
+ * of blocker strings those modules contributed to `Report.blockers`, so the
+ * collect decision can tell child-origin blockers apart from root-level
+ * acceptance/integration failures (which must still gate — a partial that fails
+ * acceptance is not shipped).
+ */
+export interface PartialDelivery {
+  blockedModules: BlockedModule[];
+  childBlockers: string[];
 }

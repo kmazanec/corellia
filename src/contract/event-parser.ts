@@ -34,6 +34,7 @@ const EVENT_TYPES = new Set([
   'worktree-preserved',
   'worktree-reaped',
   'files-touched',
+  'partial-delivered',
   'produced',
   'ceiling-reached',
   'transport-retry',
@@ -142,6 +143,7 @@ const EVENT_VALIDATORS = {
   'worktree-reaped': (event) =>
     hasString(event, 'path') && hasOptionalString(event, 'branch') && hasString(event, 'reason'),
   'files-touched': (event) => hasStringArray(event, 'scope') && hasTouchedFiles(event),
+  'partial-delivered': (event) => hasBlockedModules(event),
   produced: (event) => hasObject(event, 'usage'),
   'ceiling-reached': (event) => hasFiniteNumber(event, 'spentUsd') && hasFiniteNumber(event, 'ceilingUsd'),
   'transport-retry': hasDetail,
@@ -192,6 +194,21 @@ function hasTouchedFiles(event: JsonObject): boolean {
         isObject(f) &&
         typeof (f as JsonObject)['path'] === 'string' &&
         typeof (f as JsonObject)['inScope'] === 'boolean',
+    )
+  );
+}
+
+/** Validate `blockedModules: { goalId, title, blocker }[]` on a partial-delivered event. */
+function hasBlockedModules(event: JsonObject): boolean {
+  const modules = event['blockedModules'];
+  return (
+    Array.isArray(modules) &&
+    modules.every(
+      (m) =>
+        isObject(m) &&
+        typeof (m as JsonObject)['goalId'] === 'string' &&
+        typeof (m as JsonObject)['title'] === 'string' &&
+        typeof (m as JsonObject)['blocker'] === 'string',
     )
   );
 }

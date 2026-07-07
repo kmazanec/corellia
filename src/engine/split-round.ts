@@ -114,6 +114,7 @@ export async function runSplitRound(params: {
   });
   const report = buildSplitRoundReport({
     mergedArtifact,
+    childGoals,
     childReports,
     promotion,
     extraFindings: params.extraFindings ?? [],

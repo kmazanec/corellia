@@ -1,7 +1,7 @@
 import type { ChildPlan } from '../contract/decision.js';
 import type { EventStore } from '../contract/events.js';
 import type { Goal, MemoryPointer } from '../contract/goal.js';
-import type { Artifact, Report } from '../contract/report.js';
+import type { Artifact, BlockedModule, Report } from '../contract/report.js';
 
 export interface SplitPromotion {
   lessons: string[];
@@ -59,6 +59,7 @@ export async function promoteChildReports(params: {
 
 export function buildSplitRoundReport(params: {
   mergedArtifact: Artifact | null;
+  childGoals: Goal[];
   childReports: Report[];
   promotion: SplitPromotion;
   extraFindings: string[];
@@ -67,6 +68,8 @@ export function buildSplitRoundReport(params: {
   comprehendFindings: string[];
   comprehendBlockers: string[];
 }): Report {
+  const childBlockers = params.childReports.flatMap((report) => report.blockers);
+  const partialDelivery = buildPartialDelivery(params.childGoals, params.childReports, childBlockers);
   return {
     artifact: params.mergedArtifact,
     proof: [],
@@ -75,7 +78,7 @@ export function buildSplitRoundReport(params: {
     blockers: [
       ...params.integrationBlockers,
       ...params.comprehendBlockers,
-      ...params.childReports.flatMap((report) => report.blockers),
+      ...childBlockers,
     ],
     findings: [
       ...params.extraFindings,
@@ -84,7 +87,35 @@ export function buildSplitRoundReport(params: {
       ...params.childReports.flatMap((report) => report.findings),
     ],
     learned: params.promotion.learned,
+    ...(partialDelivery !== undefined ? { partialDelivery } : {}),
   };
+}
+
+/**
+ * Enumerate the child modules that blocked (issue A5), for the ship-what's-green
+ * report. Records both the operator-facing {goalId, title, blocker} list and the
+ * exact blocker strings those modules contributed, so the collect decision can
+ * separate child-origin blockers from root-level acceptance/integration
+ * failures. Returns undefined when no child blocked (nothing partial to surface).
+ */
+function buildPartialDelivery(
+  childGoals: Goal[],
+  childReports: Report[],
+  childBlockers: string[],
+): Report['partialDelivery'] {
+  const blockedModules: BlockedModule[] = [];
+  for (let index = 0; index < childReports.length; index++) {
+    const report = childReports[index]!;
+    if (report.blockers.length === 0) continue;
+    const childGoal = childGoals[index];
+    blockedModules.push({
+      goalId: childGoal?.id ?? `child-${index}`,
+      title: childGoal?.title ?? '(unknown module)',
+      blocker: report.blockers[0] ?? 'unknown',
+    });
+  }
+  if (blockedModules.length === 0) return undefined;
+  return { blockedModules, childBlockers };
 }
 
 export function childOutcomes(
