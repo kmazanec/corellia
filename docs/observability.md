@@ -107,19 +107,75 @@ this table is fixed.
 Span timing: `at` (wall-clock ms) is the event time; a span's start is its
 `goal-received.at` and its end is the `emitted`/`blocked` `at` for that `goalId`.
 
-### LangSmith adapter (primary follow-on, gated on `LANGSMITH_API_KEY`)
+### OTLP / generic adapter (shipped) — `src/eventlog/otlp-sink.ts`
 
-Each goal → a LangSmith run (type per the table); child goals → child runs;
-`usage` → the run's token counts; `judge-verdict` findings → run metadata;
-`blocked` / non-empty `emitted.blockers` → error status. A `SinkFanoutStore`
-sink buffers per-`goalId` and posts the run tree via the LangSmith SDK; `flush`
-drains it at shutdown. No `src/` core import — the SDK lives only in the adapter
-module registered in `buildStore()`.
+`OtlpSink` is the second concrete sink, proving the `EventSink` interface generic
+against a real backend. It exports the goal tree over the **OTLP/HTTP JSON**
+encoding with **no vendor SDK** — plain `fetch` POSTing `resourceSpans` to
+`<endpoint>/v1/traces`. One exporter reaches Grafana Tempo, Honeycomb, Datadog,
+and any OTLP collector.
 
-### OTLP / generic adapter (vendor-neutral follow-on)
+**Mapping to OTLP spans** (from the table above):
 
-`goal-received` → span, `child-spawned` → child span, `tool-call`/`decided`/
-`judge-verdict` → span events, `usage` → span/metric attributes, `blocked` /
-blocking `emitted` → span status = error. One OTLP exporter reaches Grafana/
-Tempo, Datadog, and Honeycomb — the lingua franca that proves the `EventSink`
-interface is generic against ≥2 backends.
+- `goal-received` **opens** a span: `name = goal.title`, `kind = INTERNAL`,
+  `startTimeUnixNano = at`, attributes `corellia.goal.id` / `corellia.goal.type`.
+- Parent linkage comes from `goal.parentId` (`parentSpanId = spanId(parentId)`);
+  the root goal (`parentId === null`) is the trace root. `child-spawned` is also
+  recorded as a span event carrying `dependsOn`.
+- Step-shaped events (`tool-call`, `decided`, `step`, `judge-verdict`,
+  `deterministic-checked`, `tier-escalated`, `repair-applied`, `script-ran`,
+  `capture-ran`, `ceiling-reached`, `budget-exhausted`) become **span events** with
+  their salient fields as attributes.
+- Any `usage` accumulates onto the span as `corellia.usage.prompt_tokens` /
+  `completion_tokens` / `cached_prompt_tokens` / `cost_usd`.
+- A failing `judge-verdict` / `deterministic-checked` sets the span's status to
+  **ERROR** even before it closes.
+- `emitted` **closes** the span (ERROR status carrying `report.blockers` when
+  non-empty, else UNSET); `blocked` closes it ERROR with `brief.question` and a
+  `corellia.block.resolution` attribute.
+
+**Ids.** Deterministic, no allocation: `traceId = sha256("trace:" + rootGoalId)`
+(16 bytes / 32 hex) and `spanId = sha256("span:" + goalId)` (8 bytes / 16 hex),
+via `node:crypto` (not a dependency). The trace id is resolved by walking
+`parentId` links to the root, so every span in a tree shares one trace id.
+
+**Batching & failure discipline.** `emit()` only folds into the in-memory span
+buffer — it never blocks a run. A span is exportable **only once closed**; closed
+spans POST in batches (default **50 spans** or every **5 s**, whichever first),
+fire-and-forget. `flush()` drains everything at shutdown and marks any still-open
+span `factory.incomplete=true` rather than dropping it. Every network error is
+caught (the fan-out already guards against throws) and logged **at most once per
+burst** — a success re-arms the next log — so a down collector never spams the
+operator.
+
+**Config** (env-gated in `buildSinks()`):
+
+| Env var | Effect |
+| --- | --- |
+| `CORELLIA_OTLP_ENDPOINT` | Presence **enables** the sink. Base collector URL; `/v1/traces` is appended if absent. |
+| `CORELLIA_OTLP_HEADERS` | Optional JSON object of `{ header: value }` — how backends pass auth. A malformed value disables auth (with a warning), not the whole sink. |
+
+**Honeycomb:**
+
+```bash
+export CORELLIA_OTLP_ENDPOINT="https://api.honeycomb.io"
+export CORELLIA_OTLP_HEADERS='{"x-honeycomb-team":"YOUR_API_KEY","x-honeycomb-dataset":"corellia"}'
+```
+
+**Grafana Cloud (Tempo, OTLP/HTTP endpoint):**
+
+```bash
+export CORELLIA_OTLP_ENDPOINT="https://otlp-gateway-<region>.grafana.net/otlp"
+# instanceID:token base64-encoded, per Grafana Cloud's OTLP auth
+export CORELLIA_OTLP_HEADERS='{"Authorization":"Basic <base64(instanceID:token)>"}'
+```
+
+A local collector (Grafana Tempo, an OpenTelemetry Collector, Jaeger's OTLP
+receiver) needs only `CORELLIA_OTLP_ENDPOINT="http://localhost:4318"`.
+
+### LangSmith adapter (remains open)
+
+The LangSmith run-tree adapter (gated on `LANGSMITH_API_KEY`) is still the one
+documented-but-unbuilt follow-on. It maps the same events to LangSmith's nested
+`run` model; it would live in its own module and register in `buildSinks()` the
+same way `OtlpSink` does, keeping the LangSmith SDK out of `src/` core.

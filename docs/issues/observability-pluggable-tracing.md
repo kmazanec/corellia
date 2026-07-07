@@ -9,6 +9,34 @@ kind: idea
 severity: medium
 ---
 
+## Update 2026-07-06 (b) — OTLP adapter shipped; LangSmith remains open
+
+The first concrete vendor adapter is now built, proving the `EventSink` seam
+generic against a real backend (≥2 backends: the ndjson debug sink + OTLP).
+
+- **`src/eventlog/otlp-sink.ts`** implements `EventSink`, exporting the goal tree
+  over the **OTLP/HTTP JSON** encoding via plain `fetch` (POST
+  `<endpoint>/v1/traces`) — **no vendor SDK, no new dependency** (ADR-001). Reaches
+  Grafana Tempo, Honeycomb, Datadog, any OTLP collector.
+- Folds events to spans per the neutral mapping (goal-received opens; parentId
+  nests; tool-call/decided/judge-verdict/step become span events; usage →
+  attributes; blocked / blocking emitted → ERROR status). Deterministic
+  `node:crypto` ids: 16-byte trace id from the root goalId, 8-byte span id from
+  the goalId. `emit()` only buffers; closed spans POST in batches (50 spans / 5 s),
+  fire-and-forget; `flush()` drains and marks still-open spans
+  `factory.incomplete=true`. Network failures caught, logged once per burst, never
+  thrown.
+- Env-gated in `buildSinks()`: `CORELLIA_OTLP_ENDPOINT` enables it,
+  `CORELLIA_OTLP_HEADERS` (JSON object) carries auth. Honeycomb + Grafana Cloud
+  example configs are in `docs/observability.md`.
+- Tests: `tests/eventlog/otlp-sink.test.ts` (lifecycle → well-formed OTLP JSON, id
+  shapes, parenthood, error status, batching, flush+incomplete, fetch-failure
+  discipline) and `tests/daemon/config-sinks.test.ts` (env-gating + header parse).
+
+**Still open:** the **LangSmith** adapter (gated on `LANGSMITH_API_KEY`) — the one
+remaining documented-but-unbuilt adapter — and a live-backend proof of a real
+daemon run producing a trace whose span tree matches the factory's goal tree.
+
 ## Update 2026-07-06 — Part 2 shipped, Part 1 seam shipped, vendor adapters open
 
 Built on `feat/observability` (off `feat/cloud-ready`). Status: **partially-fixed**.

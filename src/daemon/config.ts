@@ -17,6 +17,7 @@ import { JsonlEventStore } from '../eventlog/jsonl-store.js';
 import { PgEventStore } from '../substrate/pg-event-store.js';
 import { SinkFanoutStore } from '../eventlog/sink-fanout-store.js';
 import { StdoutSink } from '../eventlog/stdout-sink.js';
+import { OtlpSink } from '../eventlog/otlp-sink.js';
 import type { EventSink, EventStore } from '../contract/events.js';
 import type { StandingEnvelope } from '../contract/brief.js';
 
@@ -67,17 +68,55 @@ export function buildStore(opts: BuildStoreOptions = {}): StoreHandle {
 }
 
 /**
- * Register the optional export sinks from the environment. Ships one concrete
- * sink — the ndjson debug sink (CORELLIA_SINK_STDOUT) — proving the fan-out seam;
- * the LangSmith / OTLP adapters are the documented follow-ons (docs/observability.md)
- * that register here behind their own env guards without touching the core.
+ * Register the optional export sinks from the environment. Two concrete sinks
+ * ship: the ndjson debug sink (CORELLIA_SINK_STDOUT) and the OTLP/HTTP JSON trace
+ * exporter (CORELLIA_OTLP_ENDPOINT) — proving the fan-out seam generic against a
+ * real backend (docs/observability.md). The LangSmith adapter remains the
+ * documented follow-on, registered here behind its own env guard without touching
+ * the core.
  */
-function buildSinks(): EventSink[] {
+export function buildSinks(): EventSink[] {
   const sinks: EventSink[] = [];
   if (isEnabled(process.env['CORELLIA_SINK_STDOUT'])) {
     sinks.push(new StdoutSink());
   }
+  const otlp = buildOtlpSink();
+  if (otlp !== undefined) {
+    sinks.push(otlp);
+  }
   return sinks;
+}
+
+/**
+ * Build the OTLP trace sink when CORELLIA_OTLP_ENDPOINT is set. CORELLIA_OTLP_HEADERS
+ * (a JSON object) carries auth — e.g. Honeycomb's `x-honeycomb-team` or Grafana
+ * Cloud's `Authorization: Basic …`. A malformed headers value disables auth (with a
+ * warning) rather than the whole sink, so a typo does not silently drop tracing.
+ */
+function buildOtlpSink(): OtlpSink | undefined {
+  const endpoint = process.env['CORELLIA_OTLP_ENDPOINT'];
+  if (endpoint === undefined || endpoint.length === 0) return undefined;
+
+  const headers = parseOtlpHeaders(process.env['CORELLIA_OTLP_HEADERS']);
+  return new OtlpSink({ endpoint, ...(headers !== undefined ? { headers } : {}) });
+}
+
+function parseOtlpHeaders(raw: string | undefined): Record<string, string> | undefined {
+  if (raw === undefined || raw.length === 0) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('not a JSON object');
+    }
+    const headers: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === 'string') headers[key] = value;
+    }
+    return headers;
+  } catch {
+    console.warn('[config] CORELLIA_OTLP_HEADERS is not a JSON object of strings — OTLP auth headers disabled');
+    return undefined;
+  }
 }
 
 /** Wrap the inner store in the fan-out only when at least one sink is registered. */
