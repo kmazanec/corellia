@@ -10,10 +10,14 @@
  *   npm run logs -- [path] [--follow] [--tree] [--cost] [--goal <s>] [--type <e>]
  *
  * COMMANDS
- *   logs   view the event log — replay a finished run, or --follow a live one.
+ *   logs       view the event log — replay a finished run, or --follow a live one.
+ *   label      attach an exogenous outcome to a tree's golden candidates.
+ *   calibrate  replay a judge's golden set and print its agreement score.
  */
 
 import { parseLogsArgs, runLogs, type LogsConsole } from '../src/eventlog/logs-cli.js';
+import { parseLabelArgs, runLabel } from '../src/eventlog/label-cli.js';
+import { parseCalibrateArgs, runCalibrate } from '../src/eval/golden/calibrate-cli.js';
 
 const io: LogsConsole = {
   log: (line) => console.log(line),
@@ -38,13 +42,21 @@ async function main(): Promise<number> {
       }
       return code;
     }
+    case 'label': {
+      const { code } = await runLabel(parseLabelArgs(rest), io, process.env);
+      return code;
+    }
+    case 'calibrate': {
+      const { code } = await runCalibrate(parseCalibrateArgs(rest), io);
+      return code;
+    }
     case undefined:
       io.error('corellia: no command given');
-      io.error('  commands: logs');
+      io.error('  commands: logs, label, calibrate');
       return 2;
     default:
       io.error(`corellia: unknown command "${command}"`);
-      io.error('  commands: logs');
+      io.error('  commands: logs, label, calibrate');
       return 2;
   }
 }

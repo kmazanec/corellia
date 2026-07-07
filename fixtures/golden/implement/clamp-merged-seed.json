@@ -1,0 +1,16 @@
+{
+  "id": "clamp-merged-seed",
+  "goalType": "implement",
+  "judgeType": "critique-code",
+  "artifact": {
+    "kind": "text",
+    "text": "export function clamp(n, lo, hi) {\n  if (n < lo) return lo;\n  if (n > hi) return hi;\n  return n;\n}\n"
+  },
+  "rubric": "Judge this artifact as a critique-code for goal type implement\n\nThe goal is a production implementation. Apply the production bar.",
+  "label": "merged",
+  "labelSource": "operator",
+  "sha": "0000000000000000000000000000000000000000",
+  "artifactDigest": "55657b4cee2a640853fdc9343a10e395b020e02b",
+  "rubricDigest": "db41fa3f7d2bc687ad17def4355e724cd8c2c987",
+  "note": "Seed pair: a correct, in-scope clamp() that shipped and merged clean. Establishes the golden-set home and lets corellia calibrate run out of the box."
+}
