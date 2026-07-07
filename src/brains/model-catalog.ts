@@ -56,6 +56,17 @@ export interface ModelSpec {
    */
   endpoint?: { baseUrl: string; apiKeyEnv?: string };
   /**
+   * Which provider WIRE FORMAT this model speaks. Absent (the common case) → the
+   * OpenAI-compatible chat-completions dialect (OpenRouter, OpenAI, local vLLM/Ollama).
+   * `'anthropic'` → the Anthropic Messages API (POST /v1/messages, x-api-key auth,
+   * tool-use blocks), used when an Anthropic-family model is reached DIRECT rather
+   * than through OpenRouter. This is independent of `endpoint`: the wire says HOW
+   * to speak, `endpoint` says WHERE. The config assembler sets `wire: 'anthropic'`
+   * (plus the api.anthropic.com endpoint) on Anthropic-family rows when a direct
+   * key is available; see `anthropicDirectConfig`.
+   */
+  wire?: 'openai' | 'anthropic';
+  /**
    * Optional OpenRouter provider pin, the same shape as the legacy
    * `providerByTier` entry. Present → included as the request's `provider` field,
    * pinning provider order and fallback behaviour for cache affinity.
@@ -456,5 +467,6 @@ function fillSpecDefaults(patch: Partial<ModelSpec>): ModelSpec {
     ...(patch.endpoint !== undefined ? { endpoint: patch.endpoint } : {}),
     ...(patch.provider !== undefined ? { provider: patch.provider } : {}),
     ...(patch.requestTimeoutMs !== undefined ? { requestTimeoutMs: patch.requestTimeoutMs } : {}),
+    ...(patch.wire !== undefined ? { wire: patch.wire } : {}),
   };
 }

@@ -14,6 +14,7 @@
 import { readFileSync } from 'node:fs';
 import type { LlmBrainConfig } from './llm.js';
 import { assembleCatalog } from './model-catalog.js';
+import { applyAnthropicDirect } from './anthropic-provider.js';
 
 /**
  * Build an LlmBrainConfig pointed at OpenRouter.
@@ -34,7 +35,15 @@ export function openRouterConfig(env: NodeJS.ProcessEnv = process.env): LlmBrain
   // the banded default silently — the catalog always has an entry per band, so
   // there is nothing to warn about (unlike the old one-model-per-var scheme, an
   // unset var is not a "missing model", just "use the band's cheapest default").
-  const { catalog, pins } = assembleCatalog(env, (path) => readFileSync(path, 'utf8'));
+  //
+  // Then redirect Anthropic-family rows to the DIRECT Messages API when
+  // ANTHROPIC_API_KEY is set (provider redundancy, direct pricing — issue
+  // anthropic-direct-provider). Absent the key this is a no-op and every model
+  // resolves through OpenRouter exactly as before.
+  const { catalog, pins } = applyAnthropicDirect(
+    assembleCatalog(env, (path) => readFileSync(path, 'utf8')),
+    env,
+  );
 
   return {
     baseUrl: 'https://openrouter.ai/api/v1',

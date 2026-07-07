@@ -25,6 +25,13 @@ import type { Tier } from '../contract/goal.js';
 import type { MemoryPointer } from '../contract/goal.js';
 import type { ModelSpec } from './model-catalog.js';
 import { BASELINE_NEEDS, resolveModel, satisfiesNeeds } from './model-catalog.js';
+import type { ProviderWire, WireStepResponse } from './provider-wire.js';
+import { openAiWire, readUsage, buildStepRequest } from './openai-wire.js';
+import { anthropicWire } from './anthropic-wire.js';
+
+// Re-exported for callers/tests that consumed these from the brain before the
+// provider-wire codec seam extracted them into openai-wire.ts.
+export { readUsage, buildStepRequest };
 import type { Decision, ChildPlan, DecisionBrief } from '../contract/decision.js';
 import type { Artifact, EmptyDiagnosis } from '../contract/report.js';
 import type { ToolDef, ToolCall } from '../contract/tool.js';
@@ -145,6 +152,8 @@ interface ResolvedModel {
   apiKey: string;
   provider: ProviderRoutingConfig | undefined;
   requestTimeoutMs: number;
+  /** The provider wire codec (URL/headers/encode/decode) for this model's dialect. */
+  wire: ProviderWire;
 }
 
 /**
@@ -172,73 +181,19 @@ function syntheticCatalogFromModelByTier(modelByTier: Record<Tier, string>): Mod
 }
 
 // ---------------------------------------------------------------------------
-// Internal types for the OpenAI-compatible shape
+// Provider-agnostic call types
 // ---------------------------------------------------------------------------
 
+/**
+ * The message shape the prompt builders construct. Roles map to the wire codec's
+ * request encoding: the OpenAI codec passes them through as-is; the Anthropic codec
+ * lifts 'system' into a top-level field. `readUsage`/`sumUsage`/`buildStepRequest`
+ * and the concrete wire shapes live in the provider codec modules (openai-wire.ts,
+ * anthropic-wire.ts); llm.ts is provider-agnostic below this line.
+ */
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
-}
-
-interface ChatRequest {
-  model: string;
-  messages: ChatMessage[];
-  temperature?: number;
-  response_format?:
-    | { type: 'json_object' }
-    | { type: 'json_schema'; json_schema: WireJsonSchema };
-}
-
-interface ChatChoice {
-  message: { role: string; content: string };
-  /** Provider truncation signal: 'length' means the output was cut off mid-stream. */
-  finish_reason?: string;
-}
-
-interface ChatUsage {
-  prompt_tokens?: number;
-  completion_tokens?: number;
-  /** OpenRouter reports cost here when usage accounting is enabled. */
-  cost?: number;
-  /**
-   * OpenRouter/OpenAI prompt-cache breakdown.
-   * Shape: { cached_tokens?: number, ... }
-   */
-  prompt_tokens_details?: { cached_tokens?: number };
-  /**
-   * DeepSeek-style prompt cache hit tokens (flat field on the usage object).
-   */
-  prompt_cache_hit_tokens?: number;
-}
-
-interface ChatResponse {
-  choices: ChatChoice[];
-  usage?: ChatUsage;
-}
-
-/**
- * Extract provider-reported usage from a chat-completions response JSON.
- * When the response carries no usage block, returns {@link ZERO_USAGE}.
- * When tokens are present but cost is absent, returns usage without costUsd
- * so the engine can apply the conservative token-only ceiling fallback.
- */
-export function readUsage(data: { usage?: ChatUsage }): Usage {
-  const u = data.usage;
-  if (!u) return ZERO_USAGE;
-  const promptTokens = u.prompt_tokens ?? 0;
-  const completionTokens = u.completion_tokens ?? 0;
-  // OpenRouter/OpenAI shape: usage.prompt_tokens_details.cached_tokens
-  // DeepSeek shape:          usage.prompt_cache_hit_tokens
-  const cachedPromptTokens: number | undefined =
-    u.prompt_tokens_details?.cached_tokens ??
-    u.prompt_cache_hit_tokens ??
-    undefined;
-  const base: Usage = {
-    promptTokens,
-    completionTokens,
-    ...(cachedPromptTokens !== undefined ? { cachedPromptTokens } : {}),
-  };
-  return u.cost !== undefined ? { ...base, costUsd: u.cost } : base;
 }
 
 /**
@@ -260,71 +215,15 @@ export function sumUsage(a: Usage, b: Usage): Usage {
   return merged;
 }
 
-// ---------------------------------------------------------------------------
-// OpenAI tool-calling wire types (used by step())
-// ---------------------------------------------------------------------------
-
-interface WireToolParam {
-  type: 'function';
-  function: {
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-  };
-}
-
-interface WireToolCallFunction {
-  name: string;
-  arguments: string;
-}
-
-interface WireToolCall {
-  id: string;
-  type: 'function';
-  function: WireToolCallFunction;
-}
-
-interface WireToolCallMessage {
-  role: 'assistant';
-  content: string | null;
-  tool_calls: WireToolCall[];
-}
-
-interface WireToolResultMessage {
-  role: 'tool';
-  tool_call_id: string;
-  content: string;
-}
-
-type WireMessage =
-  | { role: 'system'; content: string }
-  | { role: 'user'; content: string }
-  | { role: 'assistant'; content: string }
-  | WireToolCallMessage
-  | WireToolResultMessage;
-
-interface WireJsonSchema {
-  name: string;
-  strict: boolean;
-  schema: Record<string, unknown>;
-}
-
-interface StepRequest {
-  model: string;
-  messages: WireMessage[];
-  tools?: WireToolParam[];
-  response_format?: { type: 'json_object' };
-  /**
-   * Provider routing (ADR-005 / ADR-017 lineage): pin the provider order and
-   * whether fallbacks are allowed, so prefix-cache affinity survives across a
-   * run. Absent config → field absent (wire-compatible with providers that
-   * ignore it). Plumbed from per-tier binding config by F-64.
-   */
-  provider?: { order: string[]; allow_fallbacks: boolean };
-}
-
 type ProviderRoutingConfig = { order: string[]; allow_fallbacks: boolean };
 type SleepFn = (ms: number) => Promise<void>;
+
+/**
+ * A normalized step response the codec decoded from the provider's raw body — the
+ * single-choice message plus truncation and usage. `translateStepResponse` consumes
+ * exactly this, so it never sees a provider's own layout.
+ */
+type StepResponse = WireStepResponse;
 
 interface StepFetchParams {
   transcript: StepTranscript;
@@ -341,23 +240,6 @@ interface MalformedStepRetryParams {
   outputSchema: Record<string, unknown> | undefined;
   incidents: TransportIncident[];
   firstResponse: StepResponse;
-}
-
-interface StepChoiceMessage {
-  role: string;
-  content: string | null;
-  tool_calls?: WireToolCall[];
-}
-
-interface StepChoice {
-  message: StepChoiceMessage;
-  /** Provider truncation signal: 'length' means the output was cut off mid-stream. */
-  finish_reason?: string;
-}
-
-interface StepResponse {
-  choices: StepChoice[];
-  usage?: ChatUsage;
 }
 
 // ---------------------------------------------------------------------------
@@ -393,136 +275,6 @@ class TransportError extends Error {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Request shaping: pure function (StepTranscript, ToolDef[], model) -> wire body
-// ---------------------------------------------------------------------------
-
-/**
- * Build the OpenAI-compatible chat-completions request body for one step.
- * Pure and deterministic: given the same inputs in the same order, produces
- * byte-identical JSON serialization (prefix stability).
- *
- * Transcript mapping:
- * - 'context' role: first message → system; subsequent → user
- * - 'assistant' with toolCalls → assistant with tool_calls[]
- * - 'assistant' with no toolCalls → plain assistant content message
- * - 'tool' → role:'tool' with tool_call_id
- *
- * Provider routing (F-64 / ADR-005): when `providerConfig` is supplied, it is
- * included as the `provider` field on the wire body, pinning the provider order
- * and cache-affinity setting for this tier's requests. Absent → field omitted
- * (wire-compatible: providers that do not understand the field ignore it).
- */
-function buildStepRequest(
-  transcript: StepTranscript,
-  tools: ToolDef[],
-  model: string,
-  outputSchema?: Record<string, unknown>,
-  providerConfig?: { order: string[]; allow_fallbacks: boolean },
-): StepRequest {
-  let contextCount = 0;
-  const messages: WireMessage[] = [];
-  // On a TOOL-LESS request (the dedicated emit call), tool machinery must not
-  // appear in the messages either: assistant `tool_calls` turns and tool-role
-  // results sent with no `tools` defined is a shape providers' chat templating
-  // wedges on — the emit hung at every tier across live-tail runs 1–15 while
-  // the same transcript's tool-bearing exploration steps completed fine
-  // (isolated by elimination: schema flattening, strict:false, and json_object
-  // each left the hang in place). Render the history as plain text instead, so
-  // the provider sees an ordinary chat.
-  const plainTextHistory = tools.length === 0;
-
-  for (const msg of transcript) {
-    if (msg.role === 'context') {
-      if (contextCount === 0) {
-        messages.push({ role: 'system', content: msg.content });
-      } else {
-        messages.push({ role: 'user', content: msg.content });
-      }
-      contextCount++;
-    } else if (msg.role === 'assistant') {
-      if (msg.toolCalls && msg.toolCalls.length > 0) {
-        if (plainTextHistory) {
-          const callsText = msg.toolCalls
-            .map((tc) => `${tc.name}(${JSON.stringify(tc.args)})`)
-            .join(', ');
-          messages.push({
-            role: 'assistant',
-            content: `${msg.content}\n[called tools: ${callsText}]`.trim(),
-          });
-        } else {
-          const wireCalls: WireToolCall[] = msg.toolCalls.map((tc) => ({
-            id: tc.id,
-            type: 'function' as const,
-            function: {
-              name: tc.name,
-              arguments: JSON.stringify(tc.args),
-            },
-          }));
-          messages.push({
-            role: 'assistant',
-            content: msg.content,
-            tool_calls: wireCalls,
-          });
-        }
-      } else {
-        messages.push({ role: 'assistant', content: msg.content });
-      }
-    } else {
-      if (plainTextHistory) {
-        messages.push({
-          role: 'user',
-          content: `[tool result ${msg.callId}]\n${msg.content}`,
-        });
-      } else {
-        messages.push({
-          role: 'tool',
-          tool_call_id: msg.callId,
-          content: msg.content,
-        });
-      }
-    }
-  }
-
-  const wireTools: WireToolParam[] = tools.map((t) => ({
-    type: 'function',
-    function: {
-      name: t.name,
-      description: t.description,
-      parameters: t.parameters,
-    },
-  }));
-
-  // Apply a response_format ONLY on a tool-less step (the dedicated emit
-  // call). Sending an output-schema grammar AND tools on the same request is a
-  // contradiction — "your message must match the criteria schema" vs "call a
-  // tool" — which providers handle inconsistently and which wedges/hangs the
-  // request (run ee51401d). During exploration the model is free to call tools
-  // or return a plain message.
-  //
-  // The mode is the lightweight `json_object`, NOT a `json_schema` grammar:
-  // schema-constrained decode over a long step-loop prefill (tool-call history,
-  // ~19 steps) hangs these providers outright at every tier, strict or not
-  // (live-tail runs 13–14 isolated this; runs 1–12 died the same way). The
-  // SCHEMA travels in the emit instruction text instead (step-loop-emit pushes
-  // it into the transcript), and the deterministic gate (criteriaWellFormed
-  // et al.) remains the real validator — a malformed emit takes the normal
-  // retry path instead of a provider hang.
-  const responseFormat: StepRequest['response_format'] =
-    outputSchema !== undefined && wireTools.length === 0 ? { type: 'json_object' } : undefined;
-
-  return {
-    model,
-    messages,
-    // Omit an EMPTY tools array: providers disagree on `tools: []` (some
-    // reject, some misbehave when tool history is present with no tools).
-    ...(wireTools.length > 0 ? { tools: wireTools } : {}),
-    ...(responseFormat !== undefined ? { response_format: responseFormat } : {}),
-    // Provider routing: include only when per-tier config is present (F-64 / ADR-005).
-    // Absent config → field absent → wire-compatible with providers that ignore it.
-    ...(providerConfig !== undefined ? { provider: providerConfig } : {}),
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Response translation: wire StepResponse -> StepOutput
@@ -532,22 +284,21 @@ function buildStepRequest(
  * Translate a wire step response into a StepOutput.
  * Returns null when the tool_calls are malformed (caller issues re-prompt).
  */
-/** The provider's `finish_reason` for the first choice, if present. */
+/** Whether the provider signalled a length cutoff on this (normalized) response. */
 function firstFinishReason(response: StepResponse): string | undefined {
-  return response.choices[0]?.finish_reason;
+  // The normalized shape carries a boolean `truncated`; map it back to the
+  // provider-agnostic 'length' token the callers already test for.
+  return response.truncated ? 'length' : undefined;
 }
 
 function translateStepResponse(
   response: StepResponse,
   incidents?: TransportIncident[],
 ): StepOutput | null {
-  const choice = response.choices[0];
-  if (!choice) throw new Error('LLM step returned no choices');
-
-  const usage = readUsage(response);
+  const usage = response.usage;
   const incidentField = incidents && incidents.length > 0 ? { incidents } : {};
 
-  const toolCalls = choice.message.tool_calls;
+  const toolCalls = response.message.toolCalls;
   if (toolCalls && toolCalls.length > 0) {
     const calls: ToolCall[] = [];
     for (const wc of toolCalls) {
@@ -560,14 +311,14 @@ function translateStepResponse(
         // args; an unstripped token either breaks this JSON.parse or rides inside
         // a string value into the persisted artifact, failing a downstream
         // JSON parse (run live-self-a6963719: `<｜DSML｜…` failed diveAnchorCheck).
-        args = JSON.parse(stripControlTokens(wc.function.arguments)) as Record<string, unknown>;
+        args = JSON.parse(stripControlTokens(wc.argumentsJson)) as Record<string, unknown>;
       } catch (_e) {
         return null;
       }
       if (typeof args !== 'object' || args === null || Array.isArray(args)) {
         return null;
       }
-      calls.push({ id: wc.id, name: normalizeToolName(wc.function.name), args });
+      calls.push({ id: wc.id, name: normalizeToolName(wc.name), args });
     }
     return { kind: 'tool-calls', calls, usage, ...incidentField };
   }
@@ -579,7 +330,7 @@ function translateStepResponse(
   // diveAnchorCheck). These tokens are never legitimate output — strip them here so
   // the clean artifact flows to every consumer (the deterministic gates parse the
   // artifact directly, not through stripJsonEnvelope).
-  const content = stripControlTokens(choice.message.content ?? '');
+  const content = stripControlTokens(response.message.content ?? '');
   const files = parseFileBlocks(content);
   const artifact: Artifact =
     files.length > 0 ? { kind: 'files', files } : { kind: 'text', text: content };
@@ -601,9 +352,10 @@ export function normalizeToolName(raw: string): string {
   return match ? match[0] : raw;
 }
 
-function parseStepResponseBody(bodyText: string): StepResponse {
+function parseStepResponseBody(bodyText: string, wire: ProviderWire): StepResponse {
+  let raw: unknown;
   try {
-    return JSON.parse(bodyText) as StepResponse;
+    raw = JSON.parse(bodyText);
   } catch {
     // The HTTP RESPONSE ENVELOPE (not model output) failed to parse — a proxy
     // error page, a cut stream, provider garbage. That is a transport incident:
@@ -616,6 +368,8 @@ function parseStepResponseBody(bodyText: string): StepResponse {
         `stream). Body length: ${bodyText.length}.`,
     );
   }
+  // Normalize the provider's raw body into the codec-agnostic WireStepResponse.
+  return wire.decodeStep(raw);
 }
 
 function isTimeoutError(err: unknown): boolean {
@@ -698,7 +452,7 @@ function mergeMalformedStepRetry(
   repromptResult: StepOutput,
   incidents: TransportIncident[],
 ): StepOutput {
-  const firstUsage = readUsage(firstResponse);
+  const firstUsage = firstResponse.usage;
   const mergedUsage: Usage = {
     promptTokens: firstUsage.promptTokens + repromptUsage.promptTokens,
     completionTokens: firstUsage.completionTokens + repromptUsage.completionTokens,
@@ -1328,7 +1082,12 @@ export class LlmBrain implements Brain {
         : this.config.apiKey;
     const provider = spec.provider ?? this.config.providerByTier?.[tier];
     const requestTimeoutMs = spec.requestTimeoutMs ?? requestTimeoutMsForTier(this.config, tier);
-    return { model: spec.id, baseUrl, apiKey, provider, requestTimeoutMs };
+    // The spec's `wire` selects the provider dialect: 'anthropic' → the Messages
+    // API codec (direct api.anthropic.com), anything else → the default OpenAI
+    // chat-completions codec. A spec with no `wire` is unchanged from before the
+    // codec seam existed (openAiWire, byte-identical requests).
+    const wire = spec.wire === 'anthropic' ? anthropicWire : openAiWire;
+    return { model: spec.id, baseUrl, apiKey, provider, requestTimeoutMs, wire };
   }
 
   /**
@@ -1365,17 +1124,10 @@ export class LlmBrain implements Brain {
     jsonMode: boolean | { schemaName: string; schema: Record<string, unknown> },
   ): Promise<{ content: string; usage: Usage; truncated?: boolean }> {
     const fetchFn = this.config.fetchImpl ?? globalThis.fetch;
-    const responseFormat: ChatRequest['response_format'] =
-      jsonMode === false
-        ? undefined
-        : jsonMode === true
-          ? { type: 'json_object' }
-          : { type: 'json_schema', json_schema: { name: jsonMode.schemaName, strict: false, schema: jsonMode.schema } };
-    const body: ChatRequest = {
-      model: target.model,
-      messages,
-      ...(responseFormat !== undefined ? { response_format: responseFormat } : {}),
-    };
+    // Encode the request through the target's provider codec (OpenAI or Anthropic).
+    const body = target.wire.encodeCompletion({ model: target.model, messages, jsonMode });
+    const url = target.wire.url(target.baseUrl);
+    const headers = target.wire.headers(target.apiKey, this.config.headers);
     const sleepFn = this.config.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     const MAX_RETRIES = 3;
     // Retry transient transport failures the same way the step path does. The
@@ -1387,13 +1139,9 @@ export class LlmBrain implements Brain {
     let attempt = 0;
     while (true) {
       try {
-        const response = await fetchFn(`${target.baseUrl}/chat/completions`, {
+        const response = await fetchFn(url, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${target.apiKey}`,
-            ...this.config.headers,
-          },
+          headers,
           body: JSON.stringify(body),
           // Abort a hung request → falls into the retry below.
           signal: AbortSignal.timeout(target.requestTimeoutMs),
@@ -1408,10 +1156,9 @@ export class LlmBrain implements Brain {
           }
           throw new Error(`LLM request failed (${response.status}): ${text}`);
         }
-        const data = (await response.json()) as ChatResponse;
-        const content = data.choices[0]?.message?.content ?? '';
-        const truncated = data.choices[0]?.finish_reason === 'length';
-        return { content, usage: readUsage(data), truncated };
+        const data: unknown = await response.json();
+        const decoded = target.wire.decodeCompletion(data);
+        return { content: decoded.content, usage: decoded.usage, truncated: decoded.truncated };
       } catch (err) {
         // Network-level failure (ECONNRESET, timeout) on the fetch or body read.
         // A TransportError we already chose to rethrow above is terminal — let it out.
@@ -1953,13 +1700,13 @@ export class LlmBrain implements Brain {
    */
   private async fetchStepResponse(params: StepFetchParams): Promise<StepResponse> {
     const sleepFn = this.config.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-    const requestBody = buildStepRequest(
-      params.transcript,
-      params.tools,
-      params.target.model,
-      params.outputSchema,
-      params.target.provider,
-    );
+    const requestBody = params.target.wire.encodeStep({
+      model: params.target.model,
+      transcript: params.transcript,
+      tools: params.tools,
+      outputSchema: params.outputSchema,
+      provider: params.target.provider,
+    });
     let attempt = 0;
 
     while (true) {
@@ -1990,7 +1737,7 @@ export class LlmBrain implements Brain {
           }
           throw stepTransportError(bodyErr, isTimeoutError(bodyErr));
         }
-        return parseStepResponseBody(bodyText);
+        return parseStepResponseBody(bodyText, params.target.wire);
       }
 
       const httpError = await retryHttpStepRequest(params.transportIncidents, sleepFn, attempt, response);
@@ -2012,13 +1759,13 @@ export class LlmBrain implements Brain {
     params.incidents.push({ kind: 'malformation-reprompt', detail: malformDetail, at: Date.now() });
 
     const correctedTranscript = buildMalformedStepTranscript(params.transcript, malformDetail);
-    const repromptBody = buildStepRequest(
-      correctedTranscript,
-      params.tools,
-      params.target.model,
-      params.outputSchema,
-      params.target.provider,
-    );
+    const repromptBody = params.target.wire.encodeStep({
+      model: params.target.model,
+      transcript: correctedTranscript,
+      tools: params.tools,
+      outputSchema: params.outputSchema,
+      provider: params.target.provider,
+    });
     const repromptResponse = await this.postStepRequest(repromptBody, params.target);
 
     if (!repromptResponse.ok) {
@@ -2026,8 +1773,9 @@ export class LlmBrain implements Brain {
       throw new TransportError(repromptResponse.status, errorText);
     }
 
-    const repromptWire = (await repromptResponse.json()) as StepResponse;
-    const repromptUsage = readUsage(repromptWire);
+    const repromptRaw: unknown = await repromptResponse.json();
+    const repromptWire = params.target.wire.decodeStep(repromptRaw);
+    const repromptUsage = repromptWire.usage;
     const repromptResult = translateStepResponse(repromptWire, params.incidents);
 
     if (repromptResult === null) {
@@ -2045,15 +1793,11 @@ export class LlmBrain implements Brain {
     return mergeMalformedStepRetry(params.firstResponse, repromptWire, repromptUsage, repromptResult, params.incidents);
   }
 
-  private async postStepRequest(requestBody: StepRequest, target: ResolvedModel): Promise<Response> {
+  private async postStepRequest(requestBody: unknown, target: ResolvedModel): Promise<Response> {
     const fetchFn = this.config.fetchImpl ?? globalThis.fetch;
-    return fetchFn(`${target.baseUrl}/chat/completions`, {
+    return fetchFn(target.wire.url(target.baseUrl), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${target.apiKey}`,
-        ...this.config.headers,
-      },
+      headers: target.wire.headers(target.apiKey, this.config.headers),
       body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(target.requestTimeoutMs),
     });
