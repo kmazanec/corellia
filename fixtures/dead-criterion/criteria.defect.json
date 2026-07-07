@@ -1,0 +1,14 @@
+{
+  "criteria": [
+    {
+      "id": "tests-pass",
+      "claim": "The unit test suite passes.",
+      "check": { "script": "vitest run --coverage" }
+    },
+    {
+      "id": "readme-documents-auth",
+      "claim": "The README documents authentication.",
+      "check": { "file": "README.md", "anchor": "## Authentication" }
+    }
+  ]
+}

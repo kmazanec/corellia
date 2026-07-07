@@ -1,0 +1,13 @@
+{
+  "kind": "files",
+  "files": [
+    {
+      "path": "src/billing/invoice.ts",
+      "content": "export function total(lines: number[]): number {\n  return lines.reduce((sum, n) => sum + n, 0);\n}\n"
+    },
+    {
+      "path": "src/billing/tax.ts",
+      "content": "export function withTax(amount: number, rate: number): number {\n  return amount * (1 + rate);\n}\n"
+    }
+  ]
+}

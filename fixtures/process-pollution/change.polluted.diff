@@ -1,0 +1,12 @@
+diff --git a/src/greeting.ts b/src/greeting.ts
+index 1111111..2222222 100644
+--- a/src/greeting.ts
++++ b/src/greeting.ts
+@@ -1,3 +1,7 @@
+ export function greet(name: string): string {
+   return `Hello, ${name}!`;
+ }
++
++// Ported from branch tree/9f3c1a2b as part of the improve-factory goal.
++// Format a farewell for the given name.
++export const farewell = (name: string): string => `Goodbye, ${name}.`;
