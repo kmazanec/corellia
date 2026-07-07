@@ -16,10 +16,12 @@
  *   patterns   list split memos with their trust plane and recurrence/outcome stats.
  *   trust      promote a memo provisional → trusted (the authority gap; --by required).
  *   distrust   demote a memo trusted → provisional (deliberate; --by required).
+ *   conform    replay a run's log and assert its runtime conduct invariants.
  */
 
 import { parseLogsArgs, runLogs, type LogsConsole } from '../src/eventlog/logs-cli.js';
 import { parseLabelArgs, runLabel } from '../src/eventlog/label-cli.js';
+import { parseConformArgs, runConform } from '../src/eventlog/conform-cli.js';
 import { parseCalibrateArgs, runCalibrate } from '../src/eval/golden/calibrate-cli.js';
 import { parseTrustArgs, runTrust, runPatternsList } from '../src/eventlog/patterns-cli.js';
 import { buildStore, buildPatternStore } from '../src/daemon/config.js';
@@ -32,7 +34,7 @@ const io: LogsConsole = {
 
 const [command, ...rest] = process.argv.slice(2);
 
-const COMMANDS = 'logs, label, calibrate, patterns, trust, distrust';
+const COMMANDS = 'logs, label, calibrate, patterns, trust, distrust, conform';
 
 /**
  * Open the event store and the pattern store on the daemon's substrate (Pg when
@@ -91,6 +93,10 @@ async function main(): Promise<number> {
       return withStores(({ store, patterns }) =>
         runTrust('provisional', parseTrustArgs(rest), patterns, store, io),
       );
+    case 'conform': {
+      const { code } = await runConform(parseConformArgs(rest), io, process.env);
+      return code;
+    }
     case undefined:
       io.error('corellia: no command given');
       io.error(`  commands: ${COMMANDS}`);
