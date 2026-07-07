@@ -383,6 +383,40 @@ describe('assembly — knowledge wiring', () => {
     }
   });
 
+  it('always registers web_fetch in the broker; web_search only when a provider is configured', async () => {
+    const repo = makeTempRepo();
+    const store = new MemoryEventStore();
+    const registry = buildRegistry([implType([])]);
+
+    const prev = process.env['WEB_SEARCH_URL'];
+    delete process.env['WEB_SEARCH_URL'];
+    try {
+      const noSearch = await openSandboxAssembly(
+        { repoRoot: repo, declaredScripts: {} },
+        'g-nosearch',
+        registry,
+        store,
+      );
+      const noSearchDefs = (noSearch.broker as unknown as { defs(): { name: string }[] }).defs().map((d) => d.name);
+      expect(noSearchDefs).toContain('web_fetch');
+      expect(noSearchDefs).not.toContain('web_search');
+
+      process.env['WEB_SEARCH_URL'] = 'https://search.example/?q={query}';
+      const withSearch = await openSandboxAssembly(
+        { repoRoot: repo, declaredScripts: {} },
+        'g-search',
+        registry,
+        store,
+      );
+      const withSearchDefs = (withSearch.broker as unknown as { defs(): { name: string }[] }).defs().map((d) => d.name);
+      expect(withSearchDefs).toContain('web_fetch');
+      expect(withSearchDefs).toContain('web_search');
+    } finally {
+      if (prev === undefined) delete process.env['WEB_SEARCH_URL'];
+      else process.env['WEB_SEARCH_URL'] = prev;
+    }
+  });
+
   it('rebindKnowledgeScan replaces the no-op map-repo scanner with a real one', () => {
     const before = starterTypes().find((t) => t.name === 'map-repo')!;
     const beforeCheck = before.deterministic.find((c) => c.name === 'knowledge:map-repo')!;

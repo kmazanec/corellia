@@ -140,6 +140,12 @@ export const GRANT_TOOL_MAP = {
   // The issue-filing capability (ADR-034): a brokered write tool scoped to
   // docs/issues/, available to any goal type that holds the grant.
   file_issue: ['docs.issues.write'],
+  // The research-family web tools (issue: web-fetch-tool): an https-only,
+  // SSRF-vetted GET (web_fetch) and an optional env-configured search
+  // (web_search). Held only by the research/diagnose family (research-external);
+  // a build-family goal naming them is refused here before any request is made.
+  web_fetch: ['web.fetch'],
+  web_search: ['web.search'],
   // Runtime/visual capture (ADR-042): running a declared capture starts servers
   // and writes image/response files — side effects above the judge/learn/evolve
   // ceiling, so the constitution confines this grant to make-kind types.

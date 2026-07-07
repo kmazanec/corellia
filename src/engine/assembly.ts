@@ -32,6 +32,7 @@ import {
 } from '../library/script-runner.js';
 import { pushBranchTool, openPrTool, type FetchTransport } from './pr-tools.js';
 import { fileIssueTool } from './issue-tools.js';
+import { webTools } from './web-tools.js';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
@@ -334,6 +335,14 @@ export async function openSandboxAssembly(
   // OKF frontmatter and refuses duplicate slugs.
   const issueTool = fileIssueTool(root);
 
+  // ── Web tools (issue: web-fetch-tool) ──────────────────────────────
+  // web_fetch (always) and web_search (only when a provider is env-configured),
+  // for research-family leaves spawned into this tree (e.g. research-external
+  // under investigate). Grant enforcement (web.fetch / web.search) is the
+  // broker's job via GRANT_TOOL_MAP — registering them here does not grant them
+  // to a type that lacks the grant, so a build leaf calling web_fetch is refused.
+  const webToolImpls = webTools();
+
   const broker = new Broker({
     root,
     registry,
@@ -351,6 +360,7 @@ export async function openSandboxAssembly(
       ...knowledgeTools,
       ...prTools,
       issueTool,
+      ...webToolImpls,
     ],
   });
 
@@ -420,6 +430,13 @@ export function openLearnAssembly(
     : [];
 
   // Read-only broker: writeFile and runScriptImpl are intentionally absent.
+  // The web tools are registered (issue: web-fetch-tool) so a research-external
+  // ROOT — which runs here, not under a sandboxed parent — can actually fetch.
+  // web_fetch reaches OUT to public https only (SSRF-vetted); it does not write
+  // the repo, so it stays within a read-only learn root's posture. Grant
+  // enforcement (web.fetch) still gates it per calling goal-type.
+  const webToolImpls = webTools();
+
   const broker = new Broker({
     root,
     registry,
@@ -429,6 +446,7 @@ export function openLearnAssembly(
       fileTools.listDir,
       fileTools.search,
       ...knowledgeTools,
+      ...webToolImpls,
     ],
   });
 
