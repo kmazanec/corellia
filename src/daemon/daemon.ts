@@ -30,6 +30,7 @@ import { Listener } from '../listener/listener.js';
 import { preserveTree, sanitizeTreeId } from '../engine/worktree.js';
 import type { Engine } from '../engine/engine.js';
 import { FrontDoorServer } from './http-server.js';
+import { maybeStartRepl } from './repl.js';
 import { buildStore, buildStandingEnvelope } from './config.js';
 import { buildLiveEngine, deriveRepoSlug } from './live-engine.js';
 import { join } from 'node:path';
@@ -143,8 +144,9 @@ function selectEngine(): Engine {
 
 /**
  * The daemon instantiates exactly ONE Listener. Both the HTTP server and the
- * REPL mode (when enabled) route through this same instance — there is no
- * second Listener anywhere in the process (ADR-008 invariant).
+ * REPL mode (when enabled via CORELLIA_REPL=1 on a TTY) route through this same
+ * instance — there is no second Listener anywhere in the process (ADR-008
+ * invariant).
  */
 const listener = new Listener({ engine: selectEngine(), store });
 
@@ -163,6 +165,15 @@ const server = new FrontDoorServer({ listener, token });
  */
 const tickMs = parseInt(process.env['CORELLIA_TICK_MS'] ?? '5000', 10);
 let tickTimer: ReturnType<typeof setInterval> | undefined;
+
+// ── REPL (opt-in local surface — ADR-026) ─────────────────────────────────────
+
+/**
+ * The interactive REPL handle, present only when CORELLIA_REPL=1 AND stdin is a
+ * TTY (see maybeStartRepl). Held so SIGTERM can close it; undefined on the
+ * default headless/container path.
+ */
+let repl: ReturnType<typeof maybeStartRepl>;
 
 function startTick(): void {
   tickTimer = setInterval(() => {
@@ -203,6 +214,11 @@ async function onSigterm(): Promise<void> {
   // Stop the periodic tick immediately.
   if (tickTimer !== undefined) {
     clearInterval(tickTimer);
+  }
+
+  // Close the interactive REPL if one is running (no-op on the headless path).
+  if (repl !== undefined) {
+    repl.close();
   }
 
   const status = listener.status();
@@ -258,6 +274,11 @@ async function start(): Promise<void> {
 
   await server.listen(port, host);
   startTick();
+
+  // Opt-in interactive REPL: shares the single Listener, never blocks startup,
+  // and is off on every headless/container run (default; requires CORELLIA_REPL=1
+  // on a TTY). A REPL start failure is swallowed inside maybeStartRepl.
+  repl = maybeStartRepl({ listener });
 
   console.log(`[daemon] front door listening on ${host}:${server.port}`);
   console.log(`[daemon] substrate: ${process.env['DATABASE_URL'] ? 'postgres' : 'jsonl'}`);

@@ -21,6 +21,45 @@ import { createInterface, type Interface } from 'node:readline';
 import type { Listener } from '../listener/listener.js';
 import type { CommissionInput, FrontDoorStatus } from '../contract/brief.js';
 
+// ── Opt-in gate ────────────────────────────────────────────────────────────────
+
+/**
+ * Whether the daemon should start the interactive REPL. Opt-in and double-gated
+ * so headless and container runs are never affected: it starts ONLY when the
+ * operator explicitly set `CORELLIA_REPL=1` AND stdin is an interactive terminal.
+ * A container/CI/piped run (stdin not a TTY) keeps the REPL off even with the
+ * flag set, so the headless path is byte-for-byte unchanged. Default off.
+ */
+export function replEnabled(params: { env: Record<string, string | undefined>; stdinIsTTY: boolean }): boolean {
+  return params.env['CORELLIA_REPL'] === '1' && params.stdinIsTTY === true;
+}
+
+/**
+ * Start the REPL iff {@link replEnabled}, sharing the daemon's single Listener
+ * (ADR-008). Returns the readline Interface when started, else undefined. Wrapped
+ * so a REPL start can never throw into — or block — daemon startup: any failure
+ * is logged and swallowed, and the HTTP front door stays up regardless.
+ */
+export function maybeStartRepl(opts: ReplOptions & {
+  env?: Record<string, string | undefined>;
+  stdinIsTTY?: boolean;
+  log?: (msg: string) => void;
+}): Interface | undefined {
+  const env = opts.env ?? process.env;
+  const stdinIsTTY = opts.stdinIsTTY ?? process.stdin.isTTY === true;
+  if (!replEnabled({ env, stdinIsTTY })) return undefined;
+  try {
+    const rl = startRepl(opts);
+    (opts.log ?? ((m) => console.log(m)))('[daemon] REPL enabled (CORELLIA_REPL=1, stdin is a TTY)');
+    return rl;
+  } catch (err) {
+    (opts.log ?? ((m) => console.log(m)))(
+      `[daemon] REPL failed to start (${err instanceof Error ? err.message : String(err)}); continuing headless`,
+    );
+    return undefined;
+  }
+}
+
 // ── Response helpers ──────────────────────────────────────────────────────────
 
 function jsonLine(obj: unknown): string {
