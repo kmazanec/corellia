@@ -4,6 +4,7 @@ import type { Budget, Goal } from '../contract/goal.js';
 import type { GoalTypeDef } from '../contract/goal-type.js';
 import type { ToolBroker, ToolCall } from '../contract/tool.js';
 import {
+  readWithoutEmitSteer,
   shouldNudgeReadWithoutWrite,
   readWithoutWriteNudge,
 } from './make-progress-nudge.js';
@@ -26,6 +27,7 @@ export interface StepToolRoutingState {
   writeCalls: number;
   /** Whether the read-without-write nudge has already fired this attempt. */
   readWithoutWriteNudged: boolean;
+  readWithoutEmitNudges: number;
 }
 
 export type StepToolRoutingResult =
@@ -114,6 +116,17 @@ export async function routeStepToolCalls(params: StepToolRoutingParams): Promise
   ) {
     state.readWithoutWriteNudged = true;
     params.transcript.push({ role: 'context', content: readWithoutWriteNudge(state.readCalls) });
+  }
+
+  const emitSteer = readWithoutEmitSteer({
+    isExploreThenEmit: params.isExploreThenEmit,
+    exploreReadCalls: state.exploreReadCalls,
+    nudgesSent: state.readWithoutEmitNudges,
+    scope: params.goal.scope,
+  });
+  if (emitSteer !== null) {
+    state.readWithoutEmitNudges++;
+    params.transcript.push({ role: 'context', content: emitSteer });
   }
 
   return { kind: 'routed', state };

@@ -67,6 +67,7 @@ export async function runStepLoop(params: {
     readCalls,
     writeCalls,
     readWithoutWriteNudged,
+    readWithoutEmitNudges,
     totalTokensUsed,
     toolBudgetWarned,
     forceEmitNext,
@@ -255,6 +256,7 @@ export async function runStepLoop(params: {
         readCalls,
         writeCalls,
         readWithoutWriteNudged,
+        readWithoutEmitNudges,
       },
     });
     if (routing.kind === 'exhausted') {
@@ -267,6 +269,7 @@ export async function runStepLoop(params: {
       readCalls,
       writeCalls,
       readWithoutWriteNudged,
+      readWithoutEmitNudges,
     } = routing.state);
   }
 }

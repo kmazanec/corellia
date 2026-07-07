@@ -16,6 +16,7 @@ export interface StepLoopCounters {
   readCalls: number;
   writeCalls: number;
   readWithoutWriteNudged: boolean;
+  readWithoutEmitNudges: number;
   totalTokensUsed: number;
   toolBudgetWarned: boolean;
   forceEmitNext: boolean;
@@ -72,6 +73,7 @@ export function createStepLoopSession(params: {
       readCalls: 0,
       writeCalls: 0,
       readWithoutWriteNudged: false,
+      readWithoutEmitNudges: 0,
       totalTokensUsed: 0,
       toolBudgetWarned: false,
       forceEmitNext: false,
