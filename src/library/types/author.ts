@@ -38,6 +38,7 @@ export function authorTypes(): GoalTypeDef[] {
       // scope is what left this leaf with no anchor and let it read 140 files of the
       // whole repo (run 9e035402; ADR-039).
       requiresScope: true,
+      mintsAcceptanceChecks: true,
     },
 
     /**

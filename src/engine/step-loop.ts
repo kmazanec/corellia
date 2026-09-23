@@ -14,6 +14,7 @@ import { createStepLoopSession } from './step-loop-session.js';
 import { recordStepOutput } from './step-loop-step.js';
 import { boundStepLoopTranscript } from './step-loop-transcript.js';
 import type { StepLoopResult } from './step-loop-result.js';
+import type { CheckVocabulary } from './leaf-grounding.js';
 
 export async function runStepLoop(params: {
   goal: Goal;
@@ -25,6 +26,8 @@ export async function runStepLoop(params: {
   sandboxRepoRoot: string | undefined;
   priorTranscript: StepTranscript | undefined;
   priorRejectionReasons: string[] | undefined;
+  /** The tree's declared check names, for types that mint acceptance checks. */
+  checkVocabulary?: CheckVocabulary;
   brain: Brain;
   store: EventStore;
   now: () => number;
@@ -48,6 +51,7 @@ export async function runStepLoop(params: {
     sandboxRepoRoot: params.sandboxRepoRoot,
     priorTranscript: params.priorTranscript,
     priorRejectionReasons: params.priorRejectionReasons,
+    ...(params.checkVocabulary !== undefined ? { checkVocabulary: params.checkVocabulary } : {}),
   });
   const {
     tools,
@@ -57,6 +61,7 @@ export async function runStepLoop(params: {
     callKeyByCallId,
     readOutputCache,
     isExploreThenEmit,
+    grounding,
     hardToolCallCap,
   } = session;
   let {
@@ -245,6 +250,7 @@ export async function runStepLoop(params: {
       now: params.now,
       enforceToolCallBudget: params.enforceToolCallBudget,
       isExploreThenEmit,
+      grounding,
       typeDef: params.typeDef,
       seenCalls,
       callKeyByCallId,

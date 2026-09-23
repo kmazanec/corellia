@@ -174,6 +174,13 @@ export interface GoalTypeDef {
    */
   requiresScope?: boolean;
   /**
+   * Whether this type authors runnable acceptance checks (ADR-032). Its step loop
+   * is shown the tree's declared check vocabulary — the script and capture names
+   * a `{ script }` / `{ capture }` check may reference — because those names live
+   * in the tree's configuration, not in any file the leaf could read.
+   */
+  mintsAcceptanceChecks?: boolean;
+  /**
    * When present, this type's SPLIT dispatch arm routes through the milestone
    * loop (`runMilestone`) instead of the single-pass `runSplit` (ADR-031). The
    * type re-decides against a frozen acceptance-criteria done-condition each

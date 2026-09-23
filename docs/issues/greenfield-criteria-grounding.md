@@ -3,8 +3,8 @@ type: issue
 title: "author-acceptance-criteria cannot ground criteria for a greenfield/empty-scope deliverable and explores unboundedly"
 description: For a goal whose scope is an empty directory (greenfield CLI), the criteria leaf reads the host repo 50-90+ steps searching for anchors that cannot exist yet, never emits, and runs out the tree deadline — six daemon proof runs, zero criteria frozen, while the implement leaf built and judge-passed the same deliverable in ~2 minutes. Criteria authoring needs a greenfield mode grounded in the spec, not the repo.
 tags: [engine, acceptance-criteria, milestone-loop, greenfield, anchors, explore-economy, deliver-intent]
-timestamp: 2026-07-07
-status: open
+timestamp: 2026-09-23
+status: fixed-pending-live-proof
 kind: bug
 severity: high
 ---
@@ -75,3 +75,28 @@ A greenfield deliver-intent (empty scope dir) freezes runnable acceptance
 criteria within a bounded number of reads (no host-repo survey), the milestone
 loop assesses non-0/0 rounds, and the tree converges to a collected worktree /
 PR — proven via a daemon commission like proof-word-count.
+
+---
+
+> **Fixed (2026-09-23, iteration 22; pending live proof).** Diagnosis found three
+> compounding context defects rather than model stubbornness alone: the leaf
+> (`kind: 'make'`, no write grant) was told to deliver FILES with write tools it
+> did not have and nudged at 12 reads to "write the file(s) now"; it was never
+> shown the tree's declared script/capture names, which `criteriaWellFormed`
+> enforces but no file contains; and nothing told it the scope did not exist.
+> The note above that the steer skipped this type for a write grant is not borne
+> out — the type grants only `fs.read` + `retrieval.api`, so the steer applied
+> but was outvoted. Fixed in the step loop: file-writing guidance, conventions,
+> code-shape evidence, and the write nudge render only for leaves that deliver
+> files; a new `GoalTypeDef.mintsAcceptanceChecks` flag threads the CHECK
+> VOCABULARY into the criteria leaf's context; `groundScope`
+> (`src/engine/leaf-grounding.ts`) classifies an absent/empty scope as greenfield,
+> which adds a spec-is-your-ground-truth block and lowers the read-without-emit
+> steer to 6/12 reads; the skill gives the greenfield rule (file checks for files
+> the spec names, anchors only for spec-fixed literals). Sequencing criteria after
+> a walking-skeleton round was deliberately not taken (it weakens the frozen
+> round-0 done-condition). Detail:
+> [iteration 22](../iterations/2026-09-23-00-greenfield-criteria-grounding/index.md).
+> Follow-on: [daemon-declared-scripts](daemon-declared-scripts.md) — under the
+> daemon only `{ file }` criteria are legal at all.
+

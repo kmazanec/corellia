@@ -19,12 +19,19 @@ export const READ_WITHOUT_WRITE_THRESHOLD = 12;
 
 export function shouldNudgeReadWithoutWrite(params: {
   typeDef: GoalTypeDef;
+  /**
+   * An explore-then-emit make leaf has no write tools — its deliverable is the
+   * emitted artifact — so "write the files now" would steer it toward something
+   * it cannot do. It gets the read-without-emit steer instead.
+   */
+  isExploreThenEmit?: boolean;
   readCalls: number;
   writeCalls: number;
   alreadyNudged: boolean;
 }): boolean {
   return (
     params.typeDef.kind === 'make' &&
+    params.isExploreThenEmit !== true &&
     !params.alreadyNudged &&
     params.writeCalls === 0 &&
     params.readCalls >= READ_WITHOUT_WRITE_THRESHOLD
@@ -61,6 +68,13 @@ export function readWithoutWriteNudge(readCalls: number): string {
 export const READ_WITHOUT_EMIT_THRESHOLD = 16;
 
 /**
+ * The steer threshold for a greenfield leaf (its scope does not exist yet). The
+ * spec is its only ground truth, so a handful of reads is already a survey of
+ * the wrong thing — calibrating reads have nothing to calibrate against.
+ */
+export const GREENFIELD_READ_WITHOUT_EMIT_THRESHOLD = 6;
+
+/**
  * Return the steer to inject for an explore-then-emit leaf, or null when none
  * is due. `nudgesSent` counts prior injections (0, 1, or 2).
  */
@@ -69,21 +83,30 @@ export function readWithoutEmitSteer(params: {
   exploreReadCalls: number;
   nudgesSent: number;
   scope: string[];
+  /** The leaf's scope does not exist yet; the steer fires sooner and says why. */
+  greenfield?: boolean;
 }): string | null {
   if (!params.isExploreThenEmit) return null;
   const scope = params.scope.length > 0 ? params.scope.join(', ') : '(empty scope)';
-  if (params.nudgesSent === 0 && params.exploreReadCalls >= READ_WITHOUT_EMIT_THRESHOLD) {
+  const threshold =
+    params.greenfield === true ? GREENFIELD_READ_WITHOUT_EMIT_THRESHOLD : READ_WITHOUT_EMIT_THRESHOLD;
+  const greenfieldNote =
+    params.greenfield === true
+      ? ` That scope does not exist yet — no read of the host repo can ground this ` +
+        `artifact; derive it from the spec.`
+      : '';
+  if (params.nudgesSent === 0 && params.exploreReadCalls >= threshold) {
     return (
       `You have made ${params.exploreReadCalls} read-class calls without emitting. ` +
-      `Your declared scope is: ${scope}. Reading beyond what that scope requires is ` +
-      `waste — if further reading has stopped changing your answer, your next ` +
+      `Your declared scope is: ${scope}.${greenfieldNote} Reading beyond what that scope ` +
+      `requires is waste — if further reading has stopped changing your answer, your next ` +
       `message should be the final artifact.`
     );
   }
-  if (params.nudgesSent === 1 && params.exploreReadCalls >= READ_WITHOUT_EMIT_THRESHOLD * 2) {
+  if (params.nudgesSent === 1 && params.exploreReadCalls >= threshold * 2) {
     return (
       `You have now made ${params.exploreReadCalls} read-class calls without emitting — ` +
-      `twice the calibration budget for this goal's scope (${scope}). This is the final ` +
+      `twice the calibration budget for this goal's scope (${scope}).${greenfieldNote} This is the final ` +
       `steer: emit the artifact from what you already know, or raise a blocker if the ` +
       `work genuinely cannot be done. Do not keep reading.`
     );

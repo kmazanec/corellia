@@ -62,6 +62,7 @@ Each issue is one OKF `type: issue` file with `kind` (bug | idea | future-work),
 | [listener-missing-channels](listener-missing-channels.md) | future-work | listener, daemon, autonomous-seam, admission, knowledge-refresh |
 | [anthropic-direct-provider](anthropic-direct-provider.md) | idea | brain, provider, anthropic, resilience, cost |
 | [secret-value-diff-gate](secret-value-diff-gate.md) | bug | engine, deterministic-gate, secrets, security |
+| [daemon-declared-scripts](daemon-declared-scripts.md) | bug | daemon, acceptance-criteria, declared-scripts, milestone-loop |
 
 ## Factory self-hosting (meta) — the factory participates in this discipline itself
 

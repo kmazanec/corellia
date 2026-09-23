@@ -5,6 +5,12 @@ import { codeShapeHint } from '../library/code-shape.js';
 import { renderPersonaBlock } from '../library/personas.js';
 import { loadExploreEconomy, loadFamilySkill, loadSharedPreamble } from '../library/skills.js';
 import { loadHostConventions } from './host-conventions.js';
+import {
+  checkVocabularyBlock,
+  greenfieldScopeBlock,
+  type CheckVocabulary,
+  type ScopeGrounding,
+} from './leaf-grounding.js';
 
 const PRIOR_EVIDENCE_MAX_RESULTS = 8;
 const PRIOR_EVIDENCE_MAX_CHARS = 300;
@@ -13,6 +19,10 @@ export interface StepLoopInitialTranscriptInput {
   goal: Goal;
   typeDef: GoalTypeDef;
   isExploreThenEmit: boolean;
+  /** Whether the leaf's scope exists yet (a greenfield leaf is re-grounded in its spec). */
+  grounding: ScopeGrounding;
+  /** The tree's declared check names, shown to types that mint acceptance checks. */
+  checkVocabulary: CheckVocabulary | undefined;
   remainingToolCalls: number;
   sandboxRepoRoot: string | undefined;
   priorTranscript: StepTranscript | undefined;
@@ -33,14 +43,16 @@ export function buildStepLoopInitialTranscript(input: StepLoopInitialTranscriptI
         `Work the goal with the granted tools. When the work is complete, reply with the final ` +
         `artifact as your message content with no tool calls (for artifact-emitting goals, the ` +
         `content must be exactly the artifact — no preamble, no commentary).` +
-        makeArtifactBlock(input.typeDef) +
+        makeArtifactBlock(input.typeDef, input.isExploreThenEmit) +
         sandboxPathsBlock(input.sandboxRepoRoot !== undefined) +
         skillBlock(input.goal, input.typeDef) +
         exploreEconomyBlock(input.isExploreThenEmit) +
+        (input.typeDef.mintsAcceptanceChecks === true ? checkVocabularyBlock(input.checkVocabulary) : '') +
+        (input.isExploreThenEmit ? greenfieldScopeBlock(input.grounding) : '') +
         personaBlock(input.goal) +
         memoryBlock(input.goal) +
-        conventionsBlock(input.typeDef, input.sandboxRepoRoot) +
-        codeShapeBlock(input.goal, input.typeDef, input.sandboxRepoRoot) +
+        conventionsBlock(input.typeDef, input.isExploreThenEmit, input.sandboxRepoRoot) +
+        codeShapeBlock(input.goal, input.typeDef, input.isExploreThenEmit, input.sandboxRepoRoot) +
         priorRejectionBlock(input.priorRejectionReasons) +
         priorEvidenceBlock(input.priorTranscript),
     },
@@ -51,8 +63,17 @@ export function buildStepLoopInitialTranscript(input: StepLoopInitialTranscriptI
   ];
 }
 
-function makeArtifactBlock(typeDef: GoalTypeDef): string {
-  if (typeDef.kind !== 'make') {
+/**
+ * Whether the leaf delivers FILES: a make goal that writes. An explore-then-emit
+ * make leaf (structured output, no write grant) delivers its emitted artifact
+ * instead, so file-writing guidance and code-craft context would contradict it.
+ */
+function deliversFiles(typeDef: GoalTypeDef, isExploreThenEmit: boolean): boolean {
+  return typeDef.kind === 'make' && !isExploreThenEmit;
+}
+
+function makeArtifactBlock(typeDef: GoalTypeDef, isExploreThenEmit: boolean): string {
+  if (!deliversFiles(typeDef, isExploreThenEmit)) {
     return '';
   }
   // A make goal's artifact IS the files it creates or modifies, emitted as fenced
@@ -107,8 +128,12 @@ function memoryBlock(goal: Goal): string {
     goal.memories.map((memory) => `- [${memory.provenance}] ${memory.content}`).join('\n');
 }
 
-function conventionsBlock(typeDef: GoalTypeDef, sandboxRepoRoot: string | undefined): string {
-  if (typeDef.kind !== 'make') {
+function conventionsBlock(
+  typeDef: GoalTypeDef,
+  isExploreThenEmit: boolean,
+  sandboxRepoRoot: string | undefined,
+): string {
+  if (!deliversFiles(typeDef, isExploreThenEmit)) {
     return '';
   }
 
@@ -124,9 +149,10 @@ function conventionsBlock(typeDef: GoalTypeDef, sandboxRepoRoot: string | undefi
 function codeShapeBlock(
   goal: Goal,
   typeDef: GoalTypeDef,
+  isExploreThenEmit: boolean,
   sandboxRepoRoot: string | undefined,
 ): string {
-  if (typeDef.kind !== 'make' || sandboxRepoRoot === undefined) {
+  if (!deliversFiles(typeDef, isExploreThenEmit) || sandboxRepoRoot === undefined) {
     return '';
   }
 
