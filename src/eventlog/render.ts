@@ -122,6 +122,8 @@ export function describeEvent(e: FactoryEvent): string | null {
       const out = e.files.filter((f) => !f.inScope).length;
       return `files-touched: ${e.files.length} file(s)${out > 0 ? `, ${out} OUT OF SCOPE` : ', all in scope'}`;
     }
+    case 'scope-escaped':
+      return `scope-escaped (${e.source}): ${e.paths.length} path(s) OUT OF SCOPE — ${e.paths.join(', ')}`;
     case 'partial-delivered':
       return `partial-delivered: shipped green subtree, ${e.blockedModules.length} module(s) blocked`;
   }

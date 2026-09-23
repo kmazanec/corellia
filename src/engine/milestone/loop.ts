@@ -36,7 +36,7 @@ export async function runMilestoneLoop(params: {
     priorRoundRef: string | null,
   ) => Promise<RoundReDecision>;
   persistCriteria: (artifact: Artifact) => Promise<void>;
-  commitRound: (roundIndex: number) => string | null;
+  commitRound: (roundIndex: number) => Promise<string | null>;
   assessRound: (
     criteriaArtifact: Artifact | null,
     mergedArtifact: Artifact | null,
@@ -114,7 +114,7 @@ export async function runMilestoneLoop(params: {
       }
     }
 
-    const committedRef = params.commitRound(roundIndex);
+    const committedRef = await params.commitRound(roundIndex);
     const assessment = await params.assessRound(criteriaArtifact, round.mergedArtifact);
     lastAssessment = assessment;
 

@@ -22,7 +22,7 @@ import {
 import { reDecideMilestoneRound } from './milestone/redecide-round.js';
 import { runSplitRound } from './split-round.js';
 import { debitTreeState, type TreeState } from './tree-spend.js';
-import { commitRound, type TreeWorktree } from './worktree.js';
+import { commitRound, outOfScopeChanges, type TreeWorktree } from './worktree.js';
 
 export interface SplitRunner {
   runSplit: (
@@ -158,7 +158,7 @@ export function createSplitRunner(deps: {
         reDecideRound: (priorAssessment, priorRoundRef) =>
           reDecideRound(goal, treeState, priorAssessment, priorRoundRef),
         persistCriteria: (artifact) => deps.persistLeafKnowledge(goal, artifact),
-        commitRound: (roundIndex) => commitRoundIfWorktree(deps.activeWorktree(), roundIndex, goal.title, goal.scope),
+        commitRound: (roundIndex) => commitScopedRound(deps, goal, roundIndex),
         assessRound: (criteriaArtifact, mergedArtifact) =>
           assessRound(goal, criteriaArtifact, mergedArtifact, treeState),
         ceilingReachedOnce: () => deps.ceilingReachedOnce(goal, treeState),
@@ -168,11 +168,29 @@ export function createSplitRunner(deps: {
   };
 }
 
-function commitRoundIfWorktree(
-  worktree: TreeWorktree | undefined,
+/**
+ * Commit a milestone round's in-scope work and surface any out-of-scope residue
+ * it had to leave uncommitted as a `scope-escaped` event, so a stray path is
+ * named in the log instead of silently riding to the emission gate.
+ */
+async function commitScopedRound(
+  deps: { activeWorktree(): TreeWorktree | undefined; store: EventStore; now(): number },
+  goal: Goal,
   roundIndex: number,
-  title: string,
-  scope: string[],
-): string | null {
-  return worktree === undefined ? null : commitRound(worktree, roundIndex, title, scope);
+): Promise<string | null> {
+  const worktree = deps.activeWorktree();
+  if (worktree === undefined) return null;
+  const sha = commitRound(worktree, roundIndex, goal.title, goal.scope);
+  const residue = outOfScopeChanges(worktree.root, goal.scope);
+  if (residue.length > 0) {
+    await deps.store.append({
+      type: 'scope-escaped',
+      at: deps.now(),
+      goalId: goal.id,
+      source: 'round-commit',
+      scope: goal.scope,
+      paths: residue,
+    });
+  }
+  return sha;
 }

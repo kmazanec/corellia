@@ -13,6 +13,7 @@
 
 import type { Budget, Intent } from './goal.js';
 import type { DeclaredScripts } from '../library/script-runner.js';
+import type { DeclaredCaptures } from './capture.js';
 
 // ── The commission ────────────────────────────────────────────────────────────
 
@@ -45,11 +46,19 @@ export interface CommissionInput {
    */
   spendCeilingUsd?: number;
   /**
-   * Optional capability pre-check: when present, the listener verifies that
-   * every declared script entry point exists on disk before admitting the
-   * commission. Missing entries bounce at receive with zero subtree spend.
+   * The scripts this commission declares (ADR-016): the names its tree's
+   * `{ script }` acceptance criteria may cite and `run_script` may run. They
+   * ride the root goal and are layered over the engine's default set for this
+   * tree only. At admission the listener verifies every node-file entry point
+   * exists on disk; a missing entry bounces at receive with zero subtree spend.
    */
   declaredScripts?: DeclaredScripts;
+  /**
+   * The captures this commission declares (ADR-042), layered over the engine's
+   * defaults like {@link declaredScripts}. Each capture's start/render script
+   * must be a declared script name.
+   */
+  declaredCaptures?: DeclaredCaptures;
   /** The repo root used for the declared-scripts capability check. */
   repoRoot?: string;
 }

@@ -6,6 +6,9 @@
  * goal-type is a harness; an instance of that type is a {@link Goal}.
  */
 
+import type { DeclaredCaptures } from './capture.js';
+import type { DeclaredScripts } from '../library/script-runner.js';
+
 /**
  * The four locked eval-shape classes. A goal of each kind centers its report on
  * a different thing, and the four differ in what their eval can even be:
@@ -211,4 +214,17 @@ export interface Goal {
    * non-iterative type.
    */
   maxRounds?: number;
+  /**
+   * Root-only: the commission's own declared scripts (ADR-016), layered over
+   * the engine sandbox's defaults for this tree. They are the names a
+   * `{ script }` acceptance criterion may cite and `run_script` may run, so a
+   * tree commissioned through a long-lived front door can check behavior its
+   * commission declared. Ignored below the root and on an unsandboxed engine.
+   */
+  declaredScripts?: DeclaredScripts;
+  /**
+   * Root-only: the commission's own declared captures (ADR-042), layered over
+   * the engine sandbox's defaults exactly as {@link declaredScripts} is.
+   */
+  declaredCaptures?: DeclaredCaptures;
 }

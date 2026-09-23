@@ -33,6 +33,7 @@ import type { Intent, MemoryPointer } from '../contract/goal.js';
 import type { Report } from '../contract/report.js';
 import type { DecisionBrief } from '../contract/decision.js';
 import { verifyEntryPoints } from '../library/script-runner.js';
+import { declaredScriptsProblem } from '../library/declared-scripts.js';
 import { costSummary } from '../eventlog/projections.js';
 import type { CommissionInput, StandingEnvelope } from '../contract/brief.js';
 
@@ -362,6 +363,11 @@ export class Listener {
    * Top-up is operator config only (Chunk 2: F-63).
    */
   private readonly standingEnvelope: StandingEnvelope | undefined;
+  /**
+   * The repo the engine's trees run against, used for the declared-scripts
+   * capability pre-check when a commission does not name its own `repoRoot`.
+   */
+  private readonly repoRoot: string | undefined;
 
   /**
    * Tracked spend against the standing envelope (in USD), decremented per
@@ -402,12 +408,14 @@ export class Listener {
     now?: () => number;
     defaultTtlMs?: number;
     standingEnvelope?: StandingEnvelope;
+    repoRoot?: string;
   }) {
     this.engine = opts.engine;
     this.store = opts.store;
     this.now = opts.now ?? (() => Date.now());
     this.defaultTtlMs = opts.defaultTtlMs ?? 30_000;
     this.standingEnvelope = opts.standingEnvelope;
+    this.repoRoot = opts.repoRoot;
   }
 
   // ── commission ────────────────────────────────────────────────────────────
@@ -416,17 +424,23 @@ export class Listener {
    * The front door. Mints a root Goal (type 'deliver-intent', parentId null)
    * and runs it through the engine, subject to scope-disjoint admission.
    *
-   * When `declaredScripts` and `repoRoot` are present on the input, a
-   * capability pre-check verifies that every declared entry point exists on
-   * disk. A missing entry bounces immediately with zero subtree spend.
+   * When the input declares scripts and a repo root is known (the input's own
+   * `repoRoot`, else the listener's), a capability pre-check verifies that
+   * every declared entry point exists on disk. A missing entry bounces
+   * immediately with zero subtree spend.
    *
    * Returns a promise that resolves when the tree completes (or parks — parked
    * intents resolve immediately with the blocked report so the caller knows the
    * human question, and the intent surfaces in status().parked).
    */
   commission(input: CommissionInput): Promise<Report> {
-    if (input.declaredScripts !== undefined && input.repoRoot !== undefined) {
-      const { declaredScripts, repoRoot } = input;
+    if (input.declaredScripts !== undefined) {
+      const problem = declaredScriptsProblem(input.declaredScripts);
+      if (problem !== null) return Promise.reject(new Error(`Invalid commission: ${problem}`));
+    }
+    const repoRoot = input.repoRoot ?? this.repoRoot;
+    if (input.declaredScripts !== undefined && repoRoot !== undefined) {
+      const { declaredScripts } = input;
       return verifyEntryPoints(repoRoot, declaredScripts).then((check) => {
         if (!check.ok) {
           return Promise.reject(new Error(check.reason));
@@ -642,6 +656,10 @@ export class Listener {
       ...(input.spendCeilingUsd !== undefined
         ? { spendCeilingUsd: input.spendCeilingUsd }
         : {}),
+      // The commission's own check vocabulary rides the root goal; the engine
+      // layers it over its default sandbox for this tree only.
+      ...(input.declaredScripts !== undefined ? { declaredScripts: input.declaredScripts } : {}),
+      ...(input.declaredCaptures !== undefined ? { declaredCaptures: input.declaredCaptures } : {}),
     };
 
     // Wire ourselves as the brief authority for this run.

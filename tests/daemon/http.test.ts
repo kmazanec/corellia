@@ -333,6 +333,44 @@ describe('FrontDoorServer POST /intents', () => {
     expect((body as { error: string }).error).toContain('budget');
   });
 
+  it('returns 422 when a declared script entry point escapes the repo', async () => {
+    const { status, body } = await doRequest({
+      port,
+      method: 'POST',
+      path: '/intents',
+      token: TOKEN,
+      body: {
+        id: 'bad-scripts',
+        title: 'Bad scripts',
+        spec: {},
+        scope: ['src/'],
+        budget: { attempts: 2, tokens: 5_000, toolCalls: 10, wallClockMs: 60_000 },
+        declaredScripts: { smoke: '../../bin/evil.mjs' },
+      },
+    });
+    expect(status).toBe(422);
+    expect((body as { error: string }).error).toContain('smoke');
+  });
+
+  it('returns 422 when declaredCaptures is not an object', async () => {
+    const { status, body } = await doRequest({
+      port,
+      method: 'POST',
+      path: '/intents',
+      token: TOKEN,
+      body: {
+        id: 'bad-captures',
+        title: 'Bad captures',
+        spec: {},
+        scope: ['src/'],
+        budget: { attempts: 2, tokens: 5_000, toolCalls: 10, wallClockMs: 60_000 },
+        declaredCaptures: ['home'],
+      },
+    });
+    expect(status).toBe(422);
+    expect((body as { error: string }).error).toContain('declaredCaptures');
+  });
+
   it('returns 422 when budget has non-finite field (NaN attempts)', async () => {
     const { status, body } = await doRequest({
       port,

@@ -34,6 +34,7 @@ const EVENT_TYPES = new Set([
   'worktree-preserved',
   'worktree-reaped',
   'files-touched',
+  'scope-escaped',
   'partial-delivered',
   'produced',
   'ceiling-reached',
@@ -146,6 +147,10 @@ const EVENT_VALIDATORS = {
   'worktree-reaped': (event) =>
     hasString(event, 'path') && hasOptionalString(event, 'branch') && hasString(event, 'reason'),
   'files-touched': (event) => hasStringArray(event, 'scope') && hasTouchedFiles(event),
+  'scope-escaped': (event) =>
+    (event['source'] === 'run_command' || event['source'] === 'round-commit') &&
+    hasStringArray(event, 'scope') &&
+    hasStringArray(event, 'paths'),
   'partial-delivered': (event) => hasBlockedModules(event),
   produced: (event) => hasObject(event, 'usage'),
   'ceiling-reached': (event) => hasFiniteNumber(event, 'spentUsd') && hasFiniteNumber(event, 'ceilingUsd'),

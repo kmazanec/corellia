@@ -29,6 +29,7 @@ import { goalTypeIndex } from './types.js';
  */
 const WRITE_ATTRIBUTABLE: ReadonlySet<FactoryEvent['type']> = new Set([
   'files-touched',
+  'scope-escaped',
   'worktree-collected',
   'branch-pushed',
   'pr-opened',
