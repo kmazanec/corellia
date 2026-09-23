@@ -3,10 +3,11 @@
  * from a cursor, and one goal's detail for the inspector.
  */
 
-import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
+import { createRoute, z } from '@hono/zod-openapi';
 
 import type { ReadModel } from '../read-model/read-model.js';
-import { ErrorBody, Goal, GoalId, GoalTreeNode, JobId, JobSummary, StoredEvent, UsageTotals } from './schemas.js';
+import { apiRouter, wire } from './wire.js';
+import { ErrorBody, Goal, GoalId, GoalTreeNode, JobId, JobView, StoredEvent, UsageTotals } from './schemas.js';
 
 const notFound = { content: { 'application/json': { schema: ErrorBody } }, description: 'No such job or goal' };
 
@@ -16,7 +17,7 @@ const listJobs = createRoute({
   tags: ['jobs'],
   summary: 'Every job, most recently active first',
   responses: {
-    200: { content: { 'application/json': { schema: z.object({ jobs: z.array(JobSummary), cursor: z.number().int() }) } }, description: 'Jobs' },
+    200: { content: { 'application/json': { schema: z.object({ jobs: z.array(JobView), cursor: z.number().int() }) } }, description: 'Jobs' },
   },
 });
 
@@ -24,10 +25,10 @@ const getJob = createRoute({
   method: 'get',
   path: '/jobs/{jobId}',
   tags: ['jobs'],
-  summary: "A job's summary and goal tree",
+  summary: 'A job and its goal tree (null until its first event)',
   request: { params: z.object({ jobId: JobId }) },
   responses: {
-    200: { content: { 'application/json': { schema: z.object({ job: JobSummary, tree: GoalTreeNode }) } }, description: 'Job' },
+    200: { content: { 'application/json': { schema: z.object({ job: JobView, tree: GoalTreeNode.nullable() }) } }, description: 'Job' },
     404: notFound,
   },
 });
@@ -73,28 +74,22 @@ const getGoal = createRoute({
   },
 });
 
-/**
- * The wire form of a read-model value: a JSON round-trip, which drops the
- * `undefined` members the schemas treat as absent, typed as the route's schema.
- */
-const wire = <S extends z.ZodType>(_schema: S, v: unknown): z.infer<S> => JSON.parse(JSON.stringify(v)) as z.infer<S>;
-
 export function jobsRoutes(model: ReadModel) {
   const { index } = model;
-  return new OpenAPIHono()
-    .openapi(listJobs, (c) => c.json({ jobs: index.jobs(), cursor: model.cursor }, 200))
+  return apiRouter()
+    .openapi(listJobs, (c) => c.json({ jobs: wire(z.array(JobView), model.jobs()), cursor: model.cursor }, 200))
     .openapi(getJob, (c) => {
       const { jobId } = c.req.valid('param');
-      const job = index.job(jobId);
+      const job = model.job(jobId);
+      if (!job) return c.json({ error: `no job ${jobId}` }, 404);
       const tree = index.tree(jobId);
-      if (!job || !tree) return c.json({ error: `no job ${jobId}` }, 404);
-      return c.json({ job, tree: wire(GoalTreeNode, tree) }, 200);
+      return c.json({ job: wire(JobView, job), tree: tree ? wire(GoalTreeNode, tree) : null }, 200);
     })
     .openapi(listJobEvents, (c) => {
       const { jobId } = c.req.valid('param');
       const { after, limit } = c.req.valid('query');
-      const events = index.events(jobId, after, limit);
-      if (!events) return c.json({ error: `no job ${jobId}` }, 404);
+      if (!model.job(jobId)) return c.json({ error: `no job ${jobId}` }, 404);
+      const events = index.events(jobId, after, limit) ?? [];
       return c.json({ events: wire(z.array(StoredEvent), events) }, 200);
     })
     .openapi(getGoal, (c) => {

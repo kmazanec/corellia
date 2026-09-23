@@ -17,6 +17,8 @@ export type LinkState = 'connecting' | 'live' | 'retrying';
 export interface SseOptions {
   onMessage(msg: SseMessage): void;
   onState?(state: LinkState): void;
+  /** The stream's subject does not exist (404); the reader stops. */
+  onMissing?(): void;
   /** Resume point for the first connection. */
   lastEventId?: string;
 }
@@ -38,6 +40,10 @@ export function openStream(url: string, opts: SseOptions): () => void {
         const res = await fetch(url, { headers, signal: ctrl.signal });
         if (res.status === 401) {
           setToken(null);
+          return;
+        }
+        if (res.status === 404) {
+          opts.onMissing?.();
           return;
         }
         if (!res.ok || !res.body) throw new Error(`stream answered ${res.status}`);

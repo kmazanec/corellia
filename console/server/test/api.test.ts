@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '../src/api/app.js';
-import { sampleRun } from '../src/dev/sample-run.js';
+import { sampleRun } from '../src/factory.js';
 import { MemoryEventSource } from '../src/events/event-source.js';
 import { ReadModel } from '../src/read-model/read-model.js';
 
@@ -16,7 +16,7 @@ async function setup(outcome: 'done' | 'running' = 'done') {
 }
 
 /** Read SSE messages from a streaming response until `count` arrive. */
-async function readSse(res: Response, count: number): Promise<{ event: string; id?: string; data: string }[]> {
+export async function readSse(res: Response, count: number): Promise<{ event: string; id?: string; data: string }[]> {
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   const messages: { event: string; id?: string; data: string }[] = [];
@@ -67,8 +67,8 @@ describe('control plane API', () => {
 
   it('lists jobs and returns a job with its tree', async () => {
     const { app } = await setup();
-    const list = (await (await app.request('/api/jobs', { headers: auth })).json()) as { jobs: { jobId: string; state: string }[] };
-    expect(list.jobs).toMatchObject([{ jobId: 'job-1', state: 'done' }]);
+    const list = (await (await app.request('/api/jobs', { headers: auth })).json()) as { jobs: { jobId: string; status: string }[] };
+    expect(list.jobs).toMatchObject([{ jobId: 'job-1', status: 'done', queue: null }]);
 
     const one = (await (await app.request('/api/jobs/job-1', { headers: auth })).json()) as {
       tree: { children: { title: string }[] };
@@ -126,7 +126,8 @@ describe('control plane API', () => {
     await model.sync();
     const [snapshot, update] = await pending;
     expect(snapshot!.event).toBe('snapshot');
-    expect(update).toMatchObject({ event: 'job', id: String(model.cursor) });
-    expect(JSON.parse(update!.data)).toMatchObject({ jobId: 'job-1', lastEventAt: 99_000 });
+    expect(JSON.parse(snapshot!.data)).toMatchObject({ jobs: [{ jobId: 'job-1' }], workers: [], repos: [] });
+    expect(update!.event).toBe('job');
+    expect(JSON.parse(update!.data)).toMatchObject({ jobId: 'job-1', lastEventAt: 99_000, lastSeq: model.cursor });
   });
 });

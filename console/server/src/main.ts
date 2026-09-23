@@ -3,10 +3,11 @@
  *
  * Environment:
  *   FRONT_DOOR_TOKEN        operator bearer token (required)
- *   DATABASE_URL            read the shared Postgres event log, or
- *   CONSOLE_EVENTS_JSONL    read a local JSONL log instead (development)
+ *   DATABASE_URL            the shared Postgres: event log, job queue, fleet; or
+ *   CONSOLE_EVENTS_JSONL    read a local JSONL log instead (read-only; development)
  *   CONSOLE_PORT            listen port (default 8090)
- *   CONSOLE_POLL_MS         read-model sync interval (default 500)
+ *   CONSOLE_POLL_MS         read-model poll interval (default 500; notifications
+ *                           trigger a sync sooner on Postgres)
  *   CONSOLE_WEB_DIST        built SPA to serve at / (default ../web/dist, if present)
  */
 
@@ -17,13 +18,16 @@ import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
+import pg from 'pg';
 
 import { createApp } from './api/app.js';
 import type { EventSource } from './events/event-source.js';
 import { JsonlEventSource } from './events/jsonl-event-source.js';
 import { PgEventSource } from './events/pg-event-source.js';
+import { ensureJobSchema, loadDotEnv, PgEventStore, type JobQueue } from './factory.js';
+import { PgNotifier } from './jobs/notifier.js';
+import { PgJobQueue } from './jobs/pg-job-queue.js';
 import { ReadModel } from './read-model/read-model.js';
-import { loadDotEnv } from './factory.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 loadDotEnv(resolve(here, '../../../.env'));
@@ -38,10 +42,13 @@ const port = Number(process.env['CONSOLE_PORT'] ?? 8090);
 const pollMs = Number(process.env['CONSOLE_POLL_MS'] ?? 500);
 const webDist = resolve(process.env['CONSOLE_WEB_DIST'] ?? resolve(here, '../../web/dist'));
 
-const model = new ReadModel(chooseSource());
+const { source, queue, pool } = await connect();
+const model = new ReadModel(source, queue);
 await model.start(pollMs);
+const notifier = pool ? new PgNotifier(pool, () => void model.sync().catch(() => {})) : undefined;
+await notifier?.start();
 
-const server = new Hono().route('/', createApp({ model, token }));
+const server = new Hono().route('/', createApp({ model, token, ...(queue ? { queue } : {}) }));
 server.all('/api/*', (c) => c.json({ error: 'not found' }, 404));
 if (existsSync(webDist)) {
   server.use('/*', serveStatic({ root: webDist }));
@@ -49,20 +56,31 @@ if (existsSync(webDist)) {
 }
 
 serve({ fetch: server.fetch, port }, (info) => {
-  console.log(`[console] control plane on :${info.port} — ${model.index.jobs().length} jobs indexed`);
+  const mode = queue ? 'postgres: log + queue + fleet' : 'read-only local log';
+  console.log(`[console] control plane on :${info.port} (${mode}) — ${model.jobs().length} jobs indexed`);
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
-    void model.stop().finally(() => process.exit(0));
+    void (async () => {
+      await notifier?.close();
+      await model.stop();
+      await pool?.end();
+      process.exit(0);
+    })();
   });
 }
 
-function chooseSource(): EventSource {
+async function connect(): Promise<{ source: EventSource; queue?: JobQueue; pool?: pg.Pool }> {
   const dbUrl = process.env['DATABASE_URL'];
-  if (dbUrl) return new PgEventSource(dbUrl);
+  if (dbUrl) {
+    const pool = new pg.Pool({ connectionString: dbUrl });
+    await new PgEventStore(pool).ensureSchema();
+    await ensureJobSchema(pool);
+    return { source: new PgEventSource(pool), queue: new PgJobQueue(pool), pool };
+  }
   const jsonl = process.env['CONSOLE_EVENTS_JSONL'];
-  if (jsonl) return new JsonlEventSource(resolve(jsonl));
-  console.error('Set DATABASE_URL (shared event log) or CONSOLE_EVENTS_JSONL (a local log)');
+  if (jsonl) return { source: new JsonlEventSource(resolve(jsonl)) };
+  console.error('Set DATABASE_URL (shared event log and queue) or CONSOLE_EVENTS_JSONL (a local log, read-only)');
   process.exit(1);
 }

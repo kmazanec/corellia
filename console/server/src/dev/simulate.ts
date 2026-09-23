@@ -9,8 +9,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import type { FactoryEvent } from '../factory.js';
-import { sampleRun, type SampleOutcome } from './sample-run.js';
+import { sampleRun, type FactoryEvent, type SampleOutcome } from '../factory.js';
 
 const path = resolve(process.argv[2] ?? 'out/console-dev/events.jsonl');
 const speedMs = Number(process.env['SIMULATE_STEP_MS'] ?? 700);

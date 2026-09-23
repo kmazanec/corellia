@@ -1,52 +1,73 @@
 /**
  * Live streams over SSE (ADR-051 § Liveness).
  *
- * - `GET /stream` — job summaries as they change, for the dashboard.
- * - `GET /jobs/:jobId/stream` — a job's events, replayed from `Last-Event-ID`
- *   (or `?after=`), then a `caught-up` marker, then followed live. Each event
+ * - `GET /stream` — the dashboard: a `snapshot` of every job and the fleet,
+ *   then a `job` message whenever a job's view changes and a `fleet` message
+ *   every few seconds.
+ * - `GET /jobs/:jobId/stream` — one job: its events replayed from
+ *   `Last-Event-ID` (or `?after=`), a `caught-up` marker, then new events live,
+ *   interleaved with `job` messages when its queue state changes. Each event
  *   message's `id` is the event's `seq`, so a reconnecting client resumes
  *   exactly where it stopped.
  *
- * A subscription is opened before the replay and its buffer is drained after
- * it, skipping anything the replay already sent, so no event falls between
- * the two.
+ * A subscription is opened before any replay and drained after it, skipping
+ * what the replay already sent, so nothing falls between the two.
  */
 
 import { Hono } from 'hono';
 import { streamSSE, type SSEStreamingApi } from 'hono/streaming';
 
 import type { IndexedEvent, ReadModel } from '../read-model/read-model.js';
+import { fleetView } from './fleet-routes.js';
 
 const HEARTBEAT_MS = 15_000;
+const FLEET_EVERY_MS = 5_000;
 const SUMMARY_COALESCE_MS = 250;
 
-export function streamRoutes(model: ReadModel) {
+export function streamRoutes(model: ReadModel, now: () => number = Date.now) {
   return new Hono()
     .get('/stream', (c) =>
       streamSSE(c, async (stream) => {
         const dirty = new Set<string>();
-        const unsubscribe = model.subscribe((e) => dirty.add(e.jobId));
+        const unsubscribe = model.subscribeJobs((jobId) => dirty.add(jobId));
         stream.onAbort(unsubscribe);
-        await stream.writeSSE({ event: 'snapshot', data: JSON.stringify({ jobs: model.index.jobs(), cursor: model.cursor }) });
+        const fleet = () => stream.writeSSE({ event: 'fleet', data: JSON.stringify(fleetView(model, now())) });
+        await stream.writeSSE({
+          event: 'snapshot',
+          data: JSON.stringify({ jobs: model.jobs(), cursor: model.cursor, ...fleetView(model, now()) }),
+        });
+        let sinceFleet = 0;
         await pump(stream, SUMMARY_COALESCE_MS, async () => {
           for (const jobId of dirty) {
-            const job = model.index.job(jobId);
-            if (job) await stream.writeSSE({ event: 'job', id: String(job.lastSeq), data: JSON.stringify(job) });
+            const job = model.job(jobId);
+            if (job) await stream.writeSSE({ event: 'job', data: JSON.stringify(job) });
           }
           dirty.clear();
+          sinceFleet += SUMMARY_COALESCE_MS;
+          if (sinceFleet >= FLEET_EVERY_MS) {
+            sinceFleet = 0;
+            await fleet();
+          }
         });
       }),
     )
     .get('/jobs/:jobId/stream', (c) => {
       const jobId = c.req.param('jobId');
-      if (!model.index.job(jobId)) return c.json({ error: `no job ${jobId}` }, 404);
+      if (!model.job(jobId)) return c.json({ error: `no job ${jobId}` }, 404);
       const after = resumeCursor(c.req.header('last-event-id'), c.req.query('after'));
       return streamSSE(c, async (stream) => {
         const pending: IndexedEvent[] = [];
-        const unsubscribe = model.subscribe((e) => {
+        let jobChanged = true;
+        const offEvents = model.subscribe((e) => {
           if (e.jobId === jobId) pending.push(e);
         });
-        stream.onAbort(unsubscribe);
+        const offJobs = model.subscribeJobs((id) => {
+          if (id === jobId) jobChanged = true;
+        });
+        stream.onAbort(() => {
+          offEvents();
+          offJobs();
+        });
         let sent = after;
         for (const s of model.index.events(jobId, after) ?? []) {
           await stream.writeSSE({ event: 'event', id: String(s.seq), data: JSON.stringify(s) });
@@ -59,6 +80,11 @@ export function streamRoutes(model: ReadModel) {
             if (e.seq <= sent) continue;
             await stream.writeSSE({ event: 'event', id: String(e.seq), data: JSON.stringify({ seq: e.seq, event: e.event }) });
             sent = e.seq;
+          }
+          if (jobChanged) {
+            jobChanged = false;
+            const job = model.job(jobId);
+            if (job) await stream.writeSSE({ event: 'job', data: JSON.stringify(job) });
           }
         });
       });

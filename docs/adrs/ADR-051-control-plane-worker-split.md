@@ -8,7 +8,7 @@ timestamp: 2026-09-23T12:30:00-05:00
 
 # ADR-051: one control plane, many single-job workers
 
-**Status:** Accepted (phased; see Rollout) · **Date:** 2026-09-23 · **Stretch:** no · **Contract:** yes (WorkerLink)
+**Status:** Accepted (phased; Phases 1–2 built, see Rollout and As built) · **Date:** 2026-09-23 · **Stretch:** no · **Contract:** yes (WorkerLink)
 **Relates to:** ADR-003 (event log is the source of truth), ADR-004 (Postgres
 substrate), ADR-016 (one worktree per tree), ADR-017/033 (per-tree dollar
 ceiling, budget is a non-steering safeguard), ADR-026 (hosted front door),
@@ -98,6 +98,45 @@ worker can resume is a later option; nothing in v1 prevents it.
   stamped with `job_id` / `worker_id` at write, and `NOTIFY` fires on append.
 - **Phase 3 (remote workers).** The HTTP WorkerLink adapter, worker tokens, and
   optionally push-on-park resume.
+
+## As built (Phase 2, iteration 26)
+
+Where the build settled points the Decision left open, or departed from it:
+
+- **The factory owns all DDL.** `corellia_jobs` and `corellia_workers` are
+  created by `ensureJobSchema` (`src/substrate/pg-worker-link.ts`), like the
+  event table. Workers and the control plane both call it at start; the
+  control plane mirrors the tables in Drizzle and never writes DDL.
+- **Two implementations of each side, one contract.** `src/contract/jobs.ts`
+  defines `WorkerLink` (worker side) and `JobQueue` (control-plane side).
+  `MemoryJobQueue` implements both as the reference; `PgWorkerLink` (raw `pg`,
+  factory, ADR-001) and the control plane's Drizzle `PgJobQueue` implement one
+  side each. All are held to one shared contract suite
+  (`tests/substrate/job-queue-contract.ts`), and the Postgres pairing also to
+  a concurrent-claim race test.
+- **Claims are serialised by a transaction-scoped advisory lock**, so the
+  scope-overlap check against running jobs and the claim are atomic across
+  workers. A lapsed lease makes a job claimable again up to 3 claims, then it
+  fails (`lease lost after N claims`).
+- **The worker reuses the Listener.** Each worker runs its one job through its
+  own `Listener`, which stays the single brief authority for the run
+  (ADR-008). Two additions make that work: `Listener.resume(input, question,
+  answer)` resumes a park the listener never saw, and `handOffParked(id)`
+  gives a park to the queue, so the listener's own TTL sweep never bounces it.
+  Workers sweep expired parks from the queue instead.
+- **Shutdown records `interrupted`**, rather than letting the lease lapse: the
+  worker preserves the worktree (ADR-026 preserve-don't-await) and a re-run on
+  another machine would start from nothing, so the operator decides.
+- **Event stamping is a store context.** `PgEventStore.setContext` stamps
+  `job_id` / `worker_id` while a worker holds a job; every append notifies
+  `corellia_events`. Job-row changes notify `corellia_jobs`.
+- **The single-process daemon stays** as the one-box mode (webhook front door,
+  in-memory queue); the worker is a separate entrypoint (`npm run worker`).
+  The console shows daemon runs from the log alone.
+- **Not yet on the queue:** the improvement loop (ADR-027). Workers run
+  without a standing envelope, so a failed job's blockers are still routed
+  (`blocker-routed` events) but no improvement tree is admitted. See issue
+  [improvement-loop-on-the-queue](../issues/improvement-loop-on-the-queue.md).
 
 ## Tradeoffs
 

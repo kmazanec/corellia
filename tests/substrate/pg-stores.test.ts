@@ -81,6 +81,33 @@ describe.skipIf(skip)('PgEventStore (integration)', () => {
     // No error means the IF NOT EXISTS guards held.
   });
 
+  it('stamps the job and worker context on appends, and clears it', async () => {
+    store.setContext({ jobId: 'job-9', workerId: 'w-1' });
+    await store.append(SAMPLE_EVENT);
+    store.setContext(null);
+    await store.append(SAMPLE_EVENT);
+    const { rows } = await pool.query('SELECT job_id, worker_id FROM corellia_events ORDER BY id');
+    expect(rows).toEqual([
+      { job_id: 'job-9', worker_id: 'w-1' },
+      { job_id: null, worker_id: null },
+    ]);
+  });
+
+  it('notifies corellia_events with the new row id and job on every append', async () => {
+    const listener = await pool.connect();
+    try {
+      const got = new Promise<string>((resolve) => listener.on('notification', (n) => resolve(n.payload ?? '')));
+      await listener.query('LISTEN corellia_events');
+      store.setContext({ jobId: 'job-n', workerId: 'w-1' });
+      await store.append(SAMPLE_EVENT);
+      store.setContext(null);
+      expect(JSON.parse(await got)).toEqual({ id: 1, job: 'job-n' });
+    } finally {
+      await listener.query('UNLISTEN corellia_events');
+      listener.release();
+    }
+  });
+
   it('list returns empty array on a fresh log', async () => {
     expect(await store.list()).toEqual([]);
   });

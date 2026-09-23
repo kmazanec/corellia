@@ -1,12 +1,15 @@
 /**
- * Synthetic factory runs for developing and testing the console without a
- * live model. {@link sampleRun} produces the event sequence of one plausible
- * job: a root goal splits into modules, each module decides, calls tools,
- * produces, and emits, and the root judges and emits. Every event is a real
- * `FactoryEvent`, so the read-model and UI see exactly what a worker writes.
+ * Synthetic factory runs, for developing and testing without a live model.
+ * {@link sampleRun} produces the event sequence of one plausible job: a root
+ * goal splits into modules, each module decides, calls tools, produces, and
+ * emits, and the root judges and emits. Every event is a real `FactoryEvent`,
+ * so anything reading the log sees exactly what a real run writes. The
+ * simulated engine (`./simulated-engine.ts`) plays these into a store; the
+ * operator console's tests and simulator use them directly.
  */
 
-import type { FactoryEvent, Goal } from '../factory.js';
+import type { FactoryEvent } from '../contract/events.js';
+import type { Goal } from '../contract/goal.js';
 
 export type SampleOutcome = 'done' | 'failed' | 'parked' | 'running';
 
@@ -20,6 +23,8 @@ export interface SampleRunOptions {
   outcome?: SampleOutcome;
   /** ms between consecutive events. */
   stepMs?: number;
+  /** The root goal as received, when the run is for a real commission. */
+  rootGoal?: Goal;
 }
 
 const DEFAULT_MODULES = ['Contract and types', 'Core implementation', 'Tests and fixtures'];
@@ -31,7 +36,7 @@ export function sampleRun(opts: SampleRunOptions): FactoryEvent[] {
   const tick = (): number => (at += stepMs);
   const out: FactoryEvent[] = [];
 
-  out.push({ type: 'goal-received', at, goalId: jobId, goal: goal(jobId, null, 'feature', title) });
+  out.push({ type: 'goal-received', at, goalId: jobId, goal: opts.rootGoal ?? goal(jobId, null, 'feature', title) });
   out.push({
     type: 'decided',
     at: tick(),

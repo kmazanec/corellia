@@ -43,5 +43,6 @@ Newest last (chronological).
 | [2026-09-23-01](2026-09-23-01-daemon-declared-scripts/index.md) | 23 — Per-tree declared scripts: commission scripts/captures ride the root goal; daemon defaults via env; word-count gets a behavioral smoke check | landed; live proof pending |
 | [2026-09-23-02](2026-09-23-02-shell-scope-escape/index.md) | 24 — Shell scope escapes surfaced (scope-escaped event + leaf warning); round commits keep in-scope progress | landed; live proof pending |
 | [2026-09-23-03](2026-09-23-03-operator-console-read-side/index.md) | 25 — Operator console, read side: control plane API (Hono + Drizzle, resumable SSE) and a live SPA over the event log; ADR-050/051 | landed; live proof pending |
+| [2026-09-23-04](2026-09-23-04-job-queue-and-workers/index.md) | 26 — Job queue and single-job workers (ADR-051 Phase 2): commission and answer from the console, fleet view | landed; live proof pending |
 
 Open follow-on work from these iterations lives in [../issues/](../issues/index.md).

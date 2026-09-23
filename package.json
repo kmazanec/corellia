@@ -33,7 +33,8 @@
     "console:server": "npm run dev -w @corellia/console-server",
     "console:simulate": "npm run simulate -w @corellia/console-server --",
     "console:web": "npm run dev -w @corellia/console-web",
-    "console:build": "npm run build -w @corellia/console-web"
+    "console:build": "npm run build -w @corellia/console-web",
+    "worker": "tsx src/daemon/worker.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

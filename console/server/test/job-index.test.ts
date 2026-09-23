@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { sampleRun } from '../src/dev/sample-run.js';
+import { sampleRun } from '../src/factory.js';
 import type { StoredEvent } from '../src/events/event-source.js';
 import { JobIndex } from '../src/read-model/job-index.js';
 

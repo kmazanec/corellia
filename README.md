@@ -210,6 +210,17 @@ FRONT_DOOR_TOKEN=dev CONSOLE_EVENTS_JSONL=out/console-dev/events.jsonl npm run c
 `npm run console:build` builds the SPA into `console/web/dist`, which the
 control plane then serves at `/`. The API document is at `/api/openapi.json`.
 
+**Commissioning and the fleet** (ADR-051 Phase 2) need the shared Postgres.
+Workers each run one whole job at a time from the queue; run as many as the
+machine or the fleet has room for, and commission and answer from the console.
+
+```bash
+export DATABASE_URL=postgres://…  FRONT_DOOR_TOKEN=…
+npm run console:server                                   # control plane + queue
+CORELLIA_WORKER_REPOS=acme/widgets npm run worker        # one per job slot
+# No model: CORELLIA_ENGINE=simulated npm run worker     (sample trees; can park)
+```
+
 ---
 
 ## Deploy & operate

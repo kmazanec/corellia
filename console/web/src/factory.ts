@@ -10,4 +10,6 @@ export type { Goal } from '../../../src/contract/goal.js';
 export { projectGoalTree, type GoalState, type GoalTreeNode } from '../../../src/eventlog/goal-tree.js';
 export { costSummary, type UsageTotals } from '../../../src/eventlog/projections.js';
 export type { AppType } from '../../server/src/api/app.js';
-export type { JobSummary } from '../../server/src/read-model/job-index.js';
+export type { JobStatus, JobView as Job } from '../../server/src/read-model/job-view.js';
+export type { WorkerRecord } from '../../../src/contract/jobs.js';
+export type Fleet = ReturnType<typeof import('../../server/src/api/fleet-routes.js').fleetView>;

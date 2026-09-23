@@ -553,6 +553,87 @@
     padding: 10px 12px;
     outline: none;
   }
+  textarea.field-input {
+    font-family: var(--font-prose);
+    font-size: 15px;
+    line-height: 1.45;
+    resize: vertical;
+  }
+  .field-label {
+    display: block;
+    margin-bottom: 6px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--color-ink-soft);
+  }
+  .field-hint {
+    margin-top: 4px;
+    font-family: var(--font-prose);
+    font-style: italic;
+    font-size: 12.5px;
+    color: var(--color-ink-soft);
+  }
+  .field-select {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    text-align: left;
+  }
+  .listbox {
+    min-width: var(--trigger-width);
+    max-height: 280px;
+    overflow: auto;
+    background: var(--color-paper);
+    color: var(--color-ink);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-plate);
+    box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.7);
+    padding: 4px;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    outline: none;
+  }
+  .listbox-item {
+    padding: 7px 10px;
+    border-radius: 1px;
+    cursor: pointer;
+    outline: none;
+  }
+  .listbox-item[data-focused] {
+    background: rgba(200, 147, 47, 0.2);
+  }
+  .listbox-item[data-selected] {
+    box-shadow: inset 2px 0 0 var(--color-brass);
+  }
+  .radio {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--color-ink);
+    outline: none;
+  }
+  .radio::before {
+    content: '';
+    width: 11px;
+    height: 11px;
+    border: 1px solid var(--color-ink-soft);
+    border-radius: 50%;
+  }
+  .radio[data-selected]::before {
+    background: radial-gradient(circle, var(--color-brass-deep) 45%, transparent 50%);
+    border-color: var(--color-brass-deep);
+  }
+  .radio[data-focus-visible] {
+    outline: 1px dashed var(--color-ink-soft);
+    outline-offset: 2px;
+  }
   .field-input[data-focused] {
     border-color: var(--color-brass);
     box-shadow: 0 0 0 1px var(--color-brass);

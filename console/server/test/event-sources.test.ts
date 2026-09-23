@@ -8,13 +8,14 @@ import { mkdtempSync, rmSync, writeFileSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import pg from 'pg';
+import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { PgEventStore } from '../../../src/substrate/pg-event-store.js';
-import { sampleRun } from '../src/dev/sample-run.js';
+import { sampleRun } from '../src/factory.js';
 import { JsonlEventSource } from '../src/events/jsonl-event-source.js';
 import { PgEventSource } from '../src/events/pg-event-source.js';
+import { isolatedPool } from './pg-schema.js';
 
 describe('JsonlEventSource', () => {
   const dir = mkdtempSync(join(tmpdir(), 'console-jsonl-'));
@@ -38,36 +39,28 @@ describe('JsonlEventSource', () => {
 const DB_URL = process.env['DATABASE_URL'];
 
 describe.skipIf(!DB_URL)('PgEventSource (integration)', () => {
-  const pool = new pg.Pool({ connectionString: DB_URL });
-  const store = new PgEventStore(pool);
-  const jobId = `console-it-${Date.now()}`;
-  let before = 0;
+  let pool: pg.Pool;
+  let drop: () => Promise<void>;
 
   beforeAll(async () => {
-    await store.ensureSchema();
-    const { rows } = await pool.query<{ max: string | null }>('SELECT max(id) AS max FROM corellia_events');
-    before = Number(rows[0]?.max ?? 0);
+    ({ pool, drop } = await isolatedPool(DB_URL!, 'src'));
+    await new PgEventStore(pool).ensureSchema();
   });
   afterAll(async () => {
-    await pool.query('DELETE FROM corellia_events WHERE goal_id LIKE $1', [`${jobId}%`]);
-    await pool.end();
+    await drop();
   });
 
   it('reads back what the factory store appended, in id order, from a cursor', async () => {
-    const events = sampleRun({ jobId, title: 'pg round trip', startAt: 0 });
+    const store = new PgEventStore(pool);
+    const events = sampleRun({ jobId: 'pg-round-trip', title: 'pg round trip', startAt: 0 });
     for (const e of events) await store.append(e);
 
-    const source = new PgEventSource(DB_URL!);
-    try {
-      const page = await source.after(before, 10_000);
-      const mine = page.filter((s) => s.event.goalId.startsWith(jobId));
-      expect(mine.map((s) => s.event)).toEqual(events);
-      expect(mine.every((s, i) => i === 0 || s.seq > mine[i - 1]!.seq)).toBe(true);
+    const source = new PgEventSource(pool);
+    const page = await source.after(0, 10_000);
+    expect(page.map((s) => s.event)).toEqual(events);
+    expect(page.every((s, i) => i === 0 || s.seq > page[i - 1]!.seq)).toBe(true);
 
-      const tail = await source.after(mine[4]!.seq, 2);
-      expect(tail.map((s) => s.seq)).toEqual([mine[5]!.seq, mine[6]!.seq]);
-    } finally {
-      await source.close();
-    }
+    const tail = await source.after(page[4]!.seq, 2);
+    expect(tail.map((s) => s.seq)).toEqual([page[5]!.seq, page[6]!.seq]);
   });
 });

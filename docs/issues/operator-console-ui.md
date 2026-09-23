@@ -192,13 +192,17 @@ The disqualifier: if seeing a run still requires `tail -f out/events.jsonl` or
 
 ## Resolution
 
-**2026-09-23 — partially-fixed.** The read side landed (iteration 25). ADR-050
-sets the stack and the workspace boundary, and ADR-051 the control plane /
-single-job worker split. Built: the control plane read-model and REST + SSE API
-(`console/server`), and the SPA (`console/web`). It covers the job dashboard
-(req. 3), the live goal-tree fanout (req. 4), the live log stream (req. 5), the
-per-goal inspector (req. 6), and per-job and total spend (part of req. 9).
-Remaining: commissioning and answering from the UI (req. 1–2, which need
-ADR-051 Phase 2's jobs table and WorkerLink), the artifact browser (req. 7),
-the repo registry (req. 8), goal-type stats panels (rest of req. 9), and a live
-proof against a real run.
+**2026-09-23 — partially-fixed.** Two iterations landed.
+- Iteration 25 (read side): ADR-050 stack and workspace boundary; the control
+  plane read-model and REST + SSE API; the SPA with the job dashboard (req. 3),
+  live goal-tree fanout (req. 4), live log (req. 5), per-goal inspector
+  (req. 6), and spend (part of req. 9).
+- Iteration 26 (ADR-051 Phase 2): the Postgres job queue and single-job
+  workers; commissioning (req. 1) and answering parked jobs (req. 2) from the
+  UI; a fleet panel of workers and the repos they serve (the live half of
+  req. 8).
+
+Remaining: the artifact browser (req. 7), a repo registry beyond what workers
+report (rest of req. 8), goal-type stats panels (rest of req. 9), deploying
+the fleet ([fleet-compose-deploy](fleet-compose-deploy.md)), and a live proof
+against a real run.

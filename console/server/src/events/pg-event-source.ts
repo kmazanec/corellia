@@ -14,10 +14,12 @@ import type { EventSource, StoredEvent } from './event-source.js';
 
 export class PgEventSource implements EventSource {
   readonly #pool: pg.Pool;
+  readonly #ownsPool: boolean;
   readonly #db: NodePgDatabase;
 
-  constructor(connectionString: string) {
-    this.#pool = new pg.Pool({ connectionString });
+  constructor(connectionStringOrPool: string | pg.Pool) {
+    this.#ownsPool = typeof connectionStringOrPool === 'string';
+    this.#pool = typeof connectionStringOrPool === 'string' ? new pg.Pool({ connectionString: connectionStringOrPool }) : connectionStringOrPool;
     this.#db = drizzle(this.#pool);
   }
 
@@ -37,6 +39,6 @@ export class PgEventSource implements EventSource {
   }
 
   async close(): Promise<void> {
-    await this.#pool.end();
+    if (this.#ownsPool) await this.#pool.end();
   }
 }

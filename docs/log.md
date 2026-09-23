@@ -16,6 +16,14 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-09-23
 
+- **Iteration 26 — Job queue and single-job workers** landed (live proof
+  pending). ADR-051 Phase 2: a Postgres job queue behind a `WorkerLink` /
+  `JobQueue` contract (memory, raw-pg, and Drizzle implementations held to one
+  suite), a `npm run worker` process that runs one whole job at a time through
+  its own Listener, job/worker-stamped events with NOTIFY, and console
+  commands to commission, answer, and cancel jobs, with a fleet view. Filed
+  `improvement-loop-on-the-queue` and `fleet-compose-deploy`.
+  [Detail](iterations/2026-09-23-04-job-queue-and-workers/index.md).
 - **Iteration 25 — Operator console, read side** landed (live proof pending).
   ADR-050 puts the console in `console/*` workspaces so the factory stays
   zero-dep; ADR-051 sets the deploy shape: one control plane, many single-job

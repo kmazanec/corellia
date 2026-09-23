@@ -17,3 +17,19 @@ export {
 } from '../../../src/eventlog/goal-tree.js';
 export { costSummary, traceStats, type UsageTotals } from '../../../src/eventlog/projections.js';
 export { loadDotEnv } from '../../../src/env.js';
+export type {
+  ClaimedJob,
+  JobBrief,
+  JobCommandResult,
+  JobQueue,
+  JobRecord,
+  JobState,
+  WorkerLink,
+  WorkerRecord,
+} from '../../../src/contract/jobs.js';
+export type { CommissionInput } from '../../../src/contract/brief.js';
+export { TERMINAL_JOB_STATES } from '../../../src/contract/jobs.js';
+export { MemoryJobQueue } from '../../../src/substrate/memory-job-queue.js';
+export { ensureJobSchema, PgWorkerLink } from '../../../src/substrate/pg-worker-link.js';
+export { sampleRun, type SampleOutcome } from '../../../src/dev/sample-run.js';
+export { PgEventStore } from '../../../src/substrate/pg-event-store.js';

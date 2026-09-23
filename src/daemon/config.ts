@@ -34,6 +34,8 @@ export interface StoreHandle {
   store: EventStore;
   /** Close the underlying connection (no-op for JSONL). */
   close: () => Promise<void>;
+  /** The Postgres store under any sinks, when DATABASE_URL selected it: schema and job stamping (ADR-051). */
+  pg?: PgEventStore;
 }
 
 export interface BuildStoreOptions {
@@ -63,6 +65,7 @@ export function buildStore(opts: BuildStoreOptions = {}): StoreHandle {
     return {
       store: wrapWithSinks(pg, sinks),
       close: () => pg.close(),
+      pg,
     };
   }
 
