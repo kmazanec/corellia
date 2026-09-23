@@ -8,6 +8,7 @@ import {
   shouldNudgeReadWithoutWrite,
   readWithoutWriteNudge,
 } from './make-progress-nudge.js';
+import type { ScopeGrounding } from './leaf-grounding.js';
 import { addNote, type Scratchpad } from './scratchpad.js';
 import {
   READ_ONLY_TOOL_NAMES,
@@ -45,6 +46,7 @@ export interface StepToolRoutingParams {
   now: () => number;
   enforceToolCallBudget: boolean;
   isExploreThenEmit: boolean;
+  grounding: ScopeGrounding;
   typeDef: GoalTypeDef;
   seenCalls: Set<string>;
   callKeyByCallId: Map<string, string>;
@@ -109,6 +111,7 @@ export async function routeStepToolCalls(params: StepToolRoutingParams): Promise
   if (
     shouldNudgeReadWithoutWrite({
       typeDef: params.typeDef,
+      isExploreThenEmit: params.isExploreThenEmit,
       readCalls: state.readCalls,
       writeCalls: state.writeCalls,
       alreadyNudged: state.readWithoutWriteNudged,
@@ -123,6 +126,7 @@ export async function routeStepToolCalls(params: StepToolRoutingParams): Promise
     exploreReadCalls: state.exploreReadCalls,
     nudgesSent: state.readWithoutEmitNudges,
     scope: params.goal.scope,
+    greenfield: params.grounding.kind === 'greenfield',
   });
   if (emitSteer !== null) {
     state.readWithoutEmitNudges++;

@@ -1,3 +1,6 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createStepLoopSession } from '../../src/engine/step-loop-session.js';
 import { buildRegistry, leafTypeDef, makeGoal } from './stubs.js';
@@ -67,5 +70,36 @@ describe('step-loop session', () => {
 
     expect(session.transcript[0]?.content).toContain('PRIOR ATTEMPT EVIDENCE');
     expect(session.transcript[0]?.content).toContain('important prior result');
+  });
+
+  it('grounds a greenfield criteria leaf in its spec and shows it the check vocabulary', () => {
+    const typeDef = leafTypeDef({
+      name: 'author-acceptance-criteria',
+      family: 'author',
+      grants: ['fs.read'],
+      outputSchema: { type: 'object' },
+      mintsAcceptanceChecks: true,
+    });
+    const goal = makeGoal({ type: 'author-acceptance-criteria', scope: ['examples/not-built-yet/'] });
+
+    const session = createStepLoopSession({
+      goal,
+      grants: typeDef.grants,
+      budget: goal.budget,
+      typeDef,
+      broker: {},
+      sandboxRepoRoot: mkdtempSync(join(tmpdir(), 'session-greenfield-')),
+      priorTranscript: undefined,
+      priorRejectionReasons: undefined,
+      checkVocabulary: { scriptNames: [], captureNames: [] },
+    });
+
+    const context = session.transcript[0]?.content ?? '';
+    expect(session.grounding).toEqual({ kind: 'greenfield', absent: ['examples/not-built-yet/'] });
+    expect(context).toContain('GREENFIELD SCOPE');
+    expect(context).toContain('CHECK VOCABULARY');
+    expect(context).toContain('do NOT emit any { script } check');
+    expect(context).not.toContain('This is a make goal');
+    expect(context).not.toContain('Shared conventions');
   });
 });

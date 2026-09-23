@@ -49,3 +49,13 @@ A run whose implementation satisfies a criterion's CLAIM under different
 identifier names converges — either because the minted anchors only reference
 spec-fixed strings, or because the loop can amend a stale anchor without
 weakening the claim.
+
+---
+
+> **Narrowed (2026-09-23, iteration 22).** The `author-acceptance-criteria` skill
+> now restricts `anchor`s to literal strings the spec itself fixes (a command
+> name, a flag, a quoted output) and forbids guessed identifiers, and the leaf
+> is shown its complete check vocabulary. That is prompt-level guidance only; a
+> mechanical guard (e.g. rejecting anchors absent from both the spec and the
+> worktree at author time) remains open.
+

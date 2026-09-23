@@ -7,6 +7,7 @@ import type { Artifact, Report } from '../../contract/report.js';
 import type { RiskClass, SensitivityFact } from '../../contract/risk.js';
 import type { ToolBroker } from '../../contract/tool.js';
 import { debitAttempt } from '../budget-events.js';
+import { checkVocabularyFrom, type CheckVocabulary } from '../leaf-grounding.js';
 import { exhaustedBrief } from '../reports.js';
 import {
   debitTreeState,
@@ -167,6 +168,7 @@ async function produceArtifactForAttempt(
     tierLadder: context.tierLadder,
     broker: context.deps.effectiveBroker(),
     sandboxRepoRoot: context.deps.sandboxRepoRoot(),
+    ...vocabularyFor(context),
     brain: context.deps.brain,
     registry: context.deps.registry,
     store: context.deps.store,
@@ -188,6 +190,13 @@ async function produceArtifactForAttempt(
         priorAttempt: failure.priorAttempt,
       }),
   });
+}
+
+/** The declared check names, only for types that mint acceptance checks. */
+function vocabularyFor(context: AttemptLoopContext): { checkVocabulary?: CheckVocabulary } {
+  if (context.typeDef.mintsAcceptanceChecks !== true) return {};
+  const checkVocabulary = checkVocabularyFrom(context.deps.checkContextFor(context.goal.id));
+  return checkVocabulary !== undefined ? { checkVocabulary } : {};
 }
 
 async function continueAfterProduction(

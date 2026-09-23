@@ -83,13 +83,28 @@ drift. Read the deliver-intent free-text intent and emit an ordered list of
 criteria `[{ id, claim, check }]`.
 
 Every `check` MUST be a sandbox-RUNNABLE predicate — never a rubric line a judge
-would have to read. Exactly two shapes are allowed:
-- `{ script: "<name>" }` — a repo-declared script command the sandbox runs; the
-  criterion is green when it exits 0 (the build's tests, typecheck, lint, an
-  e2e probe).
+would have to read. Exactly three shapes are allowed:
+- `{ script: "<name>" }` — a declared script the sandbox runs; the criterion is
+  green when it exits 0 (the build's tests, typecheck, lint, an e2e probe).
+- `{ capture: "<name>" }` — a declared runtime/visual capture that must run and
+  produce output.
 - `{ file: "<path>", anchor?: "<substring>" }` — the file exists in the worktree
   (and, with `anchor`, contains that substring). Use for "this module/endpoint
   exists" structural facts no script asserts.
+
+The script and capture names you may use are listed in your context under CHECK
+VOCABULARY. That list is complete and comes from the tree's configuration — it is
+not written in any repo file, so never read the repo hunting for script names, and
+never put a shell command line in a `{ script }` check.
+
+**Greenfield scope.** When your context says the scope does not exist yet, the
+deliverable has not been built and the spec is your only ground truth. Do not
+survey the host repo. Derive criteria straight from the spec: `{ file }` checks for
+each file the spec names under the scope, `anchor`s only for literal strings the
+spec itself fixes (a command name, a flag, an output the spec quotes — never an
+identifier you would be guessing), plus any declared script or capture that
+exercises the new deliverable. A handful of criteria grounded in the spec beats a
+long list grounded in guesses.
 
 A criterion whose only "check" is prose ("the code should be clean", "the UX
 should feel good") is REJECTED by the deterministic floor and blocks the artifact.

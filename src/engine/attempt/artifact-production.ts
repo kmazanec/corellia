@@ -12,6 +12,7 @@ import {
   type StepLoopResult,
 } from '../step-loop-result.js';
 import { isToolGranted } from '../step-loop-tools.js';
+import type { CheckVocabulary } from '../leaf-grounding.js';
 import { repairHintsFor } from './repair-hints.js';
 import { salvageWorktreeArtifact } from './worktree-salvage.js';
 import type { AttemptFailureResolution } from './failure.js';
@@ -52,6 +53,8 @@ export async function produceAttemptArtifact(params: {
   tierLadder: Tier[];
   broker: ToolBroker | undefined;
   sandboxRepoRoot: string | undefined;
+  /** The tree's declared check names, for types that mint acceptance checks. */
+  checkVocabulary?: CheckVocabulary;
   brain: Brain;
   registry: Registry;
   store: EventStore;
@@ -88,6 +91,7 @@ async function produceWithStepLoop(
     sandboxRepoRoot: params.sandboxRepoRoot,
     priorTranscript: params.state.priorLoopTranscript,
     priorRejectionReasons: priorRejectionReasons(params.state.priorAttempt),
+    ...(params.checkVocabulary !== undefined ? { checkVocabulary: params.checkVocabulary } : {}),
     brain: params.brain,
     store: params.store,
     now: params.now,

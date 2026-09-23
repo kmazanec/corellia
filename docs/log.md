@@ -14,6 +14,17 @@ the [iteration](iterations/index.md) or [ADR](adrs/index.md) that owns the detai
 This file replaces the former `STATUS.md`. Forward strategy is no longer a
 standalone roadmap — it lives as open issues.
 
+## 2026-09-23
+
+- **Iteration 22 — greenfield criteria grounding** (hand-built fix for the runs
+  4-6 stuck point). The criteria leaf wasn't just over-reading: it was told to
+  write files it had no tool for, never shown the declared check names the gate
+  enforces, and never told its scope didn't exist. All three fixed in the step
+  loop; live proof pending. Filed
+  [daemon-declared-scripts](issues/daemon-declared-scripts.md) (daemon trees can
+  mint only `{ file }` criteria). Detail:
+  [iteration 22](iterations/2026-09-23-00-greenfield-criteria-grounding/index.md).
+
 ## 2026-07-07 (proof runs 4-6 — the daemon gauntlet)
 
 - **Six daemon proof runs hardened four mechanisms and isolated one design

@@ -6,6 +6,7 @@ import { newScratchpad, type Scratchpad } from './scratchpad.js';
 import { stepLoopHardToolCallCap } from './step-loop-budget.js';
 import { buildStepLoopInitialTranscript } from './step-loop-context.js';
 import { isExploreThenEmitLeaf, type ReadOutputCache } from './step-loop-guards.js';
+import { groundScope, type CheckVocabulary, type ScopeGrounding } from './leaf-grounding.js';
 import { NOTE_TOOL_DEF, deriveToolDefs } from './step-loop-tools.js';
 
 export interface StepLoopCounters {
@@ -31,6 +32,7 @@ export interface StepLoopSession {
   callKeyByCallId: Map<string, string>;
   readOutputCache: ReadOutputCache;
   isExploreThenEmit: boolean;
+  grounding: ScopeGrounding;
   hardToolCallCap: number;
   counters: StepLoopCounters;
 }
@@ -44,9 +46,11 @@ export function createStepLoopSession(params: {
   sandboxRepoRoot: string | undefined;
   priorTranscript: StepTranscript | undefined;
   priorRejectionReasons: string[] | undefined;
+  checkVocabulary?: CheckVocabulary;
 }): StepLoopSession {
   const remainingToolCalls = params.budget.toolCalls;
   const isExploreThenEmit = isExploreThenEmitLeaf(params.typeDef);
+  const grounding = groundScope(params.sandboxRepoRoot, params.goal.scope);
 
   return {
     tools: stepLoopTools(params.grants, params.broker),
@@ -54,6 +58,8 @@ export function createStepLoopSession(params: {
       goal: params.goal,
       typeDef: params.typeDef,
       isExploreThenEmit,
+      grounding,
+      checkVocabulary: params.checkVocabulary,
       remainingToolCalls,
       sandboxRepoRoot: params.sandboxRepoRoot,
       priorTranscript: params.priorTranscript,
@@ -64,6 +70,7 @@ export function createStepLoopSession(params: {
     callKeyByCallId: new Map<string, string>(),
     readOutputCache: new Map<string, string>(),
     isExploreThenEmit,
+    grounding,
     hardToolCallCap: stepLoopHardToolCallCap(params.budget.toolCalls),
     counters: {
       remainingToolCalls,

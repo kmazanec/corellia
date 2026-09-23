@@ -4,6 +4,8 @@ import {
   shouldNudgeReadWithoutWrite,
   readWithoutWriteNudge,
   READ_WITHOUT_WRITE_THRESHOLD,
+  READ_WITHOUT_EMIT_THRESHOLD,
+  GREENFIELD_READ_WITHOUT_EMIT_THRESHOLD,
 } from '../../src/engine/make-progress-nudge.js';
 import type { GoalTypeDef } from '../../src/contract/goal-type.js';
 
@@ -120,5 +122,40 @@ describe('readWithoutEmitSteer (explore-then-emit read economy)', () => {
   it('labels an empty scope honestly', () => {
     const steer = readWithoutEmitSteer({ isExploreThenEmit: true, scope: [], exploreReadCalls: 16, nudgesSent: 0 });
     expect(steer).toContain('(empty scope)');
+  });
+});
+
+describe('emit-shaped make leaves', () => {
+  it('never get the write-files nudge — they have no write tools', () => {
+    expect(
+      shouldNudgeReadWithoutWrite({
+        typeDef: typeOfKind('make'),
+        isExploreThenEmit: true,
+        readCalls: READ_WITHOUT_WRITE_THRESHOLD * 4,
+        writeCalls: 0,
+        alreadyNudged: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('are steered to emit sooner when their scope is greenfield', () => {
+    const base = {
+      isExploreThenEmit: true,
+      exploreReadCalls: GREENFIELD_READ_WITHOUT_EMIT_THRESHOLD,
+      nudgesSent: 0,
+      scope: ['examples/wc/'],
+    };
+    expect(GREENFIELD_READ_WITHOUT_EMIT_THRESHOLD).toBeLessThan(READ_WITHOUT_EMIT_THRESHOLD);
+    expect(readWithoutEmitSteer(base)).toBeNull();
+    const steer = readWithoutEmitSteer({ ...base, greenfield: true });
+    expect(steer).toContain('does not exist yet');
+    expect(
+      readWithoutEmitSteer({
+        ...base,
+        greenfield: true,
+        nudgesSent: 1,
+        exploreReadCalls: GREENFIELD_READ_WITHOUT_EMIT_THRESHOLD * 2,
+      }),
+    ).toContain('final steer');
   });
 });
