@@ -843,7 +843,63 @@ describe('capability check at receive: declaredScripts + repoRoot', () => {
     const report = await listener.commission(input);
     expect(report.blockers).toHaveLength(0);
   });
+
+  it("falls back to the listener's repo root when the commission names none", async () => {
+    const store = new MemStore();
+    const engine = recordingEngine(store, []);
+    const listener = new Listener({ engine, store, repoRoot: makeCapTmp() });
+
+    const input = makeInput('cap-listener-root', ['src/lr'], {
+      declaredScripts: { smoke: 'scripts/smoke.mjs' },
+    });
+
+    await expect(listener.commission(input)).rejects.toThrow(/not found/i);
+  });
+
+  it('rejects a declared entry point that escapes the repo, before any engine run', async () => {
+    const store = new MemStore();
+    const seen: Goal[] = [];
+    const listener = new Listener({ engine: recordingEngine(store, seen), store });
+
+    const input = makeInput('cap-escape', ['src/esc'], {
+      declaredScripts: { smoke: '../outside.mjs' },
+    });
+
+    await expect(listener.commission(input)).rejects.toThrow(/in-bounds/);
+    expect(seen).toHaveLength(0);
+  });
+
+  it("threads the commission's declared scripts and captures onto the root goal", async () => {
+    const store = new MemStore();
+    const seen: Goal[] = [];
+    const listener = new Listener({ engine: recordingEngine(store, seen), store });
+
+    const input = makeInput('cap-thread', ['src/thr'], {
+      declaredScripts: { serve: 'npm-script:serve' },
+      declaredCaptures: {
+        home: { kind: 'drive-endpoint', startScript: 'serve', port: 4173, method: 'GET', path: '/', outputPath: 'out/home.json' },
+      },
+    });
+    await listener.commission(input);
+
+    expect(seen[0]?.declaredScripts).toEqual({ serve: 'npm-script:serve' });
+    expect(Object.keys(seen[0]?.declaredCaptures ?? {})).toEqual(['home']);
+  });
 });
+
+function recordingEngine(
+  store: MemStore,
+  seen: Goal[],
+): InstanceType<typeof import('../../src/engine/engine.js').Engine> {
+  return {
+    async run(goal: Goal): Promise<Report> {
+      seen.push(goal);
+      const report = successReport(goal.id);
+      await store.append({ type: 'emitted', at: Date.now(), goalId: goal.id, report });
+      return report;
+    },
+  } as unknown as InstanceType<typeof import('../../src/engine/engine.js').Engine>;
+}
 
 // ── per-commission spend ceiling threads onto the root goal ────────────────
 

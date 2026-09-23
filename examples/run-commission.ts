@@ -103,10 +103,11 @@ mkdirSync(OUT_DIR, { recursive: true });
 const repoRoot = resolve(commission.repoRoot ?? doc.repoRoot ?? process.cwd());
 assertGitRepo(repoRoot, 'commission repoRoot');
 
-// run_script may only invoke DECLARED entry points. Use the commission's declared
-// scripts if present; otherwise declare the standard verification trio so a build
-// can keep typecheck/lint/test green (mirrors examples/live-self.ts).
-const declaredScripts: DeclaredScripts = commission.declaredScripts ?? {
+// run_script may only invoke DECLARED entry points. The engine's default set is the
+// standard verification trio so a build can keep typecheck/lint/test green (mirrors
+// examples/live-self.ts); the commission's own declaredScripts ride its root goal
+// and layer over these for its tree, exactly as under the daemon.
+const declaredScripts: DeclaredScripts = {
   test: 'npm-script:test',
   typecheck: 'npm-script:typecheck',
   lint: 'npm-script:lint',
@@ -131,7 +132,7 @@ const engine = buildLiveEngine({
   sandbox: { repoRoot, declaredScripts },
   goldenCapture: true,
 });
-const listener = new Listener({ engine, store });
+const listener = new Listener({ engine, store, repoRoot });
 
 // ── Commission through the real front door ───────────────────────────────────────
 

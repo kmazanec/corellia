@@ -91,6 +91,13 @@ ceiling for the run — the engine halts the tree when measured spend reaches it
   the commission so the factory has concrete maintainability evidence.
 - The `spec` for `deliver-intent` uses the proven `{ description, scope?,
   constraints? }` convention. Do **not** invent other `spec` fields.
+- **Declare the behavioral done-condition.** `declaredScripts` names the
+  scripts this commission's tree may cite as `{ script }` acceptance criteria;
+  they layer over the runner's (or daemon's `CORELLIA_DECLARED_SCRIPTS`) default
+  set for this tree only. Point them at an operator-owned check **outside** the
+  commission's scope (e.g. `commissions/checks/<id>-smoke.mjs`), so the tree can
+  cite the check but never author it. Entry points must exist when the
+  commission is admitted.
 - Acceptance criteria live as prose in `description`/`constraints` for now;
   structured acceptance-criteria-in-spec is the milestone-loop bridge
   (ADR-031/032, `docs/iterations/2026-06-24-03-milestone-loop/spec.md`), added when

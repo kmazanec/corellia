@@ -25,6 +25,8 @@ import { projectPatternMemos } from '../eventlog/projections.js';
 import type { EventSink, EventStore } from '../contract/events.js';
 import type { PatternStore } from '../contract/pattern.js';
 import type { StandingEnvelope } from '../contract/brief.js';
+import { parseDeclaredScripts } from '../library/declared-scripts.js';
+import type { DeclaredScripts } from '../library/script-runner.js';
 
 // ── Substrate ──────────────────────────────────────────────────────────────
 
@@ -299,4 +301,21 @@ export function buildStandingEnvelope(): StandingEnvelope | undefined {
     console.warn('[config] STANDING_BUDGET_JSON is not valid JSON — standing envelope disabled');
     return undefined;
   }
+}
+
+// ── Default declared scripts ─────────────────────────────────────────────────
+
+/**
+ * The daemon's default declared scripts (ADR-016), read from
+ * CORELLIA_DECLARED_SCRIPTS — a JSON object of name → entry point, e.g.
+ * `{"test":"npm-script:test","typecheck":"npm-script:typecheck"}`. Every tree
+ * the daemon runs may cite these in `{ script }` criteria; a commission's own
+ * `declaredScripts` layer over them for its tree. Unset → no defaults, so a
+ * tree can check behavior only through scripts its commission declares.
+ *
+ * @throws When the value is malformed JSON or declares an invalid entry, so a
+ *   bad operator config is refused before any tree runs.
+ */
+export function buildDeclaredScripts(): DeclaredScripts {
+  return parseDeclaredScripts(process.env['CORELLIA_DECLARED_SCRIPTS'], 'CORELLIA_DECLARED_SCRIPTS');
 }

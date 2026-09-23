@@ -24,6 +24,9 @@ const doc = {
       ],
     },
     scope: ['out/commission-example-word-count/'],
+    // The operator-owned behavioral done-condition: the tree may cite
+    // { script: "smoke" } as a criterion but cannot author or edit it.
+    declaredScripts: { smoke: 'commissions/checks/word-count-smoke.mjs' },
     budget: {
       attempts: 3,
       tokens: 200_000,

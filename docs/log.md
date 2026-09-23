@@ -16,6 +16,13 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-09-23
 
+- **Iteration 23 — per-tree declared scripts** (hand-built fix for
+  daemon-declared-scripts). A commission's `declaredScripts`/`declaredCaptures`
+  now ride the root goal and layer over the engine's defaults for that tree;
+  the daemon's defaults come from `CORELLIA_DECLARED_SCRIPTS`. The step-7 proof
+  target `example-word-count` declares an operator-owned `smoke` check, so its
+  convergence can be judged on behavior. Live proof pending (with iteration 22).
+  Detail: [iteration 23](iterations/2026-09-23-01-daemon-declared-scripts/index.md).
 - **Iteration 22 — greenfield criteria grounding** (hand-built fix for the runs
   4-6 stuck point). The criteria leaf wasn't just over-reading: it was told to
   write files it had no tool for, never shown the declared check names the gate

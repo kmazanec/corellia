@@ -40,5 +40,6 @@ Newest last (chronological).
 | [2026-07-01-16](2026-07-01-16-live-tail-commission-fixes/index.md) | 20 — Acceptance-floor fixes from driving the live-tail commission | landed on main |
 | [2026-07-06-19](2026-07-06-19-cloud-ready-wave/index.md) | 21 — The cloud-ready wave: deploy, model catalog, tree deadline, observability, resilience rungs (ADR-044…048) | merged to main |
 | [2026-09-23-00](2026-09-23-00-greenfield-criteria-grounding/index.md) | 22 — Greenfield criteria grounding: emit-shaped leaves stop getting file guidance; check vocabulary; spec-grounded greenfield mode | landed; live proof pending |
+| [2026-09-23-01](2026-09-23-01-daemon-declared-scripts/index.md) | 23 — Per-tree declared scripts: commission scripts/captures ride the root goal; daemon defaults via env; word-count gets a behavioral smoke check | landed; live proof pending |
 
 Open follow-on work from these iterations lives in [../issues/](../issues/index.md).

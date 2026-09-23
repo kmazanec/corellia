@@ -10,6 +10,7 @@ import {
 } from './assembly.js';
 import { applyRootEmissionGate } from './root-emission-gate.js';
 import { finalizeSandboxedRun } from './sandbox-finalization.js';
+import { treeSandboxFor } from './tree-sandbox.js';
 import {
   DEFAULT_SPEND_CEILING_USD,
   createTreeState,
@@ -40,7 +41,7 @@ export async function runRootGoal(params: {
     return runLearnRoot(params, treeState, params.sandbox);
   }
 
-  return runSandboxedRoot(params, treeState, params.sandbox);
+  return runSandboxedRoot(params, treeState, treeSandboxFor(params.sandbox, params.goal));
 }
 
 function isLearnRootWithoutScripts(goal: Goal, registry: Registry): boolean {

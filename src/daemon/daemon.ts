@@ -31,7 +31,7 @@ import { preserveTree, sanitizeTreeId } from '../engine/worktree.js';
 import type { Engine } from '../engine/engine.js';
 import { FrontDoorServer } from './http-server.js';
 import { maybeStartRepl } from './repl.js';
-import { buildStore, buildStandingEnvelope, buildPatternStore } from './config.js';
+import { buildStore, buildStandingEnvelope, buildPatternStore, buildDeclaredScripts } from './config.js';
 import { buildLiveEngine, deriveRepoSlug } from './live-engine.js';
 import type { PatternStore } from '../contract/pattern.js';
 import { join } from 'node:path';
@@ -112,9 +112,10 @@ function selectEngine(patterns: PatternStore): Engine {
     // gate always. Safe default: do NOT set unless this daemon is corellia
     // pushing to its own repo.
     const factoryRepoSlugEnv = process.env['FACTORY_REPO_SLUG'] ?? undefined;
+    const declaredScripts = buildDeclaredScripts();
     const sandbox = {
       repoRoot,
-      declaredScripts: {},
+      declaredScripts,
       ...(repoSlug
         ? {
             prBoundary: {
@@ -126,6 +127,12 @@ function selectEngine(patterns: PatternStore): Engine {
     };
     const engine = buildLiveEngine({ store, sandbox, goldenCapture: true, patterns });
     console.log('[daemon] engine: live engine — commissions will be processed via OpenRouter');
+    const defaultScriptNames = Object.keys(declaredScripts);
+    console.log(
+      defaultScriptNames.length > 0
+        ? `[daemon] engine: default declared scripts: ${defaultScriptNames.join(', ')} (commissions may declare more)`
+        : '[daemon] engine: no default declared scripts — only commission-declared scripts are runnable',
+    );
     console.log('[daemon] flywheel: split-memo pattern store wired — recurring splits memoize');
     if (repoSlug) {
       console.log(`[daemon] engine: target repo slug: ${repoSlug}`);
@@ -298,7 +305,11 @@ async function start(): Promise<void> {
   const patternHandle = await buildPatternStore(store);
   closePatternStore = patternHandle.close;
 
-  listener = new Listener({ engine: selectEngine(patternHandle.patterns), store });
+  listener = new Listener({
+    engine: selectEngine(patternHandle.patterns),
+    store,
+    repoRoot: process.env['CORELLIA_REPO_ROOT'] ?? process.cwd(),
+  });
   server = new FrontDoorServer({ listener, token });
 
   await server.listen(port, host);

@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildStore, buildPatternStore, defaultEventsPath } from '../../src/daemon/config.js';
+import { buildStore, buildPatternStore, buildDeclaredScripts, defaultEventsPath } from '../../src/daemon/config.js';
 import { JsonlEventStore } from '../../src/eventlog/jsonl-store.js';
 import { runTrust, runPatternsList } from '../../src/eventlog/patterns-cli.js';
 import type { Decision } from '../../src/contract/decision.js';
@@ -172,5 +172,28 @@ describe('buildPatternStore — the flywheel wired to the daemon substrate', () 
     const out: string[] = [];
     await runPatternsList(patterns, { log: (l) => out.push(l), error: () => {} });
     expect(out.join('\n')).toContain('shape-a');
+  });
+});
+
+describe('buildDeclaredScripts — the daemon default check vocabulary', () => {
+  const saved = process.env['CORELLIA_DECLARED_SCRIPTS'];
+  afterEach(() => {
+    if (saved === undefined) delete process.env['CORELLIA_DECLARED_SCRIPTS'];
+    else process.env['CORELLIA_DECLARED_SCRIPTS'] = saved;
+  });
+
+  it('declares no scripts when the env is unset', () => {
+    delete process.env['CORELLIA_DECLARED_SCRIPTS'];
+    expect(buildDeclaredScripts()).toEqual({});
+  });
+
+  it('reads the env JSON map', () => {
+    process.env['CORELLIA_DECLARED_SCRIPTS'] = '{"test":"npm-script:test"}';
+    expect(buildDeclaredScripts()).toEqual({ test: 'npm-script:test' });
+  });
+
+  it('refuses an invalid entry', () => {
+    process.env['CORELLIA_DECLARED_SCRIPTS'] = '{"test":"/bin/sh"}';
+    expect(() => buildDeclaredScripts()).toThrow(/CORELLIA_DECLARED_SCRIPTS/);
   });
 });

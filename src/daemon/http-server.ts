@@ -17,6 +17,7 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import type { Listener } from '../listener/listener.js';
 import type { CommissionInput, FrontDoorStatus } from '../contract/brief.js';
 import type { Budget } from '../contract/goal.js';
+import { declaredScriptsProblem } from '../library/declared-scripts.js';
 
 // ── JSON body reader ────────────────────────────────────────────────────────
 
@@ -102,6 +103,14 @@ function validateCommissionInput(body: Record<string, unknown>): string | null {
   }
   if (!isValidBudget(body['budget'])) {
     return 'Invalid CommissionInput: "budget" must be an object with finite numeric fields: attempts, tokens, toolCalls, wallClockMs';
+  }
+  if (body['declaredScripts'] !== undefined) {
+    const problem = declaredScriptsProblem(body['declaredScripts']);
+    if (problem !== null) return `Invalid CommissionInput: ${problem}`;
+  }
+  const captures = body['declaredCaptures'];
+  if (captures !== undefined && (captures === null || typeof captures !== 'object' || Array.isArray(captures))) {
+    return 'Invalid CommissionInput: "declaredCaptures" must be an object of name → capture';
   }
   return null;
 }
