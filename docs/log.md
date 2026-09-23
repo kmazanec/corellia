@@ -16,6 +16,15 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-09-23
 
+- **Iteration 25 — Operator console, read side** landed (live proof pending).
+  ADR-050 puts the console in `console/*` workspaces so the factory stays
+  zero-dep; ADR-051 sets the deploy shape: one control plane, many single-job
+  workers over shared Postgres. The goal tree is now a shared data projection
+  (`src/eventlog/goal-tree.ts`). A Hono + Drizzle control plane serves jobs,
+  trees, events, and goal detail over REST + resumable SSE, and a React SPA in
+  the Plate aesthetic shows them live. Issue `operator-console-ui` →
+  partially-fixed.
+  [Detail](iterations/2026-09-23-03-operator-console-read-side/index.md).
 - **Backlog audit + issue lifecycle enforced.** 18 issues had fix notes on main
   but still said `open`; the catalog carried no status. Issue status is now a
   closed lifecycle (`open` → `partially-fixed` → `fixed-pending-live-proof` →

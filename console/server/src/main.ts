@@ -42,6 +42,7 @@ const model = new ReadModel(chooseSource());
 await model.start(pollMs);
 
 const server = new Hono().route('/', createApp({ model, token }));
+server.all('/api/*', (c) => c.json({ error: 'not found' }, 404));
 if (existsSync(webDist)) {
   server.use('/*', serveStatic({ root: webDist }));
   server.get('*', serveStatic({ path: resolve(webDist, 'index.html') }));

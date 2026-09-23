@@ -1,0 +1,560 @@
+/*
+ * The operator console's visual language is the factory's Plate aesthetic
+ * (factory.html, ADR-050): dark ground, brass and oxblood, teal and moss;
+ * Cinzel for crests, Spectral for prose, JetBrains Mono for data; hairline
+ * rules with end ticks; paper plates with a drafting grid.
+ *
+ * Tailwind is a utility layer only. Its default palette, fonts, and radii are
+ * cleared, so every colour and face on screen comes from these tokens.
+ */
+
+@import 'tailwindcss';
+
+@theme {
+  --color-*: initial;
+  --color-ground: #14110c;
+  --color-ground-2: #1d1810;
+  --color-ground-3: #262016;
+  --color-paper: #e9e1cf;
+  --color-paper-2: #ddd2ba;
+  --color-ink: #2a2417;
+  --color-ink-soft: #5a4f38;
+  --color-line: #9c8c66;
+  --color-line-soft: #bcab83;
+  --color-brass: #c8932f;
+  --color-brass-bright: #e9b84a;
+  --color-brass-deep: #8a6410;
+  --color-oxblood: #9e3a26;
+  --color-oxblood-bright: #d4775f;
+  --color-teal: #3c7d78;
+  --color-teal-bright: #5aa39c;
+  --color-moss: #5f7a3a;
+  --color-moss-bright: #7e9a4e;
+  --color-moss-pale: #9ab36a;
+  --color-paren: #a8925e;
+
+  --font-*: initial;
+  --font-crest: 'Cinzel', serif;
+  --font-prose: 'Spectral', Georgia, serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --radius-*: initial;
+  --radius-plate: 2px;
+  --radius-chit: 1px;
+
+  --animate-flick: flick 1.1s infinite;
+  --animate-slide-in: slide-in 0.4s forwards;
+
+  @keyframes flick {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.4;
+    }
+  }
+  @keyframes slide-in {
+    from {
+      opacity: 0;
+      transform: translateX(8px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    background: var(--color-ground);
+    color: var(--color-paper);
+    font-family: var(--font-prose);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+  /* Film grain over everything, and a vignette under it. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 50;
+    opacity: 0.05;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background: radial-gradient(ellipse at 50% 20%, transparent 42%, rgba(0, 0, 0, 0.45) 100%);
+  }
+  #root {
+    position: relative;
+    z-index: 1;
+  }
+  :focus-visible {
+    outline: 1px solid var(--color-brass-bright);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: rgba(200, 147, 47, 0.35);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line) transparent;
+  }
+}
+
+@layer components {
+  /* ── Labels and rules ─────────────────────────────────────────────── */
+
+  /* Mono small caps: the plate's annotation voice. */
+  .annot {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-line-soft);
+  }
+  .annot b {
+    color: var(--color-brass);
+    font-weight: 500;
+  }
+
+  /* A hairline with end ticks. */
+  .ruleline {
+    position: relative;
+    height: 1px;
+    background: var(--color-line);
+    opacity: 0.6;
+  }
+  .ruleline::before,
+  .ruleline::after {
+    content: '';
+    position: absolute;
+    top: -3px;
+    width: 1px;
+    height: 7px;
+    background: var(--color-line);
+  }
+  .ruleline::before {
+    left: 0;
+  }
+  .ruleline::after {
+    right: 0;
+  }
+
+  /* ⟨goal title⟩ in Spectral italic. */
+  .goal-title {
+    font-family: var(--font-prose);
+    font-style: italic;
+    font-weight: 500;
+  }
+  .goal-title::before {
+    content: '⟨';
+    font-style: normal;
+    opacity: 0.55;
+    margin-right: 1px;
+  }
+  .goal-title::after {
+    content: '⟩';
+    font-style: normal;
+    opacity: 0.55;
+    margin-left: 1px;
+  }
+
+  /* ── Panels: dark instruments on the ground ───────────────────────── */
+
+  .panel {
+    background: linear-gradient(180deg, var(--color-ground-2), var(--color-ground));
+    border: 1px solid rgba(156, 140, 102, 0.4);
+    border-radius: var(--radius-plate);
+    padding: 16px;
+    box-shadow: 0 14px 34px -22px #000;
+  }
+  .panel-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-crest);
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--color-brass);
+  }
+  .panel-title::before {
+    content: '';
+    width: 14px;
+    height: 1px;
+    background: var(--color-brass);
+    opacity: 0.6;
+  }
+
+  /* ── Plates: paper sheets with a drafting grid and corner ticks ───── */
+
+  .plate {
+    position: relative;
+    background: var(--color-paper);
+    color: var(--color-ink);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-plate);
+    box-shadow:
+      0 26px 60px -20px rgba(0, 0, 0, 0.55),
+      0 2px 0 rgba(255, 255, 255, 0.04) inset;
+    padding: 28px 26px 22px;
+    overflow: hidden;
+  }
+  .plate::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.5;
+    background-image:
+      linear-gradient(rgba(120, 104, 66, 0.1) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(120, 104, 66, 0.1) 1px, transparent 1px);
+    background-size: 26px 26px;
+  }
+  .plate::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 16% 10%, rgba(255, 250, 235, 0.6), transparent 45%),
+      radial-gradient(circle at 84% 90%, rgba(120, 90, 40, 0.1), transparent 50%);
+    mix-blend-mode: multiply;
+  }
+  .plate > * {
+    position: relative;
+    z-index: 2;
+  }
+  .plate .tick {
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    border: 1.5px solid var(--color-line);
+    z-index: 3;
+  }
+  .plate .tick.tl {
+    top: 8px;
+    left: 8px;
+    border-right: 0;
+    border-bottom: 0;
+  }
+  .plate .tick.tr {
+    top: 8px;
+    right: 8px;
+    border-left: 0;
+    border-bottom: 0;
+  }
+  .plate .tick.bl {
+    bottom: 8px;
+    left: 8px;
+    border-right: 0;
+    border-top: 0;
+  }
+  .plate .tick.br {
+    bottom: 8px;
+    right: 8px;
+    border-left: 0;
+    border-top: 0;
+  }
+
+  /* ── Buttons ──────────────────────────────────────────────────────── */
+
+  .btn {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 10px 14px;
+    color: var(--color-paper);
+    background: var(--color-ground-2);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-plate);
+    transition: 0.18s;
+    cursor: pointer;
+  }
+  .btn[data-hovered] {
+    background: var(--color-brass);
+    color: #1a140a;
+    border-color: var(--color-brass-bright);
+  }
+  .btn.primary {
+    background: var(--color-brass);
+    color: #1a140a;
+    border-color: var(--color-brass-bright);
+  }
+  .btn.primary[data-hovered] {
+    background: var(--color-brass-bright);
+  }
+  .btn[data-disabled] {
+    opacity: 0.32;
+    cursor: not-allowed;
+  }
+
+  /* ── The S-expression goal tree ───────────────────────────────────── */
+
+  .sexpr {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    line-height: 1.2;
+  }
+  .sexpr .form-row {
+    /* Indent by depth; a faint guide rule marks each ancestor level. */
+    padding-left: calc((var(--level, 1) - 1) * 20px);
+    background-image: repeating-linear-gradient(
+      90deg,
+      transparent 0 9px,
+      rgba(120, 104, 66, 0.3) 9px 10px,
+      transparent 10px 20px
+    );
+    background-size: calc((var(--level, 1) - 1) * 20px) 100%;
+    background-repeat: no-repeat;
+    cursor: pointer;
+    outline: none;
+  }
+  .sexpr .head {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 7px;
+    padding: 4px 8px 4px 4px;
+    border-radius: 3px;
+    transition:
+      background 0.3s,
+      box-shadow 0.3s;
+  }
+  .sexpr .paren {
+    color: var(--color-paren);
+    font-weight: 700;
+    font-size: 14px;
+  }
+  .sexpr .gtype {
+    color: var(--color-ink);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  .sexpr .goal-title {
+    font-size: 14px;
+    color: var(--color-ink);
+  }
+  .sexpr .tag {
+    font-size: 8.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border: 1px solid var(--color-ink-soft);
+    color: var(--color-ink-soft);
+    padding: 0 4px;
+    border-radius: var(--radius-chit);
+    align-self: center;
+  }
+  .sexpr .ret {
+    font-size: 11px;
+    color: var(--color-moss);
+    font-weight: 500;
+  }
+  .sexpr .ret .arrow {
+    color: var(--color-ink-soft);
+  }
+  .sexpr .fold {
+    width: 12px;
+    color: var(--color-ink-soft);
+    font-size: 10px;
+    align-self: center;
+  }
+
+  /* State skins, from the Plate legend. */
+  .head[data-state='running'] {
+    background: rgba(200, 147, 47, 0.16);
+    box-shadow: inset 0 0 0 1px rgba(200, 147, 47, 0.5);
+  }
+  .head[data-state='running'] .paren {
+    color: var(--color-brass);
+    animation: var(--animate-flick);
+  }
+  .head[data-state='running'] .gtype {
+    color: var(--color-brass-deep);
+  }
+  .head[data-state='failed'],
+  .head[data-state='blocked'] {
+    background: rgba(158, 58, 38, 0.14);
+    box-shadow: inset 0 0 0 1px rgba(158, 58, 38, 0.55);
+  }
+  .head[data-state='failed'] .paren,
+  .head[data-state='failed'] .gtype,
+  .head[data-state='blocked'] .paren,
+  .head[data-state='blocked'] .gtype {
+    color: var(--color-oxblood);
+  }
+  .head[data-state='parked'] {
+    background: rgba(60, 125, 120, 0.16);
+    box-shadow: inset 0 0 0 1px rgba(60, 125, 120, 0.6);
+  }
+  .head[data-state='parked'] .paren,
+  .head[data-state='parked'] .gtype {
+    color: var(--color-teal);
+  }
+  .head[data-state='parked'] .paren {
+    animation: var(--animate-flick);
+  }
+  .head[data-state='done'] {
+    background: rgba(95, 122, 58, 0.1);
+  }
+  .head[data-state='done'] .paren {
+    color: var(--color-moss);
+  }
+  .head[data-state='done'] .goal-title {
+    color: var(--color-ink-soft);
+  }
+  .form-row[data-selected] .head {
+    box-shadow:
+      inset 0 0 0 1px var(--color-ink),
+      2px 2px 0 rgba(42, 36, 23, 0.25);
+  }
+  .form-row[data-focus-visible] .head {
+    outline: 1px dashed var(--color-ink-soft);
+    outline-offset: 1px;
+  }
+
+  /* ── The trace: event log lines on the ground ─────────────────────── */
+
+  .trace-line {
+    display: grid;
+    grid-template-columns: 92px 1fr;
+    gap: 10px;
+    border-left: 2px solid var(--color-line);
+    padding: 1px 0 1px 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.5;
+  }
+  @media (max-width: 640px) {
+    .trace-line {
+      grid-template-columns: 1fr;
+      gap: 0;
+    }
+  }
+  .trace-line.fresh {
+    animation: var(--animate-slide-in);
+  }
+  .trace-line .t-time {
+    color: var(--color-line-soft);
+    opacity: 0.75;
+  }
+  .trace-line .t-text {
+    color: var(--color-paper-2);
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .trace-line .t-kind {
+    color: var(--color-line-soft);
+    margin-right: 8px;
+  }
+  .trace-line[data-tone='active'] {
+    border-color: var(--color-brass);
+  }
+  .trace-line[data-tone='active'] .t-kind {
+    color: var(--color-brass-bright);
+  }
+  .trace-line[data-tone='pass'] {
+    border-color: var(--color-moss);
+  }
+  .trace-line[data-tone='pass'] .t-kind {
+    color: var(--color-moss-pale);
+  }
+  .trace-line[data-tone='fail'] {
+    border-color: var(--color-oxblood);
+  }
+  .trace-line[data-tone='fail'] .t-kind {
+    color: var(--color-oxblood-bright);
+  }
+  .trace-line[data-tone='human'] {
+    border-color: var(--color-teal);
+  }
+  .trace-line[data-tone='human'] .t-kind {
+    color: var(--color-teal-bright);
+  }
+  .trace-line[data-tone='tool'] {
+    border-color: var(--color-line-soft);
+  }
+  .trace-line[data-tone='quiet'] {
+    border-color: rgba(156, 140, 102, 0.35);
+    opacity: 0.8;
+  }
+
+  /* ── The job ledger ───────────────────────────────────────────────── */
+
+  .ledger {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+  .ledger th {
+    text-align: left;
+    font-weight: 500;
+    font-size: 9.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--color-line-soft);
+    padding: 0 12px 10px;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .ledger td {
+    padding: 12px;
+    border-bottom: 1px solid rgba(156, 140, 102, 0.18);
+    color: var(--color-paper-2);
+    vertical-align: baseline;
+  }
+  .ledger tr[data-href] {
+    cursor: pointer;
+    outline: none;
+  }
+  .ledger tbody tr {
+    transition: background 0.15s;
+  }
+  .ledger tbody tr[data-hovered],
+  .ledger tbody tr[data-focus-visible] {
+    background: rgba(200, 147, 47, 0.07);
+  }
+  .ledger tbody tr[data-focus-visible] td:first-child {
+    box-shadow: inset 2px 0 0 var(--color-brass);
+  }
+  .ledger tr[data-state='parked'] td:first-child {
+    box-shadow: inset 2px 0 0 var(--color-teal);
+  }
+  .ledger .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Field ────────────────────────────────────────────────────────── */
+
+  .field-input {
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--color-ink);
+    background: rgba(255, 253, 247, 0.7);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-plate);
+    padding: 10px 12px;
+    outline: none;
+  }
+  .field-input[data-focused] {
+    border-color: var(--color-brass);
+    box-shadow: 0 0 0 1px var(--color-brass);
+  }
+}

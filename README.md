@@ -45,6 +45,8 @@ summary.
 | `src/library/` | The starter set of goal-type definitions (`starterTypes()`), the deterministic check library (`checks.ts`), and `createRegistry()`. |
 | `src/brains/` | `ScriptedBrain` (deterministic, for tests and demos) and `LlmBrain` (any OpenAI-compatible endpoint). |
 | `src/substrate/` | Durable store implementations: `PgEventStore`, `PgPatternStore`, and `InMemoryPatternStore`. |
+| `console/server/` | The control plane (ADR-050/051): a read-model over the event log served as a typed REST + SSE API. Its own npm workspace; the factory never imports it. |
+| `console/web/` | The operator console SPA (React + Vite) in the Plate aesthetic: live job ledger, goal tree, trace, and inspector. |
 
 ---
 
@@ -184,6 +186,29 @@ Inject a `fetchImpl` to stub the network in tests:
 ```ts
 const brain = new LlmBrain({ ..., fetchImpl: myStubFetch });
 ```
+
+---
+
+## Operator console
+
+A browser view of every job in the event log, live: the job ledger, each job's
+goal tree as it fans out, its trace, and a per-goal inspector. It reads the log
+and never writes it (ADR-051 Phase 1). Stack and boundaries:
+[ADR-050](docs/adrs/ADR-050-operator-console-stack.md); control plane / worker
+split: [ADR-051](docs/adrs/ADR-051-control-plane-worker-split.md).
+
+```bash
+# Against a real log: DATABASE_URL (shared Postgres) or a local JSONL file
+FRONT_DOOR_TOKEN=… DATABASE_URL=postgres://… npm run console:server   # API on :8090
+npm run console:web                                                    # UI on :5173 (proxies /api)
+
+# No model needed: synthetic concurrent jobs written live to a JSONL log
+npm run console:simulate -- out/console-dev/events.jsonl
+FRONT_DOOR_TOKEN=dev CONSOLE_EVENTS_JSONL=out/console-dev/events.jsonl npm run console:server
+```
+
+`npm run console:build` builds the SPA into `console/web/dist`, which the
+control plane then serves at `/`. The API document is at `/api/openapi.json`.
 
 ---
 

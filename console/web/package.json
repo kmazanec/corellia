@@ -12,6 +12,7 @@
   "dependencies": {
     "@tanstack/react-query": "^5.103.2",
     "@tanstack/react-router": "^1.170.39",
+    "hono": "^4.13.8",
     "react": "^19.3.0",
     "react-aria-components": "^1.21.1",
     "react-dom": "^19.3.0"

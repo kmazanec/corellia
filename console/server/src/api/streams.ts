@@ -3,8 +3,9 @@
  *
  * - `GET /stream` — job summaries as they change, for the dashboard.
  * - `GET /jobs/:jobId/stream` — a job's events, replayed from `Last-Event-ID`
- *   (or `?after=`) and then followed live. Each message's `id` is the event's
- *   `seq`, so a reconnecting client resumes exactly where it stopped.
+ *   (or `?after=`), then a `caught-up` marker, then followed live. Each event
+ *   message's `id` is the event's `seq`, so a reconnecting client resumes
+ *   exactly where it stopped.
  *
  * A subscription is opened before the replay and its buffer is drained after
  * it, skipping anything the replay already sent, so no event falls between
@@ -51,6 +52,7 @@ export function streamRoutes(model: ReadModel) {
           await stream.writeSSE({ event: 'event', id: String(s.seq), data: JSON.stringify(s) });
           sent = s.seq;
         }
+        await stream.writeSSE({ event: 'caught-up', data: JSON.stringify({ seq: sent }) });
         await pump(stream, 100, async () => {
           while (pending.length > 0) {
             const e = pending.shift()!;

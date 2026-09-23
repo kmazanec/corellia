@@ -52,7 +52,7 @@ status disagrees with its file (rules in `src/library/issue-backlog.ts`).
 | [greenfield-criteria-grounding](greenfield-criteria-grounding.md) | bug | fixed-pending-live-proof | engine, acceptance-criteria, milestone-loop, greenfield, anchors, explore-economy, deliver-intent |
 | [judge-calibration-replay](judge-calibration-replay.md) | future-work | fixed-pending-live-proof | engine, eval, golden, calibration, judge, replay |
 | [milestone-loop-step-7-prove-live](milestone-loop-step-7-prove-live.md) | future-work | open | milestone-loop, engine, live-proof |
-| [operator-console-ui](operator-console-ui.md) | future-work | open | ui, operator-console, observability, read-model, daemon, eventlog, harness, front-door |
+| [operator-console-ui](operator-console-ui.md) | future-work | partially-fixed | ui, operator-console, observability, read-model, daemon, eventlog, harness, front-door |
 | [out-of-scope-edit-enforcement](out-of-scope-edit-enforcement.md) | bug | fixed-pending-live-proof | scope-safety, engine, broker |
 | [web-fetch-tool](web-fetch-tool.md) | bug | fixed-pending-live-proof | engine, broker, tool, research, web |
 | [worktree-work-invisible-to-artifact-judges](worktree-work-invisible-to-artifact-judges.md) | bug | fixed-pending-live-proof | engine, artifact, worktree, salvage, judge, acceptance, milestone-loop, integrate-merge |

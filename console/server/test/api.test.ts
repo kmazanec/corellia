@@ -105,13 +105,15 @@ describe('control plane API', () => {
     });
     expect(res.headers.get('content-type')).toContain('text/event-stream');
 
-    const pending = readSse(res, 3);
+    const pending = readSse(res, 4);
     source.push({ type: 'transport-retry', at: 99_000, goalId: 'job-1.3', detail: 'provider 529' });
     await model.sync();
     const messages = await pending;
 
-    expect(messages.map((m) => Number(m.id))).toEqual([total - 1, total, total + 1]);
-    expect(JSON.parse(messages[2]!.data)).toMatchObject({ seq: total + 1, event: { type: 'transport-retry' } });
+    expect(messages.map((m) => m.event)).toEqual(['event', 'event', 'caught-up', 'event']);
+    expect(messages.filter((m) => m.event === 'event').map((m) => Number(m.id))).toEqual([total - 1, total, total + 1]);
+    expect(JSON.parse(messages[2]!.data)).toEqual({ seq: total });
+    expect(JSON.parse(messages[3]!.data)).toMatchObject({ seq: total + 1, event: { type: 'transport-retry' } });
   });
 
   it('streams job summaries for the dashboard', async () => {

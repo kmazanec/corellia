@@ -4,7 +4,7 @@ title: "Operator console — a first-party web UI as the human entrypoint into t
 description: Build Corellia's operator console — a co-equal commission-and-observe web app (live job tree fanout, log stream, artifact browser, repo registry, tracing-style debugger) backed by a new read-model/API layer over the event log.
 tags: [ui, operator-console, observability, read-model, daemon, eventlog, harness, front-door]
 timestamp: 2026-06-26
-status: open
+status: partially-fixed
 kind: future-work
 severity: high
 ---
@@ -189,3 +189,16 @@ authenticating with the front-door token:
 
 The disqualifier: if seeing a run still requires `tail -f out/events.jsonl` or
 `scripts/trace.ts`, the console has not replaced the blind-flying it exists to end.
+
+## Resolution
+
+**2026-09-23 — partially-fixed.** The read side landed (iteration 25). ADR-050
+sets the stack and the workspace boundary, and ADR-051 the control plane /
+single-job worker split. Built: the control plane read-model and REST + SSE API
+(`console/server`), and the SPA (`console/web`). It covers the job dashboard
+(req. 3), the live goal-tree fanout (req. 4), the live log stream (req. 5), the
+per-goal inspector (req. 6), and per-job and total spend (part of req. 9).
+Remaining: commissioning and answering from the UI (req. 1–2, which need
+ADR-051 Phase 2's jobs table and WorkerLink), the artifact browser (req. 7),
+the repo registry (req. 8), goal-type stats panels (rest of req. 9), and a live
+proof against a real run.
