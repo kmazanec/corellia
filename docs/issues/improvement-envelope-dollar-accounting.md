@@ -4,7 +4,7 @@ title: Improvement envelope counts trees, not dollars
 description: The standing budget envelope that guarantees improvement work never starves product work accounts += 1 per tree instead of USD, so the guarantee is not cost-true.
 tags: [listener, budget, improvement-loop, cost]
 timestamp: 2026-07-07
-status: open
+status: fixed-pending-live-proof
 kind: bug
 severity: low
 ---
@@ -39,7 +39,7 @@ A test where one improvement tree spends most of the envelope's USD allowance
 sees the next improvement root deferred, while product commissions are unaffected;
 the envelope's consumed/remaining totals are visible in status/projections.
 
----
+## Resolution
 
 > **Fixed (2026-07-07, branch `issue/small-fixes`; pending live proof).** The
 > envelope now charges MEASURED USD, not `+= 1` per tree. On improvement-tree
@@ -82,3 +82,5 @@ the envelope's consumed/remaining totals are visible in status/projections.
 > — the config builder parses the total allowance and the optional per-tree
 > reserve. A live improvement window that actually defers a second root on real
 > spend is the confirming proof.
+
+**2026-09-23 — fixed-pending-live-proof.** Backlog audit (2026-09-23): the fix note above was landed on main but the status was never moved off `open`. Remaining proof: a live improvement tree charging measured USD against the envelope.

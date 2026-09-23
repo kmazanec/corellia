@@ -9,32 +9,7 @@ kind: idea
 severity: medium
 ---
 
-> **Downstream half fixed-pending-live-proof (2026-07-06) — [ADR-048](../adrs/ADR-048-ship-whats-green-partial-delivery.md).**
-> The root now elects a ship-what's-green partial delivery at collection
-> (`decidePartialDelivery` / `finalizeSandboxedRun`): when a tree carries real
-> green work AND the only blockers are child-module blocks (the root's own
-> acceptance/integration judges passed on the delivered artifact), it collects the
-> green subtree instead of preserving the whole tree, emits a `partial-delivered`
-> event, and folds the blocked-module enumeration into the collect commit body.
-> The split report carries the structured `partialDelivery` list
-> (`{blockedModules, childBlockers}`) built at `buildSplitRoundReport`. Honesty
-> constraints hold: a root-level acceptance failure still gates (preserve, don't
-> ship); an all-blocked tree preserves exactly as before; `report.blockers` stays
-> populated so the run is honestly partial and the blocked modules spawn follow-up
-> work. With the upstream half (ADR-037) and this downstream half, the issue is
-> fixed-pending-live-proof.
-
 # A5. A blocked dependency silently kills its dependents with no degraded path
-
-> **Upstream half fixed by [ADR-037](../adrs/ADR-037-degraded-dependency-not-cascade-block.md).**
-> A dependency that blocked but produced a usable partial artifact no longer
-> hard-blocks its dependents — they proceed on the partial (the run-#9 cascade
-> source). What **remains open** is the *downstream* half (the original tiutni
-> Run-1 evidence): when children genuinely block and produce nothing, the root
-> still has no "collect the green subtree and open a PR for it" ship-what's-green
-> mode. That root-level collect behavior is this issue's remaining scope; ADR-037
-> only stopped manufacturing blocked dependents from partials. Severity dropped to
-> the remaining downstream concern.
 
 ## Problem
 Dependency edges are hard gates; there is no "ship what's green, report the rest"
@@ -75,3 +50,30 @@ all-or-nothing.
 A tree with a mix of green and blocked children emits a report that collects the
 green subtree and enumerates the blocked modules with reasons — the operator can
 merge the good part directly, instead of an all-or-nothing root block.
+
+## Resolution
+
+> **Downstream half fixed-pending-live-proof (2026-07-06) — [ADR-048](../adrs/ADR-048-ship-whats-green-partial-delivery.md).**
+> The root now elects a ship-what's-green partial delivery at collection
+> (`decidePartialDelivery` / `finalizeSandboxedRun`): when a tree carries real
+> green work AND the only blockers are child-module blocks (the root's own
+> acceptance/integration judges passed on the delivered artifact), it collects the
+> green subtree instead of preserving the whole tree, emits a `partial-delivered`
+> event, and folds the blocked-module enumeration into the collect commit body.
+> The split report carries the structured `partialDelivery` list
+> (`{blockedModules, childBlockers}`) built at `buildSplitRoundReport`. Honesty
+> constraints hold: a root-level acceptance failure still gates (preserve, don't
+> ship); an all-blocked tree preserves exactly as before; `report.blockers` stays
+> populated so the run is honestly partial and the blocked modules spawn follow-up
+> work. With the upstream half (ADR-037) and this downstream half, the issue is
+> fixed-pending-live-proof.
+
+> **Upstream half fixed by [ADR-037](../adrs/ADR-037-degraded-dependency-not-cascade-block.md).**
+> A dependency that blocked but produced a usable partial artifact no longer
+> hard-blocks its dependents — they proceed on the partial (the run-#9 cascade
+> source). What **remains open** is the *downstream* half (the original tiutni
+> Run-1 evidence): when children genuinely block and produce nothing, the root
+> still has no "collect the green subtree and open a PR for it" ship-what's-green
+> mode. That root-level collect behavior is this issue's remaining scope; ADR-037
+> only stopped manufacturing blocked dependents from partials. Severity dropped to
+> the remaining downstream concern.

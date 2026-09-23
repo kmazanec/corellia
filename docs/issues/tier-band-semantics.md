@@ -4,7 +4,7 @@ title: Reconcile tier semantics — low/mid/high capability bands vs GOAL-TYPES'
 description: The code resolves tiers as capability bands over an 11-model OpenRouter catalog while GOAL-TYPES.md still specifies literal haiku/sonnet/opus; one of them should be declared authoritative in an ADR.
 tags: [brain, model-catalog, tiers, docs, adr-needed]
 timestamp: 2026-07-07
-status: open
+status: partially-fixed
 kind: idea
 severity: low
 ---
@@ -38,3 +38,7 @@ be recorded as considered and rejected (or chosen, if the operator disagrees).
 An accepted ADR names the authoritative tier semantics; GOAL-TYPES.md's tier map
 matches the code's actual resolution behavior; no dangling references to literal
 model-name tiers remain in the library docs.
+
+## Resolution
+
+**2026-09-23 — partially-fixed.** Backlog audit (2026-09-23): ADR-044 keeps `Tier` as an abstract capability band resolved by `src/brains/model-catalog.ts`. Remaining: an explicit decision that bands are authoritative over model names, and GOAL-TYPES.md still speaks in haiku/sonnet/opus.

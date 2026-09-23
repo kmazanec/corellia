@@ -1,5 +1,12 @@
 /**
- * `file_issue` — the issue-filing brokered write tool (ADR-034).
+ * `file_issue` and `update_issue` — the brokered backlog tools (ADR-034).
+ *
+ * `update_issue` moves an issue along its lifecycle (src/library/issue-backlog.ts):
+ * partially-fixed / fixed-pending-live-proof record what landed under the
+ * issue's `## Resolution` section and mirror the status into the catalog;
+ * resolved deletes the issue, removes its catalog row, and logs the resolution.
+ *
+ * `file_issue`:
  *
  * Available to any goal whose type grants `docs.issues.write`. The tool writes
  * an OKF-conformant issue file at `docs/issues/<slug>.md`, validates frontmatter,
@@ -13,6 +20,7 @@
 import type { Goal } from '../contract/goal.js';
 import type { ToolImpl } from '../contract/tool.js';
 import { fileIssue, ISSUE_KIND_VALUES, ISSUE_SEVERITY_VALUES, REQUIRED_ISSUE_FIELDS } from './issue-files.js';
+import { ISSUE_TRANSITIONS, updateIssue } from './issue-updates.js';
 
 // ---------------------------------------------------------------------------
 // file_issue ToolImpl factory
@@ -54,6 +62,46 @@ export function fileIssueTool(sandboxRoot: string): ToolImpl {
 
     async execute(_goal: Goal, args: Record<string, unknown>): Promise<{ ok: boolean; output: string }> {
       return fileIssue(sandboxRoot, args);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// update_issue ToolImpl factory
+// ---------------------------------------------------------------------------
+
+/**
+ * Create the `update_issue` ToolImpl bound to a sandbox root. A goal that lands
+ * work against an issue records it here in the same run, so the backlog never
+ * says `open` about shipped work.
+ */
+export function updateIssueTool(sandboxRoot: string, now: () => number = Date.now): ToolImpl {
+  return {
+    def: {
+      name: 'update_issue',
+      description:
+        'Move an existing issue in docs/issues/ along its lifecycle after landing work against it. ' +
+        '"partially-fixed" (some of it landed) and "fixed-pending-live-proof" (all of it landed, ' +
+        'not yet proven in a live run) append your resolution note under the issue\'s "## Resolution" ' +
+        'section and update its catalog row. "resolved" (landed and proven) deletes the issue, ' +
+        'removes its catalog row, and records the resolution in docs/log.md. ' +
+        'Available to goals granted docs.issues.write.',
+      parameters: {
+        type: 'object',
+        properties: {
+          slug: { type: 'string', description: 'Slug of the existing issue (docs/issues/<slug>.md).' },
+          status: { type: 'string', enum: [...ISSUE_TRANSITIONS], description: 'The lifecycle step reached.' },
+          resolution: {
+            type: 'string',
+            description: 'What landed (files, ADR, iteration) and what, if anything, remains open.',
+          },
+        },
+        required: ['slug', 'status', 'resolution'],
+      },
+    },
+
+    async execute(_goal: Goal, args: Record<string, unknown>): Promise<{ ok: boolean; output: string }> {
+      return updateIssue(sandboxRoot, args, now);
     },
   };
 }

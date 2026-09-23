@@ -4,7 +4,7 @@ title: Type and global memory layers are never written — the compounding asset
 description: Every memory writer hardcodes layer:'project' and retrieval ignores scope, so cross-project type wisdom (DESIGN's compounding asset) never accumulates.
 tags: [engine, memory, layers, promote-memory]
 timestamp: 2026-07-07
-status: open
+status: fixed-pending-live-proof
 kind: future-work
 severity: medium
 ---
@@ -41,7 +41,7 @@ A lesson promoted with type-level generality in project A is retrieved and
 injected (provenance-labeled) for a same-type goal in project B, shown in a test
 across two stores/logs — and nothing about project-layer behavior regresses.
 
----
+## Resolution
 
 > **Fixed (2026-07-07, ADR-049, branch `issue/memory-layers`; pending live
 > proof).** Type and global memory now have a home that outlives any one
@@ -103,3 +103,5 @@ across two stores/logs — and nothing about project-layer behavior regresses.
 > stays project), `tests/eventlog/projections.test.ts` (layer/namespace filtering
 > + union with labels intact). A live run promoting a real type lesson in one repo
 > and consuming it in another is the confirming proof.
+
+**2026-09-23 — fixed-pending-live-proof.** Backlog audit (2026-09-23): the fix note above was landed on main but the status was never moved off `open`. Remaining proof: a second tree retrieving a type/global memory promoted by an earlier one (ADR-049).

@@ -4,7 +4,7 @@ title: Daemon REPL is built and tested but never wired into the entrypoint
 description: startRepl exists with tests and a comment in daemon.ts promising "REPL mode (when enabled)", but nothing enables it — a dead surface that should be wired behind a flag or deleted.
 tags: [daemon, repl, front-door, dead-code]
 timestamp: 2026-07-07
-status: open
+status: fixed-pending-live-proof
 kind: idea
 severity: low
 ---
@@ -36,7 +36,7 @@ commission:run + logs --follow, delete repl.ts and its tests instead.
 the prompt against the live Listener, while the container/headless path is
 byte-for-byte unchanged — or the REPL is gone.
 
----
+## Resolution
 
 > **Fixed (2026-07-07, branch `issue/small-fixes`; pending live proof).** WIRED,
 > not deleted. `daemon.ts` now imports `maybeStartRepl` and calls it once the
@@ -68,3 +68,5 @@ byte-for-byte unchanged — or the REPL is gone.
 > `tests/daemon/repl.test.ts` (piped commission/answer/status + single-authority
 > invariant) is unchanged and still green. A live `CORELLIA_REPL=1 npm run daemon`
 > at a terminal is the confirming proof.
+
+**2026-09-23 — fixed-pending-live-proof.** Backlog audit (2026-09-23): the fix note above was landed on main but the status was never moved off `open`. Remaining proof: an interactive daemon session driving the REPL on a TTY.

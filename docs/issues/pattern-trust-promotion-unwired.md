@@ -4,7 +4,7 @@ title: Split-memo trust promotion has no production caller — the flywheel neve
 description: Memos are recorded and consulted as provisional hints, but pattern-trust promotion (provisional → trusted, human signoff, trusted short-circuit) is dead code in a running system.
 tags: [engine, flywheel, split-memo, pattern-trust, human-gate]
 timestamp: 2026-07-07
-status: open
+status: fixed-pending-live-proof
 kind: bug
 severity: medium
 ---
@@ -46,7 +46,7 @@ recurrence-backed promotion candidate; a signoff act promotes it with
 `signed_off_by` in the log; a third run walks the trusted memo verbatim and the
 log shows the skipped fresh derivation.
 
----
+## Resolution
 
 > **Fixed (2026-07-07, branch `issue/pattern-trust`; pending live proof).** The
 > split-memo flywheel is now wired end to end from the daemon through an operator
@@ -121,3 +121,5 @@ log shows the skipped fresh derivation.
 > and record are already covered by `tests/engine/flywheel.test.ts`. A live run
 > — same spec-shape twice, an operator `corellia trust`, a third run walking the
 > memo verbatim — is the confirming proof.
+
+**2026-09-23 — fixed-pending-live-proof.** Backlog audit (2026-09-23): the fix note above was landed on main but the status was never moved off `open`. Remaining proof: a daemon run that records a split-memo pattern an operator then promotes via `corellia trust`.

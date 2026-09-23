@@ -4,7 +4,7 @@ title: Judge calibration by golden-set replay — the eval of the evaluators is 
 description: DESIGN.md requires judges calibrated by replaying pinned golden pairs against exogenous ground truth; capture exists (ADR-024) but no replay/scoring harness does, so all three judges run uncalibrated.
 tags: [engine, eval, golden, calibration, judge, replay]
 timestamp: 2026-07-07
-status: open
+status: fixed-pending-live-proof
 kind: future-work
 severity: high
 ---
@@ -47,7 +47,7 @@ set and prints an agreement score; changing the judge's prompt or model and
 re-running shows the score move. At least one judge has a real (if small) golden
 set curated from labeled live-run candidates.
 
----
+## Resolution
 
 > **Fixed (2026-07-07, branch `issue/golden-calibration`; pending live proof /
 > operator use).** All three smallest-first pieces are built, on top of the label
@@ -103,3 +103,5 @@ set curated from labeled live-run candidates.
 > exit codes). `npx tsc --noEmit` and `npm run lint` clean; `npm run code-shape`
 > clean on the new modules. A live `corellia calibrate` against a curated set with
 > the real judge brain is the confirming proof.
+
+**2026-09-23 — fixed-pending-live-proof.** Backlog audit (2026-09-23): the fix note above was landed on main but the status was never moved off `open`. Remaining proof: a calibration replay over operator-labelled golden pairs.

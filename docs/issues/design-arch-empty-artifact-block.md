@@ -9,46 +9,7 @@ kind: bug
 severity: medium
 ---
 
-> **Diagnosis half fixed-pending-live-proof (2026-07-06, feat/empty-artifact).**
-> `produce()` (`src/brains/llm.ts`) now treats an empty artifact as a diagnosable
-> failure: on an empty completion it issues one targeted re-ask on the same model
-> ("you returned no content; emit the full body now, plain text"), then falls back
-> to the mid band (catalog- and pin-aware, needs preserved, reusing the existing
-> retry plumbing); if all still come back empty it tags the returned artifact with
-> an `Artifact.emptyDiagnosis` — `reason: 'truncated' | 'refusal' | 'parse-drop' |
-> 'empty-response'` plus a bounded raw sample. `artifactPresent`
-> (`src/library/checks.ts`) names the cause in its finding detail (the STABLE part
-> only, so the deterministic failure signature stays stable and isomorphic
-> detection still fires), and `nonConvergenceBrief` (`src/engine/reports.ts`, via
-> `src/engine/attempt/failure.ts`) carries the cause + raw sample into the block
-> brief — so an empty-artifact block names the WHY, never a bare "no actionable
-> repair". Covered by `tests/brains/produce-empty-diagnosis.test.ts`,
-> `tests/library/checks.test.ts`, and `tests/engine/attempt-failure.test.ts`.
-> Awaiting a live run to confirm the diagnosis fires on a real empty-producer stall.
->
-> **Degraded-delivery half** (ship the passing siblings when one blocks) is being
-> built separately on `feat/ship-green` (its ADR-048, landing in this wave) and is
-> NOT covered here.
-
 # design-arch leaf emits an empty artifact and terminally blocks at the highest tier
-
-> **Partial mitigation (2026-06-25, commit 37e898b).** `artifact-present` now
-> passes an empty/absent artifact when the leaf actually WROTE files to the
-> worktree within scope — so a tool-driven `implement` leaf that delivers via
-> `write_file` but returns empty text is no longer wrongly blocked (the failure
-> that stranded the `file_issue` tool in build run live-self-bd479522). **Still
-> open** for a `design-arch`/doc leaf that produces NOTHING (no worktree write and
-> empty artifact): it still blocks with a generic "no actionable repair" instead of
-> surfacing WHY it is empty (truncation / refusal / parse-drop), and the
-> dependency-cascade degraded-path half remains.
->
-> **Hollow-emit gate added (2026-06-25, commit 9bd1037).** The inverse failure — a
-> make root that *successfully emits* (plausible text or an open_pr call) while
-> having built NOTHING — now blocks at tree emission with an actionable "hollow
-> emit" reason, instead of claiming a false success (run #6's slice A: 0 write_file,
-> only open_pr). This catches the no-real-work case at the PARENT level (the eval
-> Keith flagged as insufficient). Still distinct and open: a leaf that blocks with
-> no diagnosis of WHY its artifact is empty, and degraded delivery.
 
 ## Problem
 A `design-arch` leaf can loop to a terminal block by repeatedly emitting an
@@ -100,3 +61,44 @@ actionable reason in its block (truncation / refusal / parse-drop), not a generi
 "no actionable repair"; AND a tree where one sibling blocks but others pass does
 not strand the passing siblings' verified artifacts (degraded delivery or, at
 least, collected output + a clear partial-delivery report).
+
+## Resolution
+
+> **Diagnosis half fixed-pending-live-proof (2026-07-06, feat/empty-artifact).**
+> `produce()` (`src/brains/llm.ts`) now treats an empty artifact as a diagnosable
+> failure: on an empty completion it issues one targeted re-ask on the same model
+> ("you returned no content; emit the full body now, plain text"), then falls back
+> to the mid band (catalog- and pin-aware, needs preserved, reusing the existing
+> retry plumbing); if all still come back empty it tags the returned artifact with
+> an `Artifact.emptyDiagnosis` — `reason: 'truncated' | 'refusal' | 'parse-drop' |
+> 'empty-response'` plus a bounded raw sample. `artifactPresent`
+> (`src/library/checks.ts`) names the cause in its finding detail (the STABLE part
+> only, so the deterministic failure signature stays stable and isomorphic
+> detection still fires), and `nonConvergenceBrief` (`src/engine/reports.ts`, via
+> `src/engine/attempt/failure.ts`) carries the cause + raw sample into the block
+> brief — so an empty-artifact block names the WHY, never a bare "no actionable
+> repair". Covered by `tests/brains/produce-empty-diagnosis.test.ts`,
+> `tests/library/checks.test.ts`, and `tests/engine/attempt-failure.test.ts`.
+> Awaiting a live run to confirm the diagnosis fires on a real empty-producer stall.
+>
+> **Degraded-delivery half** (ship the passing siblings when one blocks) is being
+> built separately on `feat/ship-green` (its ADR-048, landing in this wave) and is
+> NOT covered here.
+
+> **Partial mitigation (2026-06-25, commit 37e898b).** `artifact-present` now
+> passes an empty/absent artifact when the leaf actually WROTE files to the
+> worktree within scope — so a tool-driven `implement` leaf that delivers via
+> `write_file` but returns empty text is no longer wrongly blocked (the failure
+> that stranded the `file_issue` tool in build run live-self-bd479522). **Still
+> open** for a `design-arch`/doc leaf that produces NOTHING (no worktree write and
+> empty artifact): it still blocks with a generic "no actionable repair" instead of
+> surfacing WHY it is empty (truncation / refusal / parse-drop), and the
+> dependency-cascade degraded-path half remains.
+>
+> **Hollow-emit gate added (2026-06-25, commit 9bd1037).** The inverse failure — a
+> make root that *successfully emits* (plausible text or an open_pr call) while
+> having built NOTHING — now blocks at tree emission with an actionable "hollow
+> emit" reason, instead of claiming a false success (run #6's slice A: 0 write_file,
+> only open_pr). This catches the no-real-work case at the PARENT level (the eval
+> Keith flagged as insufficient). Still distinct and open: a leaf that blocks with
+> no diagnosis of WHY its artifact is empty, and degraded delivery.

@@ -4,7 +4,7 @@ title: "Teach the factory to create, consume, and delete OKF issues itself"
 description: Corellia should be able to file, pick up, and close issues in docs/issues/ as native factory operations, not only via the human-facing create-issue/commission skills.
 tags: [factory, issues, library, engine, self-hosting]
 timestamp: 2026-06-25
-status: open
+status: partially-fixed
 kind: future-work
 severity: medium
 ---
@@ -59,3 +59,7 @@ A factory run can: write a conformant new issue into `docs/issues/` when it defe
 work; be commissioned directly from an existing issue file; and, on successful
 delivery of an issue-sourced commission, the originating issue is deleted with a
 corresponding `docs/log.md` entry — all without a human hand-editing the backlog.
+
+## Resolution
+
+**2026-09-23 — partially-fixed.** Backlog audit (2026-09-23): create, update, and delete are built. `file_issue` (`src/engine/issue-files.ts`) files issues; `update_issue` (`src/engine/issue-updates.ts`) moves them through the lifecycle (partially-fixed / fixed-pending-live-proof / resolved = delete + log); `deleteProvenanceIssue` (`src/engine/iteration-tools.ts`) deletes an issue-sourced commission's issue on delivery; `npm run lint` enforces the lifecycle (`src/library/issue-backlog.ts`). Remaining: consume — `parseIssueToCommissionSeed` (`src/listener/listener.ts`) has no production caller, so the factory cannot yet be commissioned directly from an issue file. Not yet live-proven.

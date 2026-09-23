@@ -140,6 +140,9 @@ export const GRANT_TOOL_MAP = {
   // The issue-filing capability (ADR-034): a brokered write tool scoped to
   // docs/issues/, available to any goal type that holds the grant.
   file_issue: ['docs.issues.write'],
+  // Its lifecycle partner: record a partial / pending-live-proof fix on an
+  // existing issue, or resolve (delete + log) it. Same grant, same boundary.
+  update_issue: ['docs.issues.write'],
   // The research-family web tools (issue: web-fetch-tool): an https-only,
   // SSRF-vetted GET (web_fetch) and an optional env-configured search
   // (web_search). Held only by the research/diagnose family (research-external);

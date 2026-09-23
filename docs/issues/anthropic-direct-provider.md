@@ -4,7 +4,7 @@ title: Anthropic-direct brain provider — OpenRouter is a single point of failu
 description: OpenRouter is the only wired provider; a direct Anthropic adapter would add provider redundancy and unlock prompt caching and batch pricing for the models the factory leans on hardest.
 tags: [brain, provider, anthropic, resilience, cost]
 timestamp: 2026-07-07
-status: open
+status: fixed-pending-live-proof
 kind: idea
 severity: medium
 ---
@@ -38,7 +38,7 @@ With ANTHROPIC_API_KEY set, catalog rows marked anthropic-direct resolve and run
 against api.anthropic.com (proven by unit tests with injected fetch plus one live
 smoke); unset, everything falls back to OpenRouter unchanged.
 
----
+## Resolution
 
 > **Fixed (2026-07-07, branch `issue/anthropic-provider`; live smoke with a real
 > key is the operator's proof, so this stays open).** A second BrainProvider now
@@ -106,3 +106,5 @@ smoke); unset, everything falls back to OpenRouter unchanged.
 > terminal 401) — all injected-fetch, never live. All 244 pre-existing
 > `tests/brains/` tests pass unchanged; `tsc` and library lint clean. A live run
 > against api.anthropic.com with a real key is the confirming proof.
+
+**2026-09-23 — fixed-pending-live-proof.** Backlog audit (2026-09-23): the fix note above was landed on main but the status was never moved off `open`. Remaining proof: a live smoke with a real `ANTHROPIC_API_KEY` routed through the Anthropic wire.

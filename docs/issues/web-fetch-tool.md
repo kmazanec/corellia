@@ -4,7 +4,7 @@ title: No web-search/web-fetch tool backs the research grants
 description: research-external and investigate declare web access in their grants, but no ToolImpl exists for web search or fetch, so external research cannot actually run.
 tags: [engine, broker, tool, research, web]
 timestamp: 2026-07-07
-status: open
+status: fixed-pending-live-proof
 kind: bug
 severity: high
 ---
@@ -46,7 +46,7 @@ whose claims carry fetched-URL citations, and the broker log shows the fetch ran
 under the grant — while a build-family goal attempting `web_fetch` is refused by
 the broker.
 
----
+## Resolution
 
 > **Fixed (2026-07-07, branch `issue/web-fetch`; pending live proof).** The
 > research grants now have a tool primitive behind them. `web_fetch(url)` is a
@@ -112,3 +112,5 @@ the broker.
 > refusal for build types, grant success for research-external); assembly
 > registration proven in `tests/engine/assembly.test.ts`. A live `research-external`
 > run fetching a real page and citing it is the confirming proof.
+
+**2026-09-23 — fixed-pending-live-proof.** Backlog audit (2026-09-23): the fix note above was landed on main but the status was never moved off `open`. Remaining proof: a live `research-external` goal citing a fetched page.

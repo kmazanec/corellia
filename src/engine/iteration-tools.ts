@@ -10,18 +10,20 @@
  *   completed-work entry to docs/log.md.
  *
  * Step 2 — deleteProvenanceIssue: when the commissioning goal's spec carries a
- *   provenance annotation "// from docs/issues/<slug>.md", deletes that issue
- *   file and removes its row from docs/issues/index.md. An OKF issue is ephemeral
- *   — destroyed when it becomes code, an iteration, and an ADR.
+ *   provenance annotation "// from docs/issues/<slug>.md", resolves that issue:
+ *   deletes the file and removes its row from docs/issues/index.md. An OKF issue
+ *   is ephemeral — destroyed when it becomes code, an iteration, and an ADR.
  *
  * Both steps are engine code (not delegated to child goals), fire exactly once
  * per successful delivery, and sit alongside the existing PR-emission integration
  * mechanics.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import type { Goal } from '../contract/goal.js';
+import { appendLogEntry } from './docs-log.js';
+import { removeCatalogRow } from './issue-updates.js';
 
 // ---------------------------------------------------------------------------
 // Date-prefix helpers
@@ -168,9 +170,8 @@ function appendIterationIndexRow(
 }
 
 /**
- * Append a one-line completed-work entry to docs/log.md under the current-date
- * heading, creating the heading if absent. The entry references the iteration
- * and any ADRs produced.
+ * Append a one-line completed-work entry to docs/log.md under the delivery
+ * date, pointing at the iteration record.
  */
 function appendLogLine(
   worktreeRoot: string,
@@ -178,37 +179,8 @@ function appendLogLine(
   dirName: string,
   title: string,
 ): void {
-  const logPath = join(worktreeRoot, 'docs', 'log.md');
-  if (!existsSync(logPath)) return;
-
-  let content = readFileSync(logPath, 'utf-8');
-
-  // The date heading is `## YYYY-MM-DD` (just the date part, not the hour).
-  const dateOnly = datePrefix.slice(0, 10); // YYYY-MM-DD
-  const dateHeading = `## ${dateOnly}`;
-
   const logLine = `- **${title}** — delivered ([${dirName}](iterations/${dirName}/index.md)).`;
-
-  if (content.includes(dateHeading)) {
-    // Insert the new line right after the date heading.
-    const headingIdx = content.indexOf(dateHeading);
-    const afterHeading = content.slice(headingIdx + dateHeading.length);
-    const nextNewline = afterHeading.indexOf('\n');
-    const insertIdx = headingIdx + dateHeading.length + (nextNewline === -1 ? afterHeading.length : nextNewline + 1);
-    content = content.slice(0, insertIdx) + logLine + '\n' + content.slice(insertIdx);
-  } else {
-    // Date heading not present — create it and insert before the next date
-    // heading or at the end of the log body (after the frontmatter + first `#`
-    // heading + blank line).
-    const firstHeadingMatch = content.match(/^# .+\n\n/m);
-    const insertIdx = firstHeadingMatch
-      ? content.indexOf(firstHeadingMatch[0]) + firstHeadingMatch[0].length
-      : content.indexOf('\n\n') + 2;
-    const newSection = `\n${dateHeading}\n\n${logLine}\n`;
-    content = content.slice(0, insertIdx) + newSection + content.slice(insertIdx);
-  }
-
-  writeFileSync(logPath, content, 'utf-8');
+  appendLogEntry(worktreeRoot, datePrefix.slice(0, 10), logLine);
 }
 
 // ---------------------------------------------------------------------------
@@ -217,14 +189,13 @@ function appendLogLine(
 
 /**
  * When the goal's spec (stringified) contains a provenance annotation of the form
- * `// from docs/issues/<slug>.md`, delete that issue file and remove its row from
- * docs/issues/index.md. An ephemeral OKF issue is destroyed when it becomes code,
- * an iteration, and an ADR.
+ * `// from docs/issues/<slug>.md`, resolve that issue: delete it and remove its
+ * catalog row from docs/issues/index.md. The delivery's own log line (step 1)
+ * records the work. An ephemeral OKF issue is destroyed when it becomes code, an
+ * iteration, and an ADR.
  *
- * This is a no-op when:
- *   - The spec does not carry the annotation.
- *   - The annotation is present but the issue file does not exist (already deleted).
- *   - The index does not exist.
+ * This is a no-op when the spec does not carry the annotation or the issue is
+ * already gone.
  */
 export function deleteProvenanceIssue(
   worktreeRoot: string,
@@ -234,12 +205,8 @@ export function deleteProvenanceIssue(
   if (slug === null) return;
 
   const issuePath = join(worktreeRoot, 'docs', 'issues', `${slug}.md`);
-  if (existsSync(issuePath)) {
-    unlinkSync(issuePath);
-  }
-
-  // Remove the row from the issues index.
-  removeIssueIndexRow(worktreeRoot, slug);
+  if (existsSync(issuePath)) unlinkSync(issuePath);
+  removeCatalogRow(worktreeRoot, slug);
 }
 
 /**
@@ -260,34 +227,4 @@ function extractProvenanceSlug(goal: Goal): string | null {
   if (match === null || match[1] === undefined) return null;
 
   return match[1];
-}
-
-/**
- * Remove the row for the given slug from docs/issues/index.md.
- * No-op when the index does not exist or the slug is not found.
- */
-function removeIssueIndexRow(
-  worktreeRoot: string,
-  slug: string,
-): void {
-  const indexPath = join(worktreeRoot, 'docs', 'issues', 'index.md');
-  if (!existsSync(indexPath)) return;
-
-  const content = readFileSync(indexPath, 'utf-8');
-  const lines = content.split('\n');
-
-  // Match a row that references the slug: `| [slug](slug.md) | ...`
-  const rowPattern = new RegExp(`^\\|\\s*\\[${escapeRegex(slug)}\\]\\(${escapeRegex(slug)}\\.md\\)\\s*\\|`);
-  const filtered = lines.filter((line) => !rowPattern.test(line));
-
-  if (filtered.length !== lines.length) {
-    writeFileSync(indexPath, filtered.join('\n'), 'utf-8');
-  }
-}
-
-/**
- * Escape a string for use in a literal RegExp pattern.
- */
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

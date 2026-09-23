@@ -31,7 +31,7 @@ import {
   type DeclaredScripts,
 } from '../library/script-runner.js';
 import { pushBranchTool, openPrTool, type FetchTransport } from './pr-tools.js';
-import { fileIssueTool } from './issue-tools.js';
+import { fileIssueTool, updateIssueTool } from './issue-tools.js';
 import { webTools } from './web-tools.js';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -339,12 +339,12 @@ export async function openSandboxAssembly(
       ]
     : [];
 
-  // ── Issue-filing tool (ADR-034) ────────────────────────────────────
-  // The file_issue tool is always registered — it writes within the sandbox
-  // root to docs/issues/ only. Grant enforcement (docs.issues.write) is
-  // handled by the broker via GRANT_TOOL_MAP; the tool impl itself validates
-  // OKF frontmatter and refuses duplicate slugs.
-  const issueTool = fileIssueTool(root);
+  // ── Backlog tools (ADR-034) ────────────────────────────────────────
+  // file_issue and update_issue are always registered — they write within the
+  // sandbox root to docs/issues/ (and, on resolution, docs/log.md) only. Grant
+  // enforcement (docs.issues.write) is handled by the broker via GRANT_TOOL_MAP;
+  // the tool impls hold the backlog to its lifecycle rules.
+  const issueTools = [fileIssueTool(root), updateIssueTool(root, now)];
 
   // ── Web tools (issue: web-fetch-tool) ──────────────────────────────
   // web_fetch (always) and web_search (only when a provider is env-configured),
@@ -370,7 +370,7 @@ export async function openSandboxAssembly(
       runCommandImpl,
       ...knowledgeTools,
       ...prTools,
-      issueTool,
+      ...issueTools,
       ...webToolImpls,
     ],
   });

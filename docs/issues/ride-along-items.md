@@ -4,7 +4,7 @@ title: "Ride-along items (small, any iteration)"
 description: A cluster of small, unbuilt enhancements the roadmap parked as fit-any-iteration ride-alongs.
 tags: [ride-along, future-work, roadmap]
 timestamp: 2026-06-25
-status: open
+status: partially-fixed
 kind: future-work
 severity: low
 ---
@@ -39,3 +39,7 @@ Split out into its own issue if/when one grows or is scheduled.
 ## Acceptance hint
 Each ride-along item is either built into some iteration or promoted to its own
 tracked issue; none is silently dropped with the roadmap.
+
+## Resolution
+
+**2026-09-23 — partially-fixed.** Backlog audit (2026-09-23): the pattern-trust CLI (`corellia patterns|trust|distrust`) and the decision-brief notification sink (`src/eventlog/notification-sink.ts`) are built; replay is partial (`corellia logs`, `conform`, `calibrate`, no general replay harness). Remaining: path-segment risk matching (`src/library/risk.ts` still matches substrings) and pgvector.

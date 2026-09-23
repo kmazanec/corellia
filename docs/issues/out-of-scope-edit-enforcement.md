@@ -9,24 +9,6 @@ kind: bug
 severity: high
 ---
 
-> **Fixed-pending-live-proof (2026-07-06):** both halves are now in place.
-> Enforcement half (already fixed, commit 5f8d5ee): the broker refuses a
-> `write_file`/`delete_file`/`file_issue` outside the goal's declared scope, and
-> the root emission gate blocks a tree whose diff escapes scope
-> (`root-emission-gate.ts` via `treeDiffWithinScope`). Report half (this change):
-> at collection `finalizeSandboxedRun` records a `files-touched` event
-> enumerating every file the tree changed since its base sha
-> (`treeFilesTouchedVsScope` in `worktree.ts`), each marked in- or out-of the
-> declared scope — the surface a reviewer reads to catch an out-of-scope edit
-> without running `git show`. With both, the whole issue is fixed-pending-live-proof.
->
-> **Shell half (2026-09-23):** `run_command` writes are free-form, so they are
-> scope-checked after each call. Any new out-of-scope path becomes a
-> `scope-escaped` event and a warning in the leaf's tool output. A milestone
-> round's commit takes only its in-scope work and logs the residue, instead of
-> silently skipping the round. Detail:
-> [iteration 24](../iterations/2026-09-23-02-shell-scope-escape/index.md).
-
 # C1. Out-of-scope edits were neither prevented nor surfaced
 
 ## Problem
@@ -51,3 +33,23 @@ touched** vs. the declared scope.
 ## Acceptance hint
 A `write_file` outside a goal's declared scope is refused and surfaced in the
 report; the collected report lists every file touched against the declared scope.
+
+## Resolution
+
+> **Fixed-pending-live-proof (2026-07-06):** both halves are now in place.
+> Enforcement half (already fixed, commit 5f8d5ee): the broker refuses a
+> `write_file`/`delete_file`/`file_issue` outside the goal's declared scope, and
+> the root emission gate blocks a tree whose diff escapes scope
+> (`root-emission-gate.ts` via `treeDiffWithinScope`). Report half (this change):
+> at collection `finalizeSandboxedRun` records a `files-touched` event
+> enumerating every file the tree changed since its base sha
+> (`treeFilesTouchedVsScope` in `worktree.ts`), each marked in- or out-of the
+> declared scope — the surface a reviewer reads to catch an out-of-scope edit
+> without running `git show`. With both, the whole issue is fixed-pending-live-proof.
+>
+> **Shell half (2026-09-23):** `run_command` writes are free-form, so they are
+> scope-checked after each call. Any new out-of-scope path becomes a
+> `scope-escaped` event and a warning in the leaf's tool output. A milestone
+> round's commit takes only its in-scope work and logs the residue, instead of
+> silently skipping the round. Detail:
+> [iteration 24](../iterations/2026-09-23-02-shell-scope-escape/index.md).

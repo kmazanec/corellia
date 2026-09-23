@@ -4,7 +4,7 @@ title: No real-model smoke test — CI never exercises a live brain
 description: Every automated test uses ScriptedBrain; prompt, skill, catalog, and tier-wiring regressions are invisible until an operator manually runs a live harness.
 tags: [tests, ci, brain, live-proof, smoke]
 timestamp: 2026-07-07
-status: open
+status: fixed-pending-live-proof
 kind: future-work
 severity: medium
 ---
@@ -39,7 +39,7 @@ secret to the repo is an operator step and stays out of scope.
 declared cost cap and exits nonzero on failure; the CI workflow runs it on
 schedule/dispatch when the secret exists and skips (not fails) when it doesn't.
 
----
+## Resolution
 
 > **Fixed (2026-07-07, branch `issue/ci-smoke`; status stays open pending the
 > scheduled-CI live proof).** `npm run smoke:live` (`scripts/smoke-live.ts`) sends
@@ -78,3 +78,5 @@ schedule/dispatch when the secret exists and skips (not fails) when it doesn't.
 > proven only by the unit test plus the typecheck/lint gate, not by a real run. The
 > confirming proof is the first scheduled `live-smoke` run (or a manual dispatch)
 > passing green against the real model with actual spend under the cap.
+
+**2026-09-23 — fixed-pending-live-proof.** Backlog audit (2026-09-23): the fix note above was landed on main but the status was never moved off `open`. Remaining proof: the scheduled `live-smoke` workflow passing with the key configured.

@@ -4,7 +4,7 @@ title: Decision briefs are poll-only — no outbound notification reaches a huma
 description: A blocked or parked tree waits for someone to poll GET /status; no sink pushes briefs, PR-opened, or tree-done events to a human channel, so "mostly autonomous" stalls on unwatched terminals.
 tags: [eventlog, daemon, observability, human-gate, notification]
 timestamp: 2026-07-07
-status: open
+status: fixed-pending-live-proof
 kind: future-work
 severity: high
 ---
@@ -45,7 +45,7 @@ With the env var set, blocking a live tree produces a webhook delivery containin
 the brief's question and deadline within seconds, and the PR-opened event for a
 finished tree arrives the same way; with the env var unset, behavior is unchanged.
 
----
+## Resolution
 
 > **Fixed (2026-07-07, branch `issue/notify-observe`; pending live proof).** A
 > `NotificationSink` (`src/eventlog/notification-sink.ts`) implements the existing
@@ -99,3 +99,5 @@ finished tree arrives the same way; with the env var unset, behavior is unchange
 > malformed headers tolerated; all three sinks together). Documented in
 > docs/observability.md and docs/deploy.md beside the OTLP vars. A live run whose
 > block/PR/terminal actually reaches a webhook is the confirming proof.
+
+**2026-09-23 — fixed-pending-live-proof.** Backlog audit (2026-09-23): the fix note above was landed on main but the status was never moved off `open`. Remaining proof: a daemon run with `CORELLIA_NOTIFY_WEBHOOK` set delivering a real brief to a human channel.

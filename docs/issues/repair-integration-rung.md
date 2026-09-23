@@ -4,7 +4,7 @@ title: "A4. The integration judge finds REAL cross-module bugs but no rung can f
 description: judge-integration finds true seam bugs but no rung can commission a cross-cutting repair, so integration findings become a terminal blocker.
 tags: [in-run-stall, engine, integration]
 timestamp: 2026-06-25
-status: open
+status: fixed-pending-live-proof
 kind: idea
 severity: medium
 ---
@@ -35,7 +35,7 @@ When `judge-integration` fails on cross-module seam bugs, the root spawns a
 `repair-integration` goal scoped to the failing modules that fixes the seam and
 re-passes the judge, instead of terminally blocking.
 
----
+## Resolution
 
 > **Fixed (2026-07-06, ADR-047, branch `feat/repair-integration`; pending live
 > proof).** The integrate edge now has a repair rung — the direct analogue of the
@@ -61,3 +61,5 @@ re-passes the judge, instead of terminally blocking.
 > spawned with union scope + findings in spec → re-judge passes → root emits;
 > repair fails again → blocks as today; escalated finding → no repair child. A live
 > run over a real seam bug is the confirming proof.
+
+**2026-09-23 — fixed-pending-live-proof.** Backlog audit (2026-09-23): the fix note above was landed on main but the status was never moved off `open`. Remaining proof: a live run where judge-integration fails with actionable findings and the repair rung fixes them.

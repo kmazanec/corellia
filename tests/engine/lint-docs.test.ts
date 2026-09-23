@@ -7,6 +7,7 @@
  *   3. Fails for an issues doc missing kind/severity/status.
  *   4. Exempts reserved files (index.md, log.md).
  *   5. Warns on missing recommended fields.
+ *   6. Folds in the issue-backlog consistency rules (src/library/issue-backlog.ts).
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -108,8 +109,24 @@ describe('lintDocs', () => {
 
     const { hardViolations } = lintDocs(docsRoot);
 
-    const fields = hardViolations.map((v) => v.field).sort();
+    const fields = hardViolations.filter((v) => v.message === undefined).map((v) => v.field).sort();
     expect(fields).toEqual(['kind', 'severity', 'status']);
+  });
+
+  it('reports backlog drift as hard violations', async () => {
+    const issuesDir = join(docsRoot, 'issues');
+    await writeDoc(issuesDir, 'stale-issue.md', {
+      type: 'issue',
+      status: 'open',
+      kind: 'bug',
+      severity: 'high',
+    });
+
+    const { hardViolations } = lintDocs(docsRoot);
+
+    expect(hardViolations).toContainEqual(
+      expect.objectContaining({ file: 'issues/index.md', field: 'catalog-missing' }),
+    );
   });
 
   it('exempts reserved index.md from type requirement', async () => {

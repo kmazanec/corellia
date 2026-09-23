@@ -77,7 +77,7 @@ export class Broker {
       return this.#refuse(goal, call, `not granted: ${needed}`);
     }
 
-    // 3. For write_file, delete_file, and file_issue: check sandbox containment
+    // 3. For write_file, delete_file, and the issue tools: check sandbox containment
     //    and goal scope before touching the event log. An out-of-scope mutation is
     //    logged as 'refused' with a reason — not as 'ran' — so the audit trail is
     //    honest. write_file and delete_file share the identical path-based check
@@ -93,21 +93,21 @@ export class Broker {
       }
     }
 
-    // file_issue derives its write path from the slug argument: docs/issues/<slug>.md.
-    // The broker validates the derived path against the goal's scope to enforce the
-    // docs/issues/ prefix boundary (ADR-034).
-    if (call.name === 'file_issue') {
+    // file_issue and update_issue derive their write path from the slug argument:
+    // docs/issues/<slug>.md. The broker validates the derived path against the
+    // goal's scope to enforce the docs/issues/ prefix boundary (ADR-034).
+    if (call.name === 'file_issue' || call.name === 'update_issue') {
       const slug = typeof call.args['slug'] === 'string' ? call.args['slug'] : '';
       if (slug.length === 0) {
-        return this.#refuse(goal, call, 'file_issue: "slug" must be a non-empty string');
+        return this.#refuse(goal, call, `${call.name}: "slug" must be a non-empty string`);
       }
       const issuePath = `docs/issues/${slug}.md`;
       const full = resolveSandboxPath(this.#root, issuePath);
       if (full === null) {
-        return this.#refuse(goal, call, `file_issue: path "${issuePath}" is outside the sandbox root`);
+        return this.#refuse(goal, call, `${call.name}: path "${issuePath}" is outside the sandbox root`);
       }
       if (!isInScope(issuePath, goal.scope)) {
-        return this.#refuse(goal, call, `file_issue: path "${issuePath}" is outside the goal's declared scope`);
+        return this.#refuse(goal, call, `${call.name}: path "${issuePath}" is outside the goal's declared scope`);
       }
     }
 

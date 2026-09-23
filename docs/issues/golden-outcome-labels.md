@@ -4,7 +4,7 @@ title: Golden candidates never receive outcome labels — calibration data is be
 description: ADR-024 captures a golden-candidate event at every judge verdict, but nothing wires exogenous outcomes (PR merged/rejected, criteria later proven wrong) back to the candidates, so the calibration set can never be labeled.
 tags: [engine, eventlog, golden, calibration, judge]
 timestamp: 2026-07-07
-status: open
+status: fixed-pending-live-proof
 kind: bug
 severity: high
 ---
@@ -43,7 +43,7 @@ After a live run ends in a merged (or rejected) PR, one command (or one observed
 event) attaches that outcome to the run's captured candidates, and the
 `goldenCandidates` projection shows labeled pairs ready for curation.
 
----
+## Resolution
 
 > **Fixed (2026-07-07, branch `issue/golden-calibration`; pending live proof /
 > operator use).** The append-only label ingestion path is built exactly as the
@@ -83,3 +83,5 @@ event) attaches that outcome to the run's captured candidates, and the
 > projection join → curate → replay). `npx tsc --noEmit` and `npm run lint` clean.
 > A live run whose PR an operator merges/rejects, then `corellia label`, is the
 > confirming proof.
+
+**2026-09-23 — fixed-pending-live-proof.** Backlog audit (2026-09-23): the fix note above was landed on main but the status was never moved off `open`. Remaining proof: an operator labelling real golden candidates from a merged/rejected PR.

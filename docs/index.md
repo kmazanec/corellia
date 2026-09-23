@@ -30,14 +30,19 @@ own design intent lives in the repo-root `DESIGN.md` and `GOAL-TYPES.md`.
 
 ## Open work
 
-- [issues/](issues/index.md) — ephemeral backlog of ideas, bugs, and future work.
-  Issues are destroyed once implemented (turned into iterations, ADRs, and code).
+- [issues/](issues/index.md) — ephemeral backlog of ideas, bugs, and future work,
+  each with a lifecycle status (`open` → `partially-fixed` →
+  `fixed-pending-live-proof`). Issues are destroyed once implemented and proven
+  (turned into iterations, ADRs, and code).
 
 ## How these relate
 
 A captured intent starts as an **issue**. When picked up, it is built as an
-**iteration** (which may produce one or more **ADRs** for durable decisions), and
-the issue is deleted. Completed work is recorded in the **log** with a pointer to
-the iteration/ADR that owns the detail. The `commission` and `create-issue` skills
+**iteration** (which may produce one or more **ADRs** for durable decisions).
+Whoever lands the work moves the issue in the same change — its status and
+`## Resolution` section while proof is outstanding, deletion once it is done
+([lifecycle](issues/index.md#lifecycle); `npm run lint` fails on drift, ADR-035).
+Completed work is recorded in the **log** with a pointer to the iteration/ADR
+that owns the detail. The `commission` and `create-issue` skills
 (under `.claude/skills/`) are the human-facing tools for filing and consuming
 issues; the factory itself is being taught the same vocabulary.

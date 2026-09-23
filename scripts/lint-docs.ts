@@ -12,6 +12,12 @@
  *   - type            (all non-reserved docs/** /*.md)
  *   - kind, severity, status  (docs/issues/*.md only)
  *
+ * Backlog consistency (hard-fail) — the issue lifecycle rules in
+ * src/library/issue-backlog.ts: closed kind/severity/status vocabularies, a
+ * `## Resolution` section on every non-open issue and none on an open one, and
+ * a catalog (docs/issues/index.md) row per issue whose section, kind, and status
+ * match the file.
+ *
  * Recommended fields (warn):
  *   - title, description, tags, timestamp
  *
@@ -21,12 +27,15 @@
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, basename } from 'node:path';
+import { checkIssueBacklog } from '../src/library/issue-backlog.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
 interface LintViolation {
   file: string;
   field: string;
+  /** Set for rule violations that are not a missing field. */
+  message?: string;
 }
 
 interface LintResult {
@@ -144,6 +153,10 @@ export function lintDocs(docsRoot: string): LintResult {
     }
   }
 
+  for (const v of checkIssueBacklog(docsRoot)) {
+    hardViolations.push({ file: v.file, field: v.rule, message: v.detail });
+  }
+
   return { hardViolations, warnings };
 }
 
@@ -164,7 +177,11 @@ if (isMain) {
 
   if (hardViolations.length > 0) {
     for (const v of hardViolations) {
-      console.error(`ERROR: ${v.file} — missing required field "${v.field}"`);
+      console.error(
+        v.message !== undefined
+          ? `ERROR: ${v.file} — ${v.field}: ${v.message}`
+          : `ERROR: ${v.file} — missing required field "${v.field}"`,
+      );
     }
     console.error(
       `docs lint: FAILED (${hardViolations.length} hard violation(s))`,

@@ -4,7 +4,7 @@ title: Event-log conformance checker — extend the constitution from structure 
 description: The constitution lints goal-type definitions at PR time, but nothing replays a real run's event log to assert the runtime invariants held (deterministic-before-judge, judges never wrote, budget monotonicity).
 tags: [eventlog, constitution, eval, replay, projections]
 timestamp: 2026-07-07
-status: open
+status: fixed-pending-live-proof
 kind: idea
 severity: medium
 ---
@@ -42,7 +42,7 @@ every live run's log; violations file issues, not fixes.
 a deliberately corrupted log (judge write injected, gate reordered) is caught in
 a unit test.
 
----
+## Resolution
 
 > **Fixed (2026-07-07, branch `issue/conformance`; status left open pending live
 > proof over a real run's log).** A `checkConformance(events, opts)` projection
@@ -118,3 +118,5 @@ a unit test.
 > `docs lint: ok`); `npm run code-shape` clean after the per-invariant
 > decomposition; targeted vitest green (20/20 conformance, 200 pass / 3 skipped
 > across `tests/eventlog/` + greeting e2e).
+
+**2026-09-23 — fixed-pending-live-proof.** Backlog audit (2026-09-23): the fix note above was landed on main but the status was never moved off `open`. Remaining proof: `corellia conform` over a real run's event log.

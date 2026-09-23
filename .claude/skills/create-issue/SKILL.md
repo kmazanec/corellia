@@ -79,8 +79,9 @@ failure mode this skill exists to prevent.
 
 Update the backlog catalog: add a row for the new issue to
 [`docs/issues/index.md`](../../docs/issues/index.md) under the matching severity
-section (it groups by high/medium/low). Keep the catalog in sync — it is the OKF
-`index.md` for the bundle.
+section (it groups by high/medium/low), in the table's
+`| [slug](slug.md) | kind | open | tags |` shape. Keep the catalog in sync — it is
+the OKF `index.md` for the bundle, and `npm run lint` checks it.
 
 Then **stop and report**: the issue path, its kind/severity, and a one-line
 summary. Tell the user it is filed but unplanned — to actually build it, hand it to
@@ -101,6 +102,13 @@ issue), or fold it into an iteration.
 ## Relationship to the rest of the bundle
 
 `create-issue` (capture) → `commission` (plan into a CommissionInput) → an
-**iteration** builds it (possibly minting **ADRs**) → the issue is **deleted** and
-the work is recorded as a line in [`docs/log.md`](../../docs/log.md). This skill
-owns the first step only.
+**iteration** builds it (possibly minting **ADRs**) → the issue moves along its
+lifecycle and is finally **deleted**, with the work recorded as a line in
+[`docs/log.md`](../../docs/log.md). This skill owns the first step only.
+
+The lifecycle ([docs/issues/index.md § Lifecycle](../../docs/issues/index.md)) is
+`open` → `partially-fixed` → `fixed-pending-live-proof` → deleted + logged. Whoever
+lands work against an issue moves it **in the same change**: set `status`, add or
+extend a `## Resolution` section (what landed, what remains, what live proof is
+outstanding), and update the Status cell of its catalog row. `npm run lint` fails
+if the file and catalog disagree, or if an `open` issue carries a fix note.

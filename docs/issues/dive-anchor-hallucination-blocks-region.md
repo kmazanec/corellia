@@ -4,57 +4,12 @@ title: "a deep-dive that hallucinates a line-anchor fails the dive-anchor check 
 description: A deep-dive-region's RegionFacts cite path:line anchors the model invents (e.g. engine.ts:4687 in a 4686-line file); the dive-anchor deterministic check correctly rejects them, but with no repair path the dive escalates to the high tier, fails again, and emits a null artifact — so the ADR-040 handoff injects no facts for that region and the dependent build leaf re-surveys it and blocks.
 tags: [engine, comprehend, knowledge, dive-anchor, verify-on-read, region-facts, deliver-intent, model-quality]
 timestamp: 2026-06-26
-status: partially-fixed
+status: fixed-pending-live-proof
 kind: bug
 severity: high
 ---
 
 # a deep-dive that hallucinates a line-anchor fails the dive-anchor check terminally and cascade-starves its dependent builder
-
-> **Update (2026-07-06) — structural-floor half fixed (pending live proof).** A
-> build leaf whose primary-region dive produced nothing is no longer hard-blocked
-> by the ADR-037 cascade: it proceeds on a **mechanically-derived structural floor**
-> for that region instead of re-surveying from scratch and blocking.
->
-> - When a dependency that produced a null artifact is a comprehension **dive**
->   (`kind: 'learn'` with a scope), its region is *floorable*: the engine
->   synthesizes a structural floor — the region's file list (path + line/byte
->   sizes) and a regex-grade export-symbol index (no LLM call) — and injects it as
->   **provisional** memories clearly labeled as a floor ("dive produced no facts;
->   raw structure pointers — read before trusting"). The null dive is carried
->   forward as a finding and a `dependency-degraded` event, not silently swallowed.
-> - A null-producing **`make`** dependency (behavior the dependent consumes) still
->   hard-blocks, unchanged — ADR-037's protection is intact; only floorable
->   comprehension gaps are downgraded from block to floor.
-> - The file list is capped (default 300 entries) with an **explicit** truncation
->   note in the memory text — no silent cap (DESIGN "Memory": provisional,
->   mechanically-derived, labeled as such).
-> - New modules: `src/engine/structural-floor.ts` (pure floor synthesis),
->   `src/engine/region-scanner.ts` (fs-backed scan, injectable), and
->   `src/engine/dive-floor-handoff.ts` (the classify-and-inject seam), wired through
->   `runSplitChildren` → `runOneSplitChild`. No ADR: it slots into the existing
->   ADR-037/ADR-040 handoff without a new architectural decision.
->
-> **Still open:** the **model-capability** half — escalation rolling into the same
-> hallucination wall — is tracked in
-> [model-capability-signal](model-capability-signal.md) and covered by the
-> capability-tagged model catalog landing separately in this same wave (ADR-044),
-> which lets tier selection pick a model by demonstrated reliability instead of a
-> fixed low→mid→high ladder. Live proof (a `live:self` run where a null `src/engine`
-> dive yields a floored builder that converges instead of blocking) is still to be
-> captured.
-
-> **Partially fixed (2026-06-26).** The repair-rung half is done: `diveAnchorCheck`
-> now returns a `prescription` on a bad anchor (the contract's `DeterministicCheck.run`
-> gained an optional `prescription` field), so the engine routes the failure through
-> the repair rung (ADR-006, repair-within-attempt) — handing the model the exact bad
-> anchors with the instruction to re-ground them by symbol search or drop the unfounded
-> fact — instead of escalating the tier into the same hallucination. If the repair
-> still reproduces the bad anchor, the isomorphic-failure check blocks honestly (one
-> repair attempt, not an infinite loop). **Still open:** the *structural floor* for a
-> build leaf whose primary-region dive nonetheless produced nothing (so it re-surveys
-> and blocks), and the model-capability signal so escalation doesn't roll into the same
-> wall. The control-token contributor was already fixed separately (`ba4a9d1`).
 
 ## Problem
 
@@ -134,3 +89,52 @@ in-attempt or its anchor re-searched) and emits a usable `RegionFacts` rather th
 escalating tiers into the same hallucination and emitting null; and a build leaf
 whose primary-region dive nonetheless produced nothing is not left to re-survey the
 whole region and block — it proceeds on a structural floor.
+
+## Resolution
+
+> **Update (2026-07-06) — structural-floor half fixed (pending live proof).** A
+> build leaf whose primary-region dive produced nothing is no longer hard-blocked
+> by the ADR-037 cascade: it proceeds on a **mechanically-derived structural floor**
+> for that region instead of re-surveying from scratch and blocking.
+>
+> - When a dependency that produced a null artifact is a comprehension **dive**
+>   (`kind: 'learn'` with a scope), its region is *floorable*: the engine
+>   synthesizes a structural floor — the region's file list (path + line/byte
+>   sizes) and a regex-grade export-symbol index (no LLM call) — and injects it as
+>   **provisional** memories clearly labeled as a floor ("dive produced no facts;
+>   raw structure pointers — read before trusting"). The null dive is carried
+>   forward as a finding and a `dependency-degraded` event, not silently swallowed.
+> - A null-producing **`make`** dependency (behavior the dependent consumes) still
+>   hard-blocks, unchanged — ADR-037's protection is intact; only floorable
+>   comprehension gaps are downgraded from block to floor.
+> - The file list is capped (default 300 entries) with an **explicit** truncation
+>   note in the memory text — no silent cap (DESIGN "Memory": provisional,
+>   mechanically-derived, labeled as such).
+> - New modules: `src/engine/structural-floor.ts` (pure floor synthesis),
+>   `src/engine/region-scanner.ts` (fs-backed scan, injectable), and
+>   `src/engine/dive-floor-handoff.ts` (the classify-and-inject seam), wired through
+>   `runSplitChildren` → `runOneSplitChild`. No ADR: it slots into the existing
+>   ADR-037/ADR-040 handoff without a new architectural decision.
+>
+> **Still open:** the **model-capability** half — escalation rolling into the same
+> hallucination wall — is tracked in
+> [model-capability-signal](model-capability-signal.md) and covered by the
+> capability-tagged model catalog landing separately in this same wave (ADR-044),
+> which lets tier selection pick a model by demonstrated reliability instead of a
+> fixed low→mid→high ladder. Live proof (a `live:self` run where a null `src/engine`
+> dive yields a floored builder that converges instead of blocking) is still to be
+> captured.
+
+> **Partially fixed (2026-06-26).** The repair-rung half is done: `diveAnchorCheck`
+> now returns a `prescription` on a bad anchor (the contract's `DeterministicCheck.run`
+> gained an optional `prescription` field), so the engine routes the failure through
+> the repair rung (ADR-006, repair-within-attempt) — handing the model the exact bad
+> anchors with the instruction to re-ground them by symbol search or drop the unfounded
+> fact — instead of escalating the tier into the same hallucination. If the repair
+> still reproduces the bad anchor, the isomorphic-failure check blocks honestly (one
+> repair attempt, not an infinite loop). **Still open:** the *structural floor* for a
+> build leaf whose primary-region dive nonetheless produced nothing (so it re-surveys
+> and blocks), and the model-capability signal so escalation doesn't roll into the same
+> wall. The control-token contributor was already fixed separately (`ba4a9d1`).
+
+**2026-09-23 — fixed-pending-live-proof.** Backlog audit (2026-09-23): the repair-rung half was proven live (run 15, docs/log.md 2026-06-26); the "model-capability half" this note calls open was resolved and its issue (model-capability-signal) destroyed as proven (docs/log.md, 2026-07-07). The structural floor is on main. Remaining proof: a live run where the dive floor hands facts to the dependent build leaf.

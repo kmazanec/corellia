@@ -142,3 +142,37 @@ it.
   ADR-034's brokered `file_issue` tool and engine integration steps, this
   completes the design for making the OKF discipline a property the factory
   enforces, not just follows.
+
+## Amendment (2026-09-23): the issue lifecycle is a checked rule
+
+**Trigger.** A backlog audit found 18 issues whose work had landed on main (each
+body carried a "Fixed" note) still marked `status: open`, and a catalog with no
+status column at all. `status` was free text that nothing read; fix notes landed
+wherever the author put them; the catalog was hand-maintained. Both writers — the
+factory and a hand-building agent — could leave the backlog stale, and nothing
+noticed. That makes the backlog useless for choosing what to build next.
+
+**Decision.** Issue status is a closed lifecycle, and the docs lint enforces it
+alongside the conformance rules above:
+
+- `status` ∈ `open` | `partially-fixed` | `fixed-pending-live-proof`. "Done" is
+  not a status: a finished issue is deleted, its catalog row removed, and a line
+  added to `docs/log.md`.
+- A non-open issue carries a `## Resolution` section (what landed, what remains,
+  what live proof is outstanding). An `open` issue carries none, and no body fix
+  note.
+- The catalog (`docs/issues/index.md`) has one row per issue, under its severity
+  heading, with a Status column; section, kind, and status must match the file.
+
+The rules live as data in `src/library/issue-backlog.ts`, read by both
+`scripts/lint-docs.ts` and the engine's issue tools. ADR-034's issue tooling gains
+a lifecycle partner: the brokered `update_issue` tool (same `docs.issues.write`
+grant, same `docs/issues/` boundary) records a partial or pending-live-proof fix
+or resolves (deletes + logs) the issue. Provenance deletion on delivery
+(`deleteProvenanceIssue`) and `file_issue` write through the same catalog shape.
+
+**Why hard-fail here, when (B) above rejected hard-failing recommended fields.**
+Drift in the lifecycle is not a style lapse; it is the backlog saying something
+false about the code. The check is mechanical (field values, one heading, table
+agreement), not a judgment of content quality, so it stays inside the "enforce
+the checkable" line this ADR draws.

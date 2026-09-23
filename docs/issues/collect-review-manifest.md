@@ -4,7 +4,7 @@ title: "C2. No diff review surface before collection"
 description: The operator must manually git diff and inspect every changed element before each merge; there is no structured review manifest.
 tags: [scope-safety, collect, review]
 timestamp: 2026-06-25
-status: open
+status: partially-fixed
 kind: idea
 severity: medium
 ---
@@ -31,3 +31,7 @@ auto-gate) reviews intent, not raw diff lines.
 Collection emits a review manifest summarizing files changed, public-symbol/contract
 deltas, scope conformance, and test delta — reviewable without reading raw diff
 lines.
+
+## Resolution
+
+**2026-09-23 — partially-fixed.** Backlog audit (2026-09-23): a `files-touched` event lists each changed file as in- or out-of-scope (`src/engine/sandbox-finalization.ts`, rendered by `src/eventlog/render.ts`), and shell writes outside scope are logged `scope-escaped` (iteration 24). Remaining: public-symbol / contract deltas, the test delta, and a single manifest artifact.

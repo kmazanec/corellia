@@ -64,12 +64,6 @@ that existed in the worktree.
 > must be given the branch diff (or a worktree-derived artifact), same
 > direction as proposed below.
 
-> **Fixed (2026-07-06, commit 2fe149c) — pending live proof.** For a sandboxed
-> tree the merged files artifact is now derived from the worktree's changed
-> files vs the base sha (committed rounds + uncommitted + untracked, one
-> authoritative content per path) in `runSplitRound`, so the integration and
-> acceptance judges assess the delivered state. Run 9's judge-integration
-> passed on exactly this input.
 
 ## Proposed direction
 
@@ -86,3 +80,12 @@ A run in which one attempt writes files and blocks, and a later attempt
 completes, produces a merged artifact (and a judge-acceptance subject) that
 contains the blocked attempt's salvaged files. No judge failure names a file
 "missing" that exists in the tree worktree.
+
+## Resolution
+
+> **Fixed (2026-07-06, commit 2fe149c) — pending live proof.** For a sandboxed
+> tree the merged files artifact is now derived from the worktree's changed
+> files vs the base sha (committed rounds + uncommitted + untracked, one
+> authoritative content per path) in `runSplitRound`, so the integration and
+> acceptance judges assess the delivered state. Run 9's judge-integration
+> passed on exactly this input.

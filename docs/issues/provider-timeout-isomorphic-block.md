@@ -38,15 +38,6 @@ and `pr`. Events under `out/commission-observability-live-tail/`.
 > in a run that was otherwise one flaky test away from passing its acceptance
 > bar.
 >
-> **Fixed (2026-07-06, commit cd0d24a) — pending live proof.** Three changes:
-> raw abort/timeout errors escaping unwrapped paths now classify as
-> `transport`; `step-loop:transport` is exempt from the isomorphic check (the
-> attempt budget and tier ladder bound the retries — each rung is a different
-> model, which IS the retry-on-a-different-endpoint); and the non-convergence
-> block carries the last verdict's findings so a timeout-caused block names
-> its cause. Related same-day fix: an EMPTY LLM response now falls back to the
-> mid model in `callJson` (run 8: four consecutive empty judge responses from
-> the high tier isomorphic-blocked the tree).
 
 ## Proposed direction
 
@@ -62,3 +53,15 @@ isomorphism detector.
 A step-loop attempt that fails on a provider timeout is retried (with backoff)
 without incrementing the isomorphic-failure count; two consecutive timeouts do
 not block a goal that still has attempt budget.
+
+## Resolution
+
+> **Fixed (2026-07-06, commit cd0d24a) — pending live proof.** Three changes:
+> raw abort/timeout errors escaping unwrapped paths now classify as
+> `transport`; `step-loop:transport` is exempt from the isomorphic check (the
+> attempt budget and tier ladder bound the retries — each rung is a different
+> model, which IS the retry-on-a-different-endpoint); and the non-convergence
+> block carries the last verdict's findings so a timeout-caused block names
+> its cause. Related same-day fix: an EMPTY LLM response now falls back to the
+> mid model in `callJson` (run 8: four consecutive empty judge responses from
+> the high tier isomorphic-blocked the tree).

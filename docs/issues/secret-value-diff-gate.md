@@ -26,8 +26,7 @@ what the deterministic floor exists to avoid.
 ## Evidence
 - Discovered during the behavioral-fixture-library build (2026-07-07): the
   planned "secret-value leak → vault-ref scan" fixture pair had no gate to pin —
-  "the pin would be circular" (fixtures/README.md, "Note on the fourth gate";
-  docs/issues/behavioral-fixture-library.md Fixed addendum).
+  "the pin would be circular" (fixtures/README.md, "Note on the fourth gate").
 - GOAL-TYPES.md implement card, `eval.deterministic` list; DESIGN.md "Eval
   economics — deterministic before judge".
 

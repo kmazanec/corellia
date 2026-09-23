@@ -118,11 +118,14 @@ This skill accepts intent from three sources. Pick by what the user gives you:
    it is a roadmap — say so and split it (see "Right-size the goal").
 
    **On issue lifecycle:** issues are *ephemeral* — destroyed once implemented. You
-   are producing a plan, not building, so **do NOT delete the issue now.** Instead,
+   are producing a plan, not building, so **do NOT change the issue now.** Instead,
    note in the commission artifact (a comment) which issue it came from
-   (`// from docs/issues/<slug>.md`), and tell the user that once the commission is
-   run and the work lands as an iteration/ADR/code, the issue should be deleted (the
-   build step or a follow-up closes the loop). Capture → plan → build → delete.
+   (`// from docs/issues/<slug>.md`). On a successful factory delivery the engine
+   deletes that issue and its catalog row itself (`deleteProvenanceIssue`). If the
+   work instead lands partially, or is hand-built, whoever lands it moves the issue
+   along its lifecycle in the same change
+   ([docs/issues/index.md § Lifecycle](../../docs/issues/index.md)). Capture → plan
+   → build → move/delete.
 
 ## The interview — gather, in the factory's vocabulary
 

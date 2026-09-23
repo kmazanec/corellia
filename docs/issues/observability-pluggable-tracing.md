@@ -9,79 +9,6 @@ kind: idea
 severity: medium
 ---
 
-## Update 2026-07-06 (b) — OTLP adapter shipped; LangSmith remains open
-
-The first concrete vendor adapter is now built, proving the `EventSink` seam
-generic against a real backend (≥2 backends: the ndjson debug sink + OTLP).
-
-- **`src/eventlog/otlp-sink.ts`** implements `EventSink`, exporting the goal tree
-  over the **OTLP/HTTP JSON** encoding via plain `fetch` (POST
-  `<endpoint>/v1/traces`) — **no vendor SDK, no new dependency** (ADR-001). Reaches
-  Grafana Tempo, Honeycomb, Datadog, any OTLP collector.
-- Folds events to spans per the neutral mapping (goal-received opens; parentId
-  nests; tool-call/decided/judge-verdict/step become span events; usage →
-  attributes; blocked / blocking emitted → ERROR status). Deterministic
-  `node:crypto` ids: 16-byte trace id from the root goalId, 8-byte span id from
-  the goalId. `emit()` only buffers; closed spans POST in batches (50 spans / 5 s),
-  fire-and-forget; `flush()` drains and marks still-open spans
-  `factory.incomplete=true`. Network failures caught, logged once per burst, never
-  thrown.
-- Env-gated in `buildSinks()`: `CORELLIA_OTLP_ENDPOINT` enables it,
-  `CORELLIA_OTLP_HEADERS` (JSON object) carries auth. Honeycomb + Grafana Cloud
-  example configs are in `docs/observability.md`.
-- Tests: `tests/eventlog/otlp-sink.test.ts` (lifecycle → well-formed OTLP JSON, id
-  shapes, parenthood, error status, batching, flush+incomplete, fetch-failure
-  discipline) and `tests/daemon/config-sinks.test.ts` (env-gating + header parse).
-
-**Still open:** the **LangSmith** adapter (gated on `LANGSMITH_API_KEY`) — the one
-remaining documented-but-unbuilt adapter — and a live-backend proof of a real
-daemon run producing a trace whose span tree matches the factory's goal tree.
-
-## Update 2026-07-06 — Part 2 shipped, Part 1 seam shipped, vendor adapters open
-
-Built on `feat/observability` (off `feat/cloud-ready`). Status: **partially-fixed**.
-
-**Shipped — Part 2, the `corellia logs` CLI (in full).**
-- A `corellia` CLI binary + dispatcher: `package.json` `bin.corellia` →
-  `scripts/corellia.ts`, a tiny subcommand router (each subcommand owns its
-  behavior in a `src/` module). Scripts: `npm run corellia`, `npm run logs`.
-- `corellia logs [path]` — replay: goal tree + per-goal detail (+ `--cost`),
-  reusing the projections (`renderTree`/`costSummary`); `scripts/trace.ts` is now
-  a thin adapter over the shared `src/eventlog/render.ts` (no duplicated describe
-  logic).
-- `corellia logs --follow` / `-f` — the live tail: `src/eventlog/tail.ts` does
-  offset-tracked incremental JSONL reads with `fs.watch` + a polling fallback and
-  partial-line carry (a half-written append is reassembled, never dropped;
-  a shrunk file resets to offset 0). Renders compact one-liners
-  (`HH:MM:SS  <goal>  <detail>` carrying tier / tool / verdict / block reason)
-  with an optional `--tree` snapshot on each new goal. Honors
-  `CORELLIA_EVENTS_PATH`. PG follow is declined honestly when `DATABASE_URL` is
-  set ("requires the JSONL store").
-- Filters: `--goal <substr>`, `--type <evt>` — dependency-free parsing (no yargs).
-
-**Shipped — Part 1, the EventSink fan-out *seam* (not the vendor adapters).**
-- `interface EventSink { emit(event); flush?() }` in `src/contract/events.ts`
-  beside `EventStore`.
-- `SinkFanoutStore` (`src/eventlog/sink-fanout-store.ts`): a thin store decorator
-  — appends to the inner store, then calls each sink's `emit` inside `try/catch`.
-  A throwing sink NEVER breaks the append (durability held; ADR-003). Zero change
-  to `JsonlEventStore`/`PgEventStore`.
-- Wired in `src/daemon/config.ts` `buildStore()`: reads env, wraps the concrete
-  store only when ≥1 sink is registered (no behavior change when none).
-- ONE concrete sink ships: `StdoutSink` (ndjson) behind `CORELLIA_SINK_STDOUT=1`,
-  proving the seam end-to-end with no vendor dep.
-- The neutral **event → span mapping** (goal = span/run, child-spawned = child,
-  tool-call/decided/judge-verdict = step events, usage = tokens, blocked = error)
-  is specified in `docs/observability.md`, enough that the LangSmith and OTLP
-  adapters are mechanical.
-
-**Still open (vendor adapters).** The LangSmith adapter (gated on
-`LANGSMITH_API_KEY`) and the OTLP/generic adapter are specified in
-`docs/observability.md` but NOT implemented — no SDK deps were added (ADR-001).
-They register in `buildStore()` the same way `StdoutSink` does. The acceptance
-hint's "a daemon run with `LANGSMITH_API_KEY` produces a LangSmith trace" remains
-to be built and proven against a live backend.
-
 # Pluggable observability: an EventSink fan-out (LangSmith-first) + a `corellia logs` CLI
 
 ## Problem
@@ -199,3 +126,78 @@ shape.
   goal tree + per-goal trace incrementally, honoring `CORELLIA_EVENTS_PATH`.
 - The OTLP adapter is specified (event→span mapping) even if implemented as a
   follow-on, so the EventSink interface is proven generic against ≥2 backends.
+
+## Resolution
+
+### Update 2026-07-06 (b) — OTLP adapter shipped; LangSmith remains open
+
+The first concrete vendor adapter is now built, proving the `EventSink` seam
+generic against a real backend (≥2 backends: the ndjson debug sink + OTLP).
+
+- **`src/eventlog/otlp-sink.ts`** implements `EventSink`, exporting the goal tree
+  over the **OTLP/HTTP JSON** encoding via plain `fetch` (POST
+  `<endpoint>/v1/traces`) — **no vendor SDK, no new dependency** (ADR-001). Reaches
+  Grafana Tempo, Honeycomb, Datadog, any OTLP collector.
+- Folds events to spans per the neutral mapping (goal-received opens; parentId
+  nests; tool-call/decided/judge-verdict/step become span events; usage →
+  attributes; blocked / blocking emitted → ERROR status). Deterministic
+  `node:crypto` ids: 16-byte trace id from the root goalId, 8-byte span id from
+  the goalId. `emit()` only buffers; closed spans POST in batches (50 spans / 5 s),
+  fire-and-forget; `flush()` drains and marks still-open spans
+  `factory.incomplete=true`. Network failures caught, logged once per burst, never
+  thrown.
+- Env-gated in `buildSinks()`: `CORELLIA_OTLP_ENDPOINT` enables it,
+  `CORELLIA_OTLP_HEADERS` (JSON object) carries auth. Honeycomb + Grafana Cloud
+  example configs are in `docs/observability.md`.
+- Tests: `tests/eventlog/otlp-sink.test.ts` (lifecycle → well-formed OTLP JSON, id
+  shapes, parenthood, error status, batching, flush+incomplete, fetch-failure
+  discipline) and `tests/daemon/config-sinks.test.ts` (env-gating + header parse).
+
+**Still open:** the **LangSmith** adapter (gated on `LANGSMITH_API_KEY`) — the one
+remaining documented-but-unbuilt adapter — and a live-backend proof of a real
+daemon run producing a trace whose span tree matches the factory's goal tree.
+
+### Update 2026-07-06 — Part 2 shipped, Part 1 seam shipped, vendor adapters open
+
+Built on `feat/observability` (off `feat/cloud-ready`). Status: **partially-fixed**.
+
+**Shipped — Part 2, the `corellia logs` CLI (in full).**
+- A `corellia` CLI binary + dispatcher: `package.json` `bin.corellia` →
+  `scripts/corellia.ts`, a tiny subcommand router (each subcommand owns its
+  behavior in a `src/` module). Scripts: `npm run corellia`, `npm run logs`.
+- `corellia logs [path]` — replay: goal tree + per-goal detail (+ `--cost`),
+  reusing the projections (`renderTree`/`costSummary`); `scripts/trace.ts` is now
+  a thin adapter over the shared `src/eventlog/render.ts` (no duplicated describe
+  logic).
+- `corellia logs --follow` / `-f` — the live tail: `src/eventlog/tail.ts` does
+  offset-tracked incremental JSONL reads with `fs.watch` + a polling fallback and
+  partial-line carry (a half-written append is reassembled, never dropped;
+  a shrunk file resets to offset 0). Renders compact one-liners
+  (`HH:MM:SS  <goal>  <detail>` carrying tier / tool / verdict / block reason)
+  with an optional `--tree` snapshot on each new goal. Honors
+  `CORELLIA_EVENTS_PATH`. PG follow is declined honestly when `DATABASE_URL` is
+  set ("requires the JSONL store").
+- Filters: `--goal <substr>`, `--type <evt>` — dependency-free parsing (no yargs).
+
+**Shipped — Part 1, the EventSink fan-out *seam* (not the vendor adapters).**
+- `interface EventSink { emit(event); flush?() }` in `src/contract/events.ts`
+  beside `EventStore`.
+- `SinkFanoutStore` (`src/eventlog/sink-fanout-store.ts`): a thin store decorator
+  — appends to the inner store, then calls each sink's `emit` inside `try/catch`.
+  A throwing sink NEVER breaks the append (durability held; ADR-003). Zero change
+  to `JsonlEventStore`/`PgEventStore`.
+- Wired in `src/daemon/config.ts` `buildStore()`: reads env, wraps the concrete
+  store only when ≥1 sink is registered (no behavior change when none).
+- ONE concrete sink ships: `StdoutSink` (ndjson) behind `CORELLIA_SINK_STDOUT=1`,
+  proving the seam end-to-end with no vendor dep.
+- The neutral **event → span mapping** (goal = span/run, child-spawned = child,
+  tool-call/decided/judge-verdict = step events, usage = tokens, blocked = error)
+  is specified in `docs/observability.md`, enough that the LangSmith and OTLP
+  adapters are mechanical.
+
+**Still open (vendor adapters).** The LangSmith adapter (gated on
+`LANGSMITH_API_KEY`) and the OTLP/generic adapter are specified in
+`docs/observability.md` but NOT implemented — no SDK deps were added (ADR-001).
+They register in `buildStore()` the same way `StdoutSink` does. The acceptance
+hint's "a daemon run with `LANGSMITH_API_KEY` produces a LangSmith trace" remains
+to be built and proven against a live backend.

@@ -4,7 +4,7 @@ title: Bundle a local trace backend so OTLP has a zero-config graphical view
 description: The OTLP exporter works but points at nothing by default; bundling Jaeger (or an OTel collector) in compose gives a free graphical run view today.
 tags: [observability, otlp, compose, deploy, ui]
 timestamp: 2026-07-07
-status: open
+status: fixed-pending-live-proof
 kind: idea
 severity: low
 ---
@@ -34,7 +34,7 @@ profile so default local/prod deploys stay two containers.
 `docker compose --profile observe up` then a live run yields a browsable trace of
 the goal tree in Jaeger with zero further configuration.
 
----
+## Resolution
 
 > **Fixed (2026-07-07, branch `issue/notify-observe`; pending live proof).** An
 > optional `observe` compose profile in `compose.yaml` adds a Jaeger all-in-one
@@ -73,3 +73,5 @@ the goal tree in Jaeger with zero further configuration.
 > the UI port published. The "watch a run: open :16686" paragraph is in both
 > docs/observability.md and docs/deploy.md. A live run rendering as a Jaeger trace
 > waterfall is the confirming proof.
+
+**2026-09-23 — fixed-pending-live-proof.** Backlog audit (2026-09-23): the fix note above was landed on main but the status was never moved off `open`. Remaining proof: `docker compose --profile observe up` showing a real run's span tree in Jaeger.

@@ -4,7 +4,7 @@ title: "Teach the factory to create and work with date-prefixed iteration record
 description: When the factory delivers work, it should open/append the matching docs/iterations/YYYY-MM-DD-HH-slug record and update the catalog, the way a human iteration does.
 tags: [factory, iterations, docs, self-hosting]
 timestamp: 2026-06-25
-status: open
+status: partially-fixed
 kind: future-work
 severity: medium
 ---
@@ -53,3 +53,7 @@ A factory-delivered piece of substantive work produces (without a human editing
 docs): a date-prefixed iteration dir with a conformant `index.md` holding its run
 evidence, a new row in `iterations/index.md`, and a closing line in `docs/log.md`
 that references the iteration and its ADRs.
+
+## Resolution
+
+**2026-09-23 — partially-fixed.** Backlog audit (2026-09-23): `createIterationRecord` (`src/engine/iteration-tools.ts`) writes the dated iteration record, its catalog row, and a log line on successful delivery. Remaining: the record body is a stub (title + intent id) with no run evidence, the log line cites no ADRs, and it is not live-proven.

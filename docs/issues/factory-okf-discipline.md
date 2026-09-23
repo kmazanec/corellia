@@ -4,7 +4,7 @@ title: "Make OKF doc discipline a property the factory enforces, not just follow
 description: The factory should keep docs/ OKF-conformant and route durable findings to the right home (issue vs iteration vs ADR vs log) as a native rule, so the doc model self-maintains.
 tags: [factory, docs, okf, constitution, self-hosting]
 timestamp: 2026-06-25
-status: open
+status: partially-fixed
 kind: idea
 severity: low
 ---
@@ -50,3 +50,7 @@ mechanics this would police.
 `npm run lint` (or a doc-lint it calls) fails on a `docs/` markdown file missing a
 `type`, on a malformed reserved file, or on an issue missing its required fields;
 and the routing rule for findings is written somewhere checkable, not only in prose.
+
+## Resolution
+
+**2026-09-23 — partially-fixed.** Backlog audit (2026-09-23): conformance is enforced — `scripts/lint-docs.ts` (in `npm run lint`) hard-fails on a missing `type`, missing issue fields, and backlog drift (lifecycle vocabulary, `## Resolution` presence, catalog section/kind/status agreement; `src/library/issue-backlog.ts`). Remaining: the finding-routing rule (ADR vs issue vs iteration vs log) is still prose only, and reserved `index.md`/`log.md` structure beyond the issues catalog is unchecked.

@@ -1,20 +1,21 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-
-/** Valid values for the `kind` frontmatter field. */
-const VALID_KINDS = ['bug', 'idea', 'future-work'] as const;
-
-/** Valid values for the `severity` frontmatter field. */
-const VALID_SEVERITIES = ['high', 'medium', 'low'] as const;
+import {
+  catalogRow,
+  isIssueKind,
+  isIssueSeverity,
+  ISSUE_KINDS,
+  ISSUE_SEVERITIES,
+  severityHeading,
+  type IssueKind,
+  type IssueSeverity,
+} from '../library/issue-backlog.js';
 
 export const REQUIRED_ISSUE_FIELDS = [
   'slug', 'title', 'description', 'tags', 'kind', 'severity',
   'problem', 'evidence', 'proposedDirection', 'acceptanceHint',
 ] as const;
-
-type IssueKind = typeof VALID_KINDS[number];
-type IssueSeverity = typeof VALID_SEVERITIES[number];
 
 export type IssueFileArgs = {
   slug: string;
@@ -38,8 +39,8 @@ type CatalogInsertResult =
   | { ok: true; content: string }
   | { ok: false; error: string };
 
-export const ISSUE_KIND_VALUES = [...VALID_KINDS];
-export const ISSUE_SEVERITY_VALUES = [...VALID_SEVERITIES];
+export const ISSUE_KIND_VALUES = [...ISSUE_KINDS];
+export const ISSUE_SEVERITY_VALUES = [...ISSUE_SEVERITIES];
 
 export async function fileIssue(sandboxRoot: string, args: Record<string, unknown>): Promise<ToolResult> {
   const parsed = parseIssueFileArgs(args);
@@ -77,12 +78,12 @@ function parseIssueFileArgs(args: Record<string, unknown>): ParseResult {
 
   const kind = String(args['kind']);
   if (!isIssueKind(kind)) {
-    return { ok: false, error: `"kind" must be one of: ${VALID_KINDS.join(', ')}` };
+    return { ok: false, error: `"kind" must be one of: ${ISSUE_KINDS.join(', ')}` };
   }
 
   const severity = String(args['severity']);
   if (!isIssueSeverity(severity)) {
-    return { ok: false, error: `"severity" must be one of: ${VALID_SEVERITIES.join(', ')}` };
+    return { ok: false, error: `"severity" must be one of: ${ISSUE_SEVERITIES.join(', ')}` };
   }
 
   const slug = String(args['slug']);
@@ -239,7 +240,11 @@ function insertCatalogRow(indexContent: string, args: IssueFileArgs): CatalogIns
 
   return {
     ok: true,
-    content: renderCatalogInsert(indexContent, insertIdx, catalogRow(args)),
+    content: renderCatalogInsert(
+      indexContent,
+      insertIdx,
+      catalogRow({ slug: args.slug, kind: args.kind, status: 'open', tags: args.tags }),
+    ),
   };
 }
 
@@ -254,15 +259,6 @@ function renderCatalogInsert(indexContent: string, insertIdx: number, row: strin
     after;
 }
 
-function catalogRow(args: IssueFileArgs): string {
-  return `| [${args.slug}](${args.slug}.md) | ${args.kind} | ${args.tags.join(', ')} |`;
-}
-
-function severityHeading(severity: IssueSeverity): string {
-  const cap = severity.charAt(0).toUpperCase() + severity.slice(1);
-  return `## ${cap} severity`;
-}
-
 function yamlValue(raw: string): string {
   if (raw.includes('\n')) {
     return `"${raw.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
@@ -275,14 +271,6 @@ function yamlValue(raw: string): string {
 
 function yamlTags(tags: string[]): string {
   return `[${tags.join(', ')}]`;
-}
-
-function isIssueKind(value: string): value is IssueKind {
-  return (VALID_KINDS as readonly string[]).includes(value);
-}
-
-function isIssueSeverity(value: string): value is IssueSeverity {
-  return (VALID_SEVERITIES as readonly string[]).includes(value);
 }
 
 function errorMessage(err: unknown): string {

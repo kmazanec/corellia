@@ -4,7 +4,7 @@ title: Screenshot-judge call site never sets needs.vision
 description: The model catalog resolves needs.vision, but the ADR-042 screenshot-judge call site doesn't declare it, so visual verification can land on a non-vision model.
 tags: [brain, model-catalog, vision, critique-ui, judge]
 timestamp: 2026-07-07
-status: open
+status: fixed-pending-live-proof
 kind: bug
 severity: low
 ---
@@ -34,7 +34,7 @@ The screenshot-judge path declares vision in its needs; a unit test proves the
 resolved model for that call site is vision-capable, and a non-vision catalog
 band is skipped past rather than selected.
 
----
+## Resolution
 
 > **Fixed (2026-07-07, branch `issue/small-fixes`; pending live proof).** The
 > acceptance-judge call site (`src/engine/milestone/round-assessment.ts`) now sets
@@ -69,3 +69,5 @@ band is skipped past rather than selected.
 > catalog entry; pure script/file criteria leave `needs` unset). A live run whose
 > criteria include a `screenshot-ui` capture landing on a vision model is the
 > confirming proof.
+
+**2026-09-23 — fixed-pending-live-proof.** Backlog audit (2026-09-23): the fix note above was landed on main but the status was never moved off `open`. Remaining proof: a live acceptance judgement over an image capture resolving a vision-capable model.

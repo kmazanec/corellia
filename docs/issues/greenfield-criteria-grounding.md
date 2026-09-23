@@ -76,7 +76,7 @@ criteria within a bounded number of reads (no host-repo survey), the milestone
 loop assesses non-0/0 rounds, and the tree converges to a collected worktree /
 PR — proven via a daemon commission like proof-word-count.
 
----
+## Resolution
 
 > **Fixed (2026-09-23, iteration 22; pending live proof).** Diagnosis found three
 > compounding context defects rather than model stubbornness alone: the leaf
@@ -99,4 +99,3 @@ PR — proven via a daemon commission like proof-word-count.
 > [iteration 22](../iterations/2026-09-23-00-greenfield-criteria-grounding/index.md).
 > Follow-on: [daemon-declared-scripts](daemon-declared-scripts.md) — under the
 > daemon only `{ file }` criteria are legal at all.
-

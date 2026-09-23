@@ -4,7 +4,7 @@ title: Verify-on-read fires at only the split checkpoint — decide and integrat
 description: DESIGN's checkpoint consistency re-reads depended-on facts at decide, split, AND integrate; today only the split checkpoint verifies, and lesson memories get no verify-on-read at all.
 tags: [engine, knowledge, memory, verify-on-read, consistency]
 timestamp: 2026-07-07
-status: open
+status: fixed-pending-live-proof
 kind: future-work
 severity: medium
 ---
@@ -43,7 +43,7 @@ A test that moves the repo SHA (or rewrites a depended-on fact) between a split
 and its integrate sees the integrate checkpoint catch the drift and trigger
 refresh/re-decision instead of judging against the stale fact.
 
----
+## Resolution
 
 > **Fixed (2026-07-07, branch `issue/verify-checkpoints`; pending live proof).**
 > The existing split-checkpoint verify-on-read now fires at the decide and
@@ -115,3 +115,5 @@ refresh/re-decision instead of judging against the stale fact.
 > `docs/issues/test-suite-parallel-load-timeouts.md`; each passes in isolation). A
 > live run catching real lateral drift between a split and its integrate is the
 > confirming proof.
+
+**2026-09-23 — fixed-pending-live-proof.** Backlog audit (2026-09-23): the fix note above was landed on main but the status was never moved off `open`. Remaining proof: a live run where the decide or integrate checkpoint re-reads and rejects a stale fact.

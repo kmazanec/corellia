@@ -2,7 +2,7 @@
 type: log
 title: Corellia change log
 description: Reverse-chronological log of Corellia's build. Completed work references an iteration or ADR; undone work lives in docs/issues/.
-timestamp: 2026-06-25
+timestamp: 2026-09-23
 ---
 
 # Corellia log
@@ -16,6 +16,27 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-09-23
 
+- **Backlog audit + issue lifecycle enforced.** 18 issues had fix notes on main
+  but still said `open`; the catalog carried no status. Issue status is now a
+  closed lifecycle (`open` → `partially-fixed` → `fixed-pending-live-proof` →
+  deleted + logged), every non-open issue carries a `## Resolution` section, and
+  the catalog shows each issue's status. `npm run lint` fails on drift
+  (`src/library/issue-backlog.ts`). The factory moves issues with the new
+  brokered `update_issue` tool (`src/engine/issue-updates.ts`). Statuses
+  re-audited against the code: 19 moved to fixed-pending-live-proof, 7 to
+  partially-fixed, 3 resolved (below). Detail:
+  [issues/index.md § Lifecycle](issues/index.md).
+- **Resolved issue `auto-prune-blocked-worktrees`** — the boot-time worktree
+  reaper was live-proved when an accidental SIGTERM hit daemon proof run 5
+  (2026-07-07 entry below).
+- **Resolved issue `knowledge-self-validation-gaps`** — all seven knowledge
+  categories self-validate at promotion (`src/library/knowledge-checks.ts`:
+  deps, credentials, design-system added), with broken-artifact tests for each.
+- **Resolved issue `behavioral-fixture-library`** — five fixture pairs in
+  `fixtures/` each prove a deterministic gate catches the defect and passes the
+  clean twin in the normal vitest suite, with `fixtures/README.md` naming the
+  gate each pins (the secret-value pair rides on
+  [secret-value-diff-gate](issues/secret-value-diff-gate.md)).
 - **Iteration 24 — shell scope escapes** (the two residual C1 holes). A
   `run_command` that changes files outside the leaf's scope is now logged as
   `scope-escaped` and named back to the leaf. A milestone round with a stray

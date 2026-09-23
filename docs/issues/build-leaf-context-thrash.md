@@ -4,34 +4,12 @@ title: "a build leaf thrashes its context — the working-memory bound evicts to
 description: A fully-fed implement leaf read 170 files across 46 evictions with 0 writes. The ADR-036 bound caps the transcript at 60K (evicts after ~6 of corellia's large files), blind-stubs ~85% of context per pass with no gist retained, and read_file always returns whole files — so a giant file alone blows the cap. The leaf loses what it read and re-reads in a sawtooth that never converges to a write.
 tags: [engine, build, working-memory, eviction, context, scratchpad, read-tool, adr-036, deliver-intent]
 timestamp: 2026-06-26
-status: partially-fixed
+status: fixed-pending-live-proof
 kind: bug
 severity: high
 ---
 
 # a build leaf thrashes its context — the working-memory bound evicts too aggressively, blindly, and per-whole-file
-
-> **Implemented (2026-06-26), pending live re-proof.** All three decided directions
-> are built and unit-tested:
-> 1. **Cap raised** `TRANSCRIPT_TOKEN_CAP` 60K→140K, `KEEP_RECENT_READS` 4→8
->    (`src/engine/scratchpad.ts`) — well under the mid tier's ~384K context.
-> 2. **Summarize-on-evict** — optional `Brain.summarize?(text, ctx)` (low tier by
->    default) distills an evicted read into a gist stub via
->    `evictTranscriptWithSummary`; the engine wires it in `evictBoundedTranscript`
->    and debits the summary tokens. Falls back to the blind stub when absent or on
->    error (no test churn). The post-truncation emergency shed stays blind (fast).
-> 3. **Ranged / large-file reads** — `read_file` gains `offset`/`limit`; a whole-file
->    read past `READ_FILE_AUTO_BOUND_LINES` (400) returns a bounded head + a paging
->    notice. Small whole-file reads stay byte-identical.
->
-> Plus (ADR-041): the **explore-then-emit read-ceiling was removed** — with context
-> bounded by the working-memory mechanism, the 16-read force-emit was redundant and
-> was force-emitting a partial RegionFacts that failed its gate (`dive-tests-engine`,
-> the dive that cascade-blocked the build in runs 15-17). A leaf now reads what the
-> region needs and emits when ready.
->
-> **Still to prove:** a live run showing the dives all converge AND the build leaf
-> reaches `write_file` without the re-read sawtooth.
 
 ## Problem
 
@@ -100,3 +78,29 @@ A fully-fed build leaf making a cross-cutting change converges to `write_file`
 without a re-read sawtooth: it holds a workable set of files in context, evicted
 reads leave a usable summary behind (not a bare re-read invitation), and a single
 large file is read in bounded chunks rather than all at once.
+
+## Resolution
+
+> **Implemented (2026-06-26), pending live re-proof.** All three decided directions
+> are built and unit-tested:
+> 1. **Cap raised** `TRANSCRIPT_TOKEN_CAP` 60K→140K, `KEEP_RECENT_READS` 4→8
+>    (`src/engine/scratchpad.ts`) — well under the mid tier's ~384K context.
+> 2. **Summarize-on-evict** — optional `Brain.summarize?(text, ctx)` (low tier by
+>    default) distills an evicted read into a gist stub via
+>    `evictTranscriptWithSummary`; the engine wires it in `evictBoundedTranscript`
+>    and debits the summary tokens. Falls back to the blind stub when absent or on
+>    error (no test churn). The post-truncation emergency shed stays blind (fast).
+> 3. **Ranged / large-file reads** — `read_file` gains `offset`/`limit`; a whole-file
+>    read past `READ_FILE_AUTO_BOUND_LINES` (400) returns a bounded head + a paging
+>    notice. Small whole-file reads stay byte-identical.
+>
+> Plus (ADR-041): the **explore-then-emit read-ceiling was removed** — with context
+> bounded by the working-memory mechanism, the 16-read force-emit was redundant and
+> was force-emitting a partial RegionFacts that failed its gate (`dive-tests-engine`,
+> the dive that cascade-blocked the build in runs 15-17). A leaf now reads what the
+> region needs and emits when ready.
+>
+> **Still to prove:** a live run showing the dives all converge AND the build leaf
+> reaches `write_file` without the re-read sawtooth.
+
+**2026-09-23 — fixed-pending-live-proof.** Backlog audit (2026-09-23): all three decided directions (cap raise, summarize-on-evict, ranged reads) plus the ADR-041 read-ceiling removal are on main; nothing remains to build. Remaining proof: the live run described under "Still to prove" above.

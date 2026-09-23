@@ -25,16 +25,16 @@ proof target is `commissions/example-word-count.ts` flipping its current BLOCK t
 converged PASS. Context: the iteration-13 factory-first attempt
 (the relevant iteration record under docs/iterations/, intent `live-self-93cbaae0`) stalled UPSTREAM of
 this on a separate decide-robustness gap, so the loop itself has not yet reached a
-live verdict. The hand-built `build/milestone-loop` branch (steps 1–6) remains
-unmerged.
+live verdict. Steps 1–6 are on main (iteration 13). Daemon proof runs 4–6
+(docs/log.md, 2026-07-07) stalled on criteria grounding, since fixed by
+iterations 22–23 — this proof is the next live run.
 
 ## Proposed direction
 Commission a small composite intent via `live:self`; confirm convergence (green PR,
 per-round commits) and an honest partial on a hard intent. Use
 `commissions/example-word-count.ts` as the BLOCK→PASS proof. Record the run in the
-event log / the relevant iteration record under docs/iterations/ per bootstrap discipline. (Note: the
-decide-robustness gap may need resolving first for a clean run — see
-`decide-json-robustness.md`.)
+event log / the relevant iteration record under docs/iterations/ per bootstrap discipline. (The decide-robustness gap that blocked the
+iteration-13 attempt is fixed — docs/log.md, "decide-json-robustness fixed".)
 
 ## Acceptance hint
 `commissions/example-word-count.ts` commissioned via `live:self` converges to a

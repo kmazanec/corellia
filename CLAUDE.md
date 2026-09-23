@@ -61,6 +61,9 @@ that state. The loop, when Keith hands you a goal:
    undisturbed, per the strange-loop hygiene in `examples/live-self.ts`).
    Build it as the factory would have: constitution-compliant, verify-on-read,
    so the artifact is the kind of output the factory itself would produce.
+   In the same commit, move any issue the work touches along its lifecycle
+   (`docs/issues/index.md` § Lifecycle): status + `## Resolution` + catalog row,
+   or delete it with a log line once proven. `npm run lint` fails on drift.
 4. **Re-prove through the factory** where feasible, closing the loop (as iteration
    08 did: ADR-029 hand-built on main, then proven via `live:self`).
 

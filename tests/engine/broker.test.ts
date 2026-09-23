@@ -14,7 +14,7 @@ import { createRegistry } from '../../src/library/registry.js';
 import { starterTypes } from '../../src/library/starter-types.js';
 import { createFileTools } from '../../src/engine/tools.js';
 import { retrievalTools } from '../../src/library/retrieval.js';
-import { fileIssueTool } from '../../src/engine/issue-tools.js';
+import { fileIssueTool, updateIssueTool } from '../../src/engine/issue-tools.js';
 import type { Goal } from '../../src/contract/goal.js';
 import type { ToolCall } from '../../src/contract/tool.js';
 
@@ -477,13 +477,13 @@ describe('file_issue grant + scope enforcement', () => {
     await mkdir(join(sandboxRoot, 'docs', 'issues'), { recursive: true });
     await writeFile(
       join(sandboxRoot, 'docs', 'issues', 'index.md'),
-      '---\ntype: index\n---\n# Issues\n\n## Medium severity\n\n| Issue | Kind | Tags |\n|---|---|---|\n',
+      '---\ntype: index\n---\n# Issues\n\n## Medium severity\n\n| Issue | Kind | Status | Tags |\n|---|---|---|---|\n',
     );
     issueBroker = new Broker({
       root: sandboxRoot,
       registry,
       store,
-      tools: [fileIssueTool(sandboxRoot)],
+      tools: [fileIssueTool(sandboxRoot), updateIssueTool(sandboxRoot)],
     });
   });
 
@@ -513,5 +513,22 @@ describe('file_issue grant + scope enforcement', () => {
     const result = await issueBroker.execute(goal, makeCall({ name: 'file_issue', args: { ...validArgs } }));
     expect(result.ok).toBe(false);
     expect(result.output).toMatch(/scope/i);
+  });
+  it('confines update_issue by the same grant and scope', async () => {
+    await issueBroker.execute(makeGoal({ type: 'investigate', scope: ['docs/issues/'] }),
+      makeCall({ name: 'file_issue', args: { ...validArgs } }));
+    const move = { slug: 'broker-filed', status: 'fixed-pending-live-proof', resolution: 'Built.' };
+
+    const ungranted = await issueBroker.execute(makeGoal({ type: 'judge-split', scope: ['docs/issues/'] }),
+      makeCall({ name: 'update_issue', args: move }));
+    expect(ungranted.output).toMatch(/not granted/i);
+
+    const outOfScope = await issueBroker.execute(makeGoal({ type: 'investigate', scope: ['src/'] }),
+      makeCall({ name: 'update_issue', args: move }));
+    expect(outOfScope.output).toMatch(/scope/i);
+
+    const granted = await issueBroker.execute(makeGoal({ type: 'investigate', scope: ['docs/issues/'] }),
+      makeCall({ name: 'update_issue', args: move }));
+    expect(granted.ok).toBe(true);
   });
 });

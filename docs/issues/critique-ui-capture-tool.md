@@ -4,7 +4,7 @@ title: critique-ui has no built-in capture tool — run_capture is a grant with 
 description: The run_capture grant string has no ToolImpl; UI proof works only if the target repo ships its own screenshot script, so critique-ui and the screenshot-judge path are not self-sufficient.
 tags: [engine, broker, tool, critique-ui, capture, vision]
 timestamp: 2026-07-07
-status: open
+status: fixed-pending-live-proof
 kind: future-work
 severity: medium
 ---
@@ -41,7 +41,7 @@ a critique-ui (or implement-with-UI-scope) goal produces a real screenshot proof
 artifact via the built-in tool, and the capture-runner tests cover both the
 repo-script and built-in paths.
 
----
+## Resolution
 
 > **Fixed (2026-07-07, branch `issue/capture-tool`; pending live proof).** The
 > `screenshot-ui` capture now has a built-in FALLBACK path so UI proof works
@@ -101,3 +101,5 @@ repo-script and built-in paths.
 > real playwright-absent resolver are proven in `tests/library/browser-capture.test.ts`.
 > A live critique-ui run against a real greenfield UI (with Playwright installed) is
 > the confirming proof.
+
+**2026-09-23 — fixed-pending-live-proof.** Backlog audit (2026-09-23): the fix note above was landed on main but the status was never moved off `open`. Remaining proof: a live critique-ui run using the built-in screenshot fallback on a repo with no screenshot script.

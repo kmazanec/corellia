@@ -4,7 +4,7 @@ title: "frozen {file, anchor} acceptance criteria guess identifier names the imp
 description: Criteria are minted at round 0, before any code exists, so file/anchor checks encode guesses about identifiers ("live-view.ts contains EventStore", "the test contains follow"). A legitimate implementation that names things differently can then never pass — run 22 ended 9/11 with every goal green, blocked only by two such anchor mismatches.
 tags: [engine, acceptance-criteria, milestone-loop, anchors, author-acceptance-criteria, adr-032]
 timestamp: 2026-07-07
-status: open
+status: partially-fixed
 kind: bug
 severity: medium
 ---
@@ -59,3 +59,6 @@ weakening the claim.
 > mechanical guard (e.g. rejecting anchors absent from both the spec and the
 > worktree at author time) remains open.
 
+## Resolution
+
+**2026-09-23 — partially-fixed.** Backlog audit (2026-09-23): the author skill restricts anchors to literal strings the spec fixes (`src/library/skills/author.md`) and `fixtures/anchor-mismatch/` pins the gate. Remaining: a mechanical authoring-time guard rejecting anchors found in neither spec nor worktree, and a way to amend a stale anchor mid-loop.

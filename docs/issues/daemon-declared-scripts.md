@@ -9,14 +9,6 @@ kind: bug
 severity: medium
 ---
 
-> **Fixed-pending-live-proof (2026-09-23):** a commission's `declaredScripts` /
-> `declaredCaptures` ride the root goal and layer over the engine's default
-> sandbox for that tree (`src/engine/tree-sandbox.ts`); the daemon's defaults
-> come from `CORELLIA_DECLARED_SCRIPTS`. `example-word-count` declares an
-> operator-owned `smoke` check. Destroy once a daemon run freezes and passes a
-> `{ script: "smoke" }` criterion. Detail:
-> [iteration 23](../iterations/2026-09-23-01-daemon-declared-scripts/index.md).
-
 # The daemon declares no scripts
 
 ## Problem
@@ -58,3 +50,13 @@ pre-check as the admission gate for whatever set is chosen.
 A daemon-commissioned greenfield intent that declares a `smoke` script freezes a
 `{ script: "smoke" }` criterion, and the milestone loop runs it against the
 round's worktree.
+
+## Resolution
+
+> **Fixed-pending-live-proof (2026-09-23):** a commission's `declaredScripts` /
+> `declaredCaptures` ride the root goal and layer over the engine's default
+> sandbox for that tree (`src/engine/tree-sandbox.ts`); the daemon's defaults
+> come from `CORELLIA_DECLARED_SCRIPTS`. `example-word-count` declares an
+> operator-owned `smoke` check. Destroy once a daemon run freezes and passes a
+> `{ script: "smoke" }` criterion. Detail:
+> [iteration 23](../iterations/2026-09-23-01-daemon-declared-scripts/index.md).

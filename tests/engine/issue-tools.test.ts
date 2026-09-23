@@ -55,9 +55,9 @@ beforeEach(async () => {
     [
       '---', 'type: index', 'title: Issues', '---', '',
       '# Issues', '',
-      '## High severity', '', '| Issue | Kind | Tags |', '|---|---|---|', '',
-      '## Medium severity', '', '| Issue | Kind | Tags |', '|---|---|---|', '',
-      '## Low severity', '', '| Issue | Kind | Tags |', '|---|---|---|', '',
+      '## High severity', '', '| Issue | Kind | Status | Tags |', '|---|---|---|---|', '',
+      '## Medium severity', '', '| Issue | Kind | Status | Tags |', '|---|---|---|---|', '',
+      '## Low severity', '', '| Issue | Kind | Status | Tags |', '|---|---|---|---|', '',
     ].join('\n'),
   );
 });
@@ -91,7 +91,7 @@ describe('file_issue', () => {
     const tool = fileIssueTool(sandboxRoot);
     await tool.execute(makeGoal(), { ...VALID_ARGS });
     const index = await readFile(join(sandboxRoot, 'docs', 'issues', 'index.md'), 'utf-8');
-    expect(index).toContain('[a-new-bug](a-new-bug.md)');
+    expect(index).toContain('| [a-new-bug](a-new-bug.md) | bug | open | engine, bug |');
     // Under Medium, not High/Low.
     const med = index.indexOf('## Medium severity');
     const low = index.indexOf('## Low severity');

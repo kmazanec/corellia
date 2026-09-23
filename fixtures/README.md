@@ -3,8 +3,7 @@
 Each fixture is a minimal artifact/repo plus a deliberately defective twin and a
 vitest that proves the relevant DETERMINISTIC gate **flags the defective one and
 passes the clean one** — the "did the produced software actually work?" floor,
-one defect class at a time (see `docs/issues/behavioral-fixture-library.md`,
-DESIGN.md "Deterministic before judge, always").
+one defect class at a time (DESIGN.md "Deterministic before judge, always").
 
 Every pair is distilled from a failure class the factory actually guards, and
 where possible one seen in real runs (out-of-scope writes, factory-language
