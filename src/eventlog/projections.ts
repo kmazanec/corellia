@@ -319,6 +319,7 @@ export function traceStats(events: FactoryEvent[]): Record<string, GoalTypeStats
       case 'worktree-preserved':
       case 'worktree-reaped':
       case 'files-touched':
+      case 'scope-escaped':
       case 'partial-delivered':
       case 'produced':
       case 'ceiling-reached':
@@ -653,6 +654,7 @@ export function costSummary(events: FactoryEvent[]): CostSummary {
       case 'worktree-preserved':
       case 'worktree-reaped':
       case 'files-touched':
+      case 'scope-escaped':
       case 'partial-delivered':
       case 'ceiling-reached':
       case 'transport-retry':
@@ -774,6 +776,7 @@ export function projectKnowledge(events: FactoryEvent[]): KnowledgeView {
       case 'worktree-preserved':
       case 'worktree-reaped':
       case 'files-touched':
+      case 'scope-escaped':
       case 'partial-delivered':
       case 'produced':
       case 'ceiling-reached':

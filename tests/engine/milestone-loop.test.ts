@@ -70,7 +70,7 @@ describe('milestone loop', () => {
       persistCriteria: async (artifact) => {
         persisted.push(artifact);
       },
-      commitRound: () => 'round-0',
+      commitRound: async () => 'round-0',
       assessRound: async () => assessment(),
       ceilingReachedOnce: async () => {
         throw new Error('not expected');
@@ -109,7 +109,7 @@ describe('milestone loop', () => {
         throw new Error('deadline should halt before re-decision');
       },
       persistCriteria: async () => {},
-      commitRound: () => 'round-0',
+      commitRound: async () => 'round-0',
       assessRound: async () => {
         clock = 10; // the round's work carried past the deadline
         return assessment({
@@ -161,7 +161,7 @@ describe('milestone loop', () => {
         throw new Error('ceiling should halt before re-decision');
       },
       persistCriteria: async () => {},
-      commitRound: () => 'round-0',
+      commitRound: async () => 'round-0',
       assessRound: async () => {
         treeState.spentUsd = 1;
         return assessment({

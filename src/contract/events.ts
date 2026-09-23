@@ -91,6 +91,15 @@ export type FactoryEvent =
    */
   | { type: 'files-touched'; at: number; goalId: string; scope: string[]; files: { path: string; inScope: boolean }[] }
   /**
+   * Work under `goalId` left worktree changes outside its declared scope (C1).
+   * `source` names where it was caught: `run_command` — the goal's own shell
+   * call changed these paths (the file tools refuse such writes, a shell cannot);
+   * `round-commit` — a milestone round's commit found them and committed only
+   * the in-scope work, leaving `paths` uncommitted. Surfaced, not reverted:
+   * siblings share the worktree, so a revert could destroy their work.
+   */
+  | { type: 'scope-escaped'; at: number; goalId: string; source: 'run_command' | 'round-commit'; scope: string[]; paths: string[] }
+  /**
    * A root elected a ship-what's-green partial delivery (issue A5): it collected
    * the green subtree and opened the PR path while enumerating the child modules
    * that blocked producing nothing. `blockedModules` is the surfaced remainder.

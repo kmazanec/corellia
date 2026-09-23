@@ -227,73 +227,80 @@ export function diffWithinScope(
   worktreeRoot: string,
   scope: string[],
 ): { ok: boolean; scopeInsufficiency?: string; changedCount: number } {
-  // Collect changed paths: all tracked changes (staged + unstaged) via diff HEAD,
-  // plus untracked files via ls-files. diff HEAD is a strict superset of
-  // diff --cached HEAD, so the redundant --cached exec is omitted.
-  const diffOutput = execFileSync(
-    'git',
-    ['-C', worktreeRoot, 'diff', '--name-only', 'HEAD'],
-    { stdio: 'pipe', encoding: 'utf-8' },
-  ).trim();
+  const all = uncommittedPaths(worktreeRoot);
 
-  // Untracked files.
-  const untrackedOutput = execFileSync(
-    'git',
-    ['-C', worktreeRoot, 'ls-files', '--others', '--exclude-standard'],
-    { stdio: 'pipe', encoding: 'utf-8' },
-  ).trim();
-
-  // Collect all changed paths (de-duplicate). The dependency links the
-  // lifecycle itself creates are infrastructure, not work — a symlink named
-  // node_modules or .venv evades a `node_modules/`/`.venv/` gitignore rule (a
-  // link is not a directory), so they are dropped here explicitly. (AC-4 cats
-  // run #4: the .venv symlink surfaced as an out-of-scope change and downgraded
-  // a green deliver to a spurious scope-insufficiency block.)
-  const DEP_LINKS = ['node_modules', '.venv'];
-  const isDepLink = (p: string): boolean =>
-    DEP_LINKS.some((d) => p === d || p.startsWith(`${d}/`));
-  const all = new Set<string>();
-  for (const line of [...diffOutput.split('\n'), ...untrackedOutput.split('\n')]) {
-    const p = line.trim();
-    if (p.length > 0 && !isDepLink(p)) all.add(p);
-  }
-
-  if (all.size === 0) {
+  if (all.length === 0) {
     // No worktree change at all. In-scope by vacuity, but the count is 0 — the
     // caller uses changedCount to distinguish a real delivery from a hollow emit
     // (a make root that "succeeded" without writing anything).
     return { ok: true, changedCount: 0 };
   }
 
-  // If scope is empty, allow everything (consistent with isInScope behavior).
-  if (scope.length === 0) {
-    return { ok: true, changedCount: all.size };
-  }
-
-  const offending: string[] = [];
-  let inScope = 0;
-  for (const p of all) {
-    // Reject absolute paths and traversals outright.
-    if (isAbsolute(p) || normalize(p).startsWith('..')) {
-      offending.push(p);
-      continue;
-    }
-    if (!isInScope(p, scope)) {
-      offending.push(p);
-    } else {
-      inScope++;
-    }
-  }
-
+  const { inScope, offending } = partitionByScope(all, scope);
   if (offending.length === 0) {
-    return { ok: true, changedCount: inScope };
+    return { ok: true, changedCount: inScope.length };
   }
 
   return {
     ok: false,
     scopeInsufficiency: `File(s) outside declared scope: ${offending.join(', ')}`,
-    changedCount: inScope,
+    changedCount: inScope.length,
   };
+}
+
+/**
+ * The uncommitted worktree paths (tracked changes + untracked files) that lie
+ * outside `scope`. Empty when everything dirty is in scope, and always empty
+ * for an empty scope (consistent with isInScope).
+ */
+export function outOfScopeChanges(worktreeRoot: string, scope: string[]): string[] {
+  return partitionByScope(uncommittedPaths(worktreeRoot), scope).offending;
+}
+
+/**
+ * Every uncommitted path in the worktree: tracked changes (staged + unstaged,
+ * via `diff HEAD`, a strict superset of `diff --cached HEAD`) plus untracked
+ * files. The dependency links the lifecycle itself creates are infrastructure,
+ * not work — a symlink named node_modules or .venv evades a
+ * `node_modules/`/`.venv/` gitignore rule (a link is not a directory), so they
+ * are dropped explicitly. (AC-4 cats run #4: the .venv symlink surfaced as an
+ * out-of-scope change and downgraded a green deliver to a spurious
+ * scope-insufficiency block.)
+ */
+function uncommittedPaths(worktreeRoot: string): string[] {
+  const lines = (args: string[]): string[] =>
+    execFileSync('git', ['-C', worktreeRoot, ...args], { stdio: 'pipe', encoding: 'utf-8' })
+      .trim()
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+  const DEP_LINKS = ['node_modules', '.venv'];
+  const isDepLink = (p: string): boolean =>
+    DEP_LINKS.some((d) => p === d || p.startsWith(`${d}/`));
+  const all = new Set<string>();
+  for (const p of [...lines(['diff', '--name-only', 'HEAD']), ...lines(['ls-files', '--others', '--exclude-standard'])]) {
+    if (!isDepLink(p)) all.add(p);
+  }
+  return [...all];
+}
+
+/**
+ * Split changed paths into those within `scope` and those outside it. An
+ * absolute path or a traversal is always outside; an empty scope admits
+ * everything (consistent with isInScope).
+ */
+function partitionByScope(paths: string[], scope: string[]): { inScope: string[]; offending: string[] } {
+  if (scope.length === 0) return { inScope: paths, offending: [] };
+  const inScope: string[] = [];
+  const offending: string[] = [];
+  for (const p of paths) {
+    if (!isAbsolute(p) && !normalize(p).startsWith('..') && isInScope(p, scope)) {
+      inScope.push(p);
+    } else {
+      offending.push(p);
+    }
+  }
+  return { inScope, offending };
 }
 
 /**
@@ -487,16 +494,20 @@ export function worktreeFilesArtifact(worktreeRoot: string, baseSha: string): Ar
 
 /**
  * Commit a milestone round's work onto the tree branch WITHOUT removing the
- * worktree. Reuses collectTree's git ops — `git add --all`, check
- * `status --porcelain`, commit if dirty — with a per-round message
- * (`feat(round N): <title>`) and returns the new HEAD sha (null when the round
- * left nothing to commit).
+ * worktree, with a per-round message (`feat(round N): <title>`), and return
+ * the new HEAD sha (null when the round left nothing to commit).
+ *
+ * With a `scope`, only in-scope changes are staged: out-of-scope work never
+ * enters the tree's history, and it stays uncommitted in the worktree where
+ * the root emission gate still sees (and blocks on) it. The in-scope progress
+ * is committed regardless, so one stray path cannot freeze HEAD for every
+ * later round. Callers surface the residue via {@link outOfScopeChanges}.
  *
  * This is what advances HEAD within a tree (ADR-032 §4): without it, ADR-019
  * verify-on-read is a no-op across rounds (HEAD never moves, so a round-0
  * knowledge artifact always reads as fresh). Per-round commits are PRESERVED
- * (decision 5): collectTree at tree-end does not squash them — it now commits
- * only residual uncommitted changes after the last round commit.
+ * (decision 5): collectTree at tree-end does not squash them — it commits only
+ * residual uncommitted changes after the last round commit.
  */
 export function commitRound(
   worktree: TreeWorktree,
@@ -505,38 +516,27 @@ export function commitRound(
   scope?: string[],
 ): string | null {
   const { root } = worktree;
+  const git = (args: string[]): string =>
+    execFileSync('git', ['-C', root, ...args], { stdio: 'pipe', encoding: 'utf-8' }).trim();
 
-  if (scope !== undefined) {
-    const scopeCheck = diffWithinScope(root, scope);
-    if (!scopeCheck.ok) {
-      return null;
-    }
+  // Stage the round's work (respects .git/info/exclude, same trust posture as
+  // collectTree): everything when unscoped, only in-scope paths otherwise.
+  if (scope === undefined) {
+    git(['add', '--all']);
+  } else {
+    // Unstage first: a shell call may have staged out-of-scope paths itself.
+    git(['reset', '--quiet']);
+    const { inScope } = partitionByScope(uncommittedPaths(root), scope);
+    if (inScope.length > 0) git(['add', '--all', '--', ...inScope]);
   }
 
-  // Stage all changes (respects .git/info/exclude, same trust posture as collectTree).
-  execFileSync('git', ['-C', root, 'add', '--all'], { stdio: 'pipe' });
-
-  // Nothing to commit → HEAD does not advance this round.
-  const statusOutput = execFileSync(
-    'git',
-    ['-C', root, 'status', '--porcelain'],
-    { stdio: 'pipe', encoding: 'utf-8' },
-  ).trim();
-  if (statusOutput.length === 0) {
+  // Nothing staged → HEAD does not advance this round.
+  if (git(['diff', '--cached', '--name-only']).length === 0) {
     return null;
   }
 
-  execFileSync(
-    'git',
-    ['-C', root, 'commit', '-m', `feat(round ${roundIndex}): ${title}`],
-    { stdio: 'pipe' },
-  );
-
-  return execFileSync(
-    'git',
-    ['-C', root, 'rev-parse', 'HEAD'],
-    { stdio: 'pipe', encoding: 'utf-8' },
-  ).trim();
+  git(['commit', '-m', `feat(round ${roundIndex}): ${title}`]);
+  return git(['rev-parse', 'HEAD']);
 }
 
 // ---------------------------------------------------------------------------

@@ -16,6 +16,12 @@ standalone roadmap — it lives as open issues.
 
 ## 2026-09-23
 
+- **Iteration 24 — shell scope escapes** (the two residual C1 holes). A
+  `run_command` that changes files outside the leaf's scope is now logged as
+  `scope-escaped` and named back to the leaf. A milestone round with a stray
+  out-of-scope path commits its in-scope work instead of silently freezing HEAD
+  for every later round. Surfaced, not reverted (siblings share the worktree).
+  Detail: [iteration 24](iterations/2026-09-23-02-shell-scope-escape/index.md).
 - **Iteration 23 — per-tree declared scripts** (hand-built fix for
   daemon-declared-scripts). A commission's `declaredScripts`/`declaredCaptures`
   now ride the root goal and layer over the engine's defaults for that tree;

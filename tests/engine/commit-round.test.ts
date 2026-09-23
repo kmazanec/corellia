@@ -16,6 +16,7 @@ import { InMemoryEventStore } from '../../src/eventlog/memory-store.js';
 import {
   openTreeWorktree,
   commitRound,
+  outOfScopeChanges,
   diffBodiesWithinScope,
   treeDiffWithinScope,
   collectTree,
@@ -162,6 +163,26 @@ describe('commitRound', () => {
 
     expect(sha).toBeNull();
     expect(head(wt.root)).toBe(before);
+  });
+
+  it('commits the in-scope work of a mixed round and leaves the out-of-scope residue uncommitted', async () => {
+    const repo = makeTempRepo();
+    const wt = await openWorktree(repo, 'g-scope-mixed');
+
+    writeAt(wt.root, 'src/in.ts', 'export const x = 1;\n');
+    writeAt(wt.root, 'docs/out.md', 'out of scope\n');
+    // A shell call may have staged the stray path itself.
+    execFileSync('git', ['-C', wt.root, 'add', 'docs/out.md'], { stdio: 'pipe' });
+
+    const sha = commitRound(wt, 0, 'round zero', ['src/']);
+
+    expect(sha).not.toBeNull();
+    const committed = execFileSync('git', ['-C', wt.root, 'show', '--name-only', '--format=', 'HEAD'], {
+      encoding: 'utf-8',
+    });
+    expect(committed).toContain('src/in.ts');
+    expect(committed).not.toContain('docs/out.md');
+    expect(outOfScopeChanges(wt.root, ['src/'])).toEqual(['docs/out.md']);
   });
 });
 

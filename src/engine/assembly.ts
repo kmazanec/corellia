@@ -64,6 +64,7 @@ import {
 import type { ChildPlan } from '../contract/decision.js';
 import type { Artifact } from '../contract/report.js';
 import type { KnowledgeArtifact, KnowledgeCategory, RegionFacts } from '../contract/knowledge.js';
+import { scopeWatchedTool } from './scope-watch.js';
 
 /**
  * The optional sandbox/assembly configuration the engine accepts. When present
@@ -276,17 +277,24 @@ export async function openSandboxAssembly(
   // worktree root + scrubbed env as the declared-script runner, with the network/
   // push block and per-command timeout enforced inside the runner. Grant-gated
   // (repo.command) by the broker; logged per calling goal like run_script.
+  // A shell can write anywhere, so each call is scope-checked after the fact
+  // against the calling goal's scope (C1; see scope-watch.ts).
   const commandRunner = createCommandRunner(root, scrubEnv());
-  const runCommandImpl: ToolImpl = (() => {
-    const base = runCommandTool(commandRunner);
-    return {
-      def: base.def,
-      async execute(goal: Goal, args: Record<string, unknown>) {
-        const perGoal = runCommandTool(loggingCommandRunner(store, commandRunner, goal.id, now));
-        return perGoal.execute(goal, args);
-      },
-    };
-  })();
+  const runCommandImpl: ToolImpl = scopeWatchedTool(
+    (() => {
+      const base = runCommandTool(commandRunner);
+      return {
+        def: base.def,
+        async execute(goal: Goal, args: Record<string, unknown>) {
+          const perGoal = runCommandTool(loggingCommandRunner(store, commandRunner, goal.id, now));
+          return perGoal.execute(goal, args);
+        },
+      };
+    })(),
+    root,
+    store,
+    now,
+  );
 
   const fileTools = createFileTools(root);
 

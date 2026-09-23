@@ -71,6 +71,9 @@ lint, and the full suite run before landing.
   `example-word-count` through the daemon or `commission:run`; success is a
   frozen round-0 checklist that includes `{ script: "smoke" }` and a round that
   passes it.
-- The tree's scope excludes `commissions/checks/`, but scope is not yet enforced
-  on edits ([out-of-scope-edit-enforcement](../../issues/out-of-scope-edit-enforcement.md)),
-  so "cannot author the check" is currently a scope contract, not a mechanism.
+- The tree's scope excludes `commissions/checks/`. The file tools refuse an
+  out-of-scope write, and the root emission gate blocks a tree whose diff
+  touches the check. A shell call can still modify it mid-run and sway a
+  round's assessment before that gate. Iteration 24 surfaces such an escape
+  to the leaf and the log, but does not revert it. See
+  [out-of-scope-edit-enforcement](../../issues/out-of-scope-edit-enforcement.md).

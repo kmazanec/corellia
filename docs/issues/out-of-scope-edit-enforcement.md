@@ -19,6 +19,13 @@ severity: high
 > (`treeFilesTouchedVsScope` in `worktree.ts`), each marked in- or out-of the
 > declared scope — the surface a reviewer reads to catch an out-of-scope edit
 > without running `git show`. With both, the whole issue is fixed-pending-live-proof.
+>
+> **Shell half (2026-09-23):** `run_command` writes are free-form, so they are
+> scope-checked after each call. Any new out-of-scope path becomes a
+> `scope-escaped` event and a warning in the leaf's tool output. A milestone
+> round's commit takes only its in-scope work and logs the residue, instead of
+> silently skipping the round. Detail:
+> [iteration 24](../iterations/2026-09-23-02-shell-scope-escape/index.md).
 
 # C1. Out-of-scope edits were neither prevented nor surfaced
 
