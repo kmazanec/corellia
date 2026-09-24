@@ -52,7 +52,7 @@ status disagrees with its file (rules in `src/library/issue-backlog.ts`).
 | [greenfield-criteria-grounding](greenfield-criteria-grounding.md) | bug | fixed-pending-live-proof | engine, acceptance-criteria, milestone-loop, greenfield, anchors, explore-economy, deliver-intent |
 | [judge-calibration-replay](judge-calibration-replay.md) | future-work | fixed-pending-live-proof | engine, eval, golden, calibration, judge, replay |
 | [milestone-loop-step-7-prove-live](milestone-loop-step-7-prove-live.md) | future-work | open | milestone-loop, engine, live-proof |
-| [operator-console-ui](operator-console-ui.md) | future-work | open | ui, operator-console, observability, read-model, daemon, eventlog, harness, front-door |
+| [operator-console-ui](operator-console-ui.md) | future-work | partially-fixed | ui, operator-console, observability, read-model, daemon, eventlog, harness, front-door |
 | [out-of-scope-edit-enforcement](out-of-scope-edit-enforcement.md) | bug | fixed-pending-live-proof | scope-safety, engine, broker |
 | [web-fetch-tool](web-fetch-tool.md) | bug | fixed-pending-live-proof | engine, broker, tool, research, web |
 | [worktree-work-invisible-to-artifact-judges](worktree-work-invisible-to-artifact-judges.md) | bug | fixed-pending-live-proof | engine, artifact, worktree, salvage, judge, acceptance, milestone-loop, integrate-merge |
@@ -69,11 +69,13 @@ status disagrees with its file (rules in `src/library/issue-backlog.ts`).
 | [design-arch-empty-artifact-block](design-arch-empty-artifact-block.md) | bug | fixed-pending-live-proof | engine, brain, design-arch, robustness, partial-delivery |
 | [event-log-conformance-check](event-log-conformance-check.md) | idea | fixed-pending-live-proof | eventlog, constitution, eval, replay, projections |
 | [external-asset-acquisition](external-asset-acquisition.md) | future-work | open | structural, asset, tool |
+| [fleet-compose-deploy](fleet-compose-deploy.md) | future-work | fixed-pending-live-proof | deploy, compose, operator-console, worker, adr-045, adr-051 |
 | [factory-authors-iterations](factory-authors-iterations.md) | future-work | partially-fixed | factory, iterations, docs, self-hosting |
 | [factory-manages-issues](factory-manages-issues.md) | future-work | partially-fixed | factory, issues, library, engine, self-hosting |
 | [frozen-anchor-criteria-guess-identifiers](frozen-anchor-criteria-guess-identifiers.md) | bug | partially-fixed | engine, acceptance-criteria, milestone-loop, anchors, author-acceptance-criteria, adr-032 |
 | [greenfield-bootstrap](greenfield-bootstrap.md) | future-work | open | structural, scaffold |
 | [ground-fact-external-knowledge](ground-fact-external-knowledge.md) | future-work | open | structural, knowledge, grounding |
+| [improvement-loop-on-the-queue](improvement-loop-on-the-queue.md) | future-work | open | listener, improvement-loop, jobs, worker, adr-027, adr-051 |
 | [listener-missing-channels](listener-missing-channels.md) | future-work | open | listener, daemon, autonomous-seam, admission, knowledge-refresh |
 | [live-model-ci-smoke](live-model-ci-smoke.md) | future-work | fixed-pending-live-proof | tests, ci, brain, live-proof, smoke |
 | [milestone-loop-step-8-slice-nesting](milestone-loop-step-8-slice-nesting.md) | future-work | open | milestone-loop, engine |

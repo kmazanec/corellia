@@ -8,6 +8,15 @@
  * Construct with a connection string (a Pool is created internally) or pass an
  * already-configured Pool directly — useful for connection-pooler setups where
  * the caller controls pool sizing.
+ *
+ * Two additions serve the control plane (ADR-051):
+ * - `job_id` / `worker_id` columns, stamped from the store's {@link EventContext}.
+ *   A worker runs one job at a time, so it sets the context when it takes a job
+ *   and clears it when the job leaves. Unstamped rows (the single-process
+ *   daemon, the CLIs) keep them null; the control plane derives their job from
+ *   the goal tree instead.
+ * - Every append notifies `corellia_events` with `{id, job}`, so listening
+ *   control planes pick new events up without polling.
  */
 
 import pg from 'pg';
@@ -34,9 +43,26 @@ const CREATE_IDX_TYPE = `
   CREATE INDEX IF NOT EXISTS corellia_events_type ON corellia_events (type)
 `;
 
+const ADD_CONTEXT_COLUMNS = `
+  ALTER TABLE corellia_events
+    ADD COLUMN IF NOT EXISTS job_id    text,
+    ADD COLUMN IF NOT EXISTS worker_id text
+`;
+
+const CREATE_IDX_JOB_ID = `
+  CREATE INDEX IF NOT EXISTS corellia_events_job_id ON corellia_events (job_id)
+`;
+
+/** Which job, on which worker, the events being appended belong to. */
+export interface EventContext {
+  jobId: string;
+  workerId: string;
+}
+
 export class PgEventStore implements EventStore {
   readonly #pool: pg.Pool;
   readonly #ownsPool: boolean;
+  #context: EventContext | null = null;
 
   constructor(connectionStringOrPool: string | pg.Pool) {
     if (typeof connectionStringOrPool === 'string') {
@@ -58,16 +84,27 @@ export class PgEventStore implements EventStore {
       await client.query(CREATE_TABLE);
       await client.query(CREATE_IDX_GOAL_ID);
       await client.query(CREATE_IDX_TYPE);
+      await client.query(ADD_CONTEXT_COLUMNS);
+      await client.query(CREATE_IDX_JOB_ID);
     } finally {
       client.release();
     }
   }
 
+  /** Stamp subsequent appends with `context`, or stop stamping with null. */
+  setContext(context: EventContext | null): void {
+    this.#context = context;
+  }
+
   async append(e: FactoryEvent): Promise<void> {
     await this.#pool.query(
-      `INSERT INTO corellia_events (at, goal_id, type, payload)
-       VALUES ($1, $2, $3, $4)`,
-      [e.at, e.goalId, e.type, JSON.stringify(e)],
+      `WITH ins AS (
+         INSERT INTO corellia_events (at, goal_id, type, payload, job_id, worker_id)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, job_id
+       )
+       SELECT pg_notify('corellia_events', json_build_object('id', id, 'job', job_id)::text) FROM ins`,
+      [e.at, e.goalId, e.type, JSON.stringify(e), this.#context?.jobId ?? null, this.#context?.workerId ?? null],
     );
   }
 

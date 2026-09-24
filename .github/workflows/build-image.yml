@@ -1,13 +1,17 @@
 name: build-image
 
-# CI + delivery for the Corellia daemon image.
+# CI + delivery for the Corellia images.
 #
 #   test       — npm ci && npm test on every push and PR (this is the repo's CI).
-#   build-push — builds the Dockerfile `runtime` target and pushes it to GHCR,
-#                but only on push to main and on version tags. PRs build-only
-#                (no push) so forks and untrusted PRs never touch the registry.
+#   build-push — builds each image and pushes it to GHCR, but only on push to
+#                main and on version tags. PRs build-only (no push) so forks and
+#                untrusted PRs never touch the registry.
 #
-# Image: ghcr.io/<owner>/corellia
+# Images (one matrix entry each, same tags):
+#   ghcr.io/<owner>/corellia          — Dockerfile `runtime`: the daemon and
+#                                       the queue worker (ADR-045, ADR-051)
+#   ghcr.io/<owner>/corellia-console  — console/Dockerfile: the control plane
+#                                       and operator console (ADR-050)
 # Tags:  latest (main only) · sha-<short> (every push) · semver (on v* tags)
 
 on:
@@ -50,6 +54,15 @@ jobs:
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        include:
+          - image: corellia
+            dockerfile: Dockerfile
+            target: runtime
+          - image: corellia-console
+            dockerfile: console/Dockerfile
+            target: runtime
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -70,7 +83,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/corellia
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,prefix=sha-,format=short
@@ -81,10 +94,11 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          target: runtime
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           # Push only off main and tags; PRs build to validate but never publish.
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

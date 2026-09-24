@@ -36,6 +36,7 @@ import { verifyEntryPoints } from '../library/script-runner.js';
 import { declaredScriptsProblem } from '../library/declared-scripts.js';
 import { costSummary } from '../eventlog/projections.js';
 import type { CommissionInput, StandingEnvelope } from '../contract/brief.js';
+import { scopesOverlap } from './scope-overlap.js';
 
 // ── Public input types ────────────────────────────────────────────────────────
 
@@ -282,6 +283,14 @@ function isImprovementCommission(input: CommissionInput): boolean {
 interface Parked {
   input: CommissionInput;
   question: string;
+  options: string[];
+  deadline: number;
+}
+
+/** A park handed out of the listener to a durable queue (ADR-051). */
+export interface HandedOffPark {
+  question: string;
+  options: string[];
   deadline: number;
 }
 
@@ -293,22 +302,6 @@ interface Waiter {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-/**
- * Two scope arrays overlap when any prefix in one is a prefix of (or equal to)
- * any prefix in the other. An empty scope array overlaps everything — a scopeless
- * intent is assumed to touch the whole repo.
- */
-function scopesOverlap(a: string[], b: string[]): boolean {
-  if (a.length === 0 || b.length === 0) return true;
-  for (const pa of a) {
-    for (const pb of b) {
-      if (pa === pb) return true;
-      if (pa.startsWith(pb + '/') || pb.startsWith(pa + '/')) return true;
-    }
-  }
-  return false;
-}
 
 /**
  * Return the last 'blocked' event emitted for a goal, or null.
@@ -477,11 +470,20 @@ export class Listener {
     if (!entry) {
       return Promise.reject(new Error(`No parked intent with id "${intentId}"`));
     }
+    return this.resume(entry.input, entry.question, humanAnswer);
+  }
 
+  /**
+   * Resume an intent parked on `question` with the human's answer, given the
+   * intent's own input. {@link answer} resumes one this listener parked; a
+   * worker resumes one the job queue held across a hand-off (ADR-051), which
+   * this listener may never have seen parked.
+   */
+  async resume(input: CommissionInput, question: string, humanAnswer: string): Promise<Report> {
     const answerPointer: MemoryPointer = {
-      id: `${intentId}:answer`,
+      id: `${input.id}:answer`,
       layer: 'project',
-      content: `Question: ${entry.question}\nAnswer: ${humanAnswer}`,
+      content: `Question: ${question}\nAnswer: ${humanAnswer}`,
       provenance: 'trusted',
     };
 
@@ -489,18 +491,30 @@ export class Listener {
     await this.store.append({
       type: 'resumed',
       at: this.now(),
-      goalId: intentId,
+      goalId: input.id,
       answer: humanAnswer,
     });
 
-    this.parked.delete(intentId);
+    this.parked.delete(input.id);
 
-    if (!this.hasConflict(entry.input.scope)) {
-      return this.runIntent(entry.input, [answerPointer]);
+    if (!this.hasConflict(input.scope)) {
+      return this.runIntent(input, [answerPointer]);
     }
     return new Promise<Report>((resolve, reject) => {
-      this.waitQueue.push({ input: entry.input, extraMemories: [answerPointer], resolve, reject });
+      this.waitQueue.push({ input, extraMemories: [answerPointer], resolve, reject });
     });
+  }
+
+  /**
+   * Hand a parked intent to a durable queue: remove it from this listener's
+   * parked map (so {@link tick} never bounces it here) and return what the
+   * queue needs to hold it. Null when `intentId` is not parked.
+   */
+  handOffParked(intentId: string): HandedOffPark | null {
+    const entry = this.parked.get(intentId);
+    if (!entry) return null;
+    this.parked.delete(intentId);
+    return { question: entry.question, options: entry.options, deadline: entry.deadline };
   }
 
   // ── tick ──────────────────────────────────────────────────────────────────
@@ -872,6 +886,7 @@ export class Listener {
     this.parked.set(input.id, {
       input,
       question: brief.question,
+      options: brief.options,
       deadline,
     });
     this.drainWaitQueue();
