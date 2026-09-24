@@ -14,6 +14,17 @@ the [iteration](iterations/index.md) or [ADR](adrs/index.md) that owns the detai
 This file replaces the former `STATUS.md`. Forward strategy is no longer a
 standalone roadmap — it lives as open issues.
 
+## 2026-09-24
+
+- **Iteration 27 — The fleet in containers** landed (live proof pending). A
+  control plane image, a `fleet` compose profile (control plane plus worker
+  replicas) in both compose files, CI publishing `corellia-console`, and
+  `scripts/deploy.sh --fleet`. Running it in Docker found and fixed two bugs: a
+  parked job's affinity outlived its worker, so a redeploy stranded it; and the
+  containerized daemon never set `CORELLIA_REPO_ROOT` to its mounted repo.
+  Issue `fleet-compose-deploy` → fixed-pending-live-proof.
+  [Detail](iterations/2026-09-24-03-fleet-compose/index.md).
+
 ## 2026-09-23
 
 - **Iteration 26 — Job queue and single-job workers** landed (live proof

@@ -221,6 +221,11 @@ CORELLIA_WORKER_REPOS=acme/widgets npm run worker        # one per job slot
 # No model: CORELLIA_ENGINE=simulated npm run worker     (sample trees; can park)
 ```
 
+In containers, the `fleet` compose profile runs the same shape
+(`docker compose --profile fleet up -d postgres control-plane worker`), and
+`scripts/deploy.sh --fleet <tag>` deploys it to a host. See
+[docs/deploy.md §9](docs/deploy.md).
+
 ---
 
 ## Deploy & operate

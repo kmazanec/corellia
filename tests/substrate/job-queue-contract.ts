@@ -109,6 +109,31 @@ export function describeJobQueueContract(name: string, make: () => Promise<Queue
       expect(resumed!.job.answer).toBeNull();
     });
 
+    it('lets any worker resume an answered park once its holder has left or gone silent', async () => {
+      const left = commission(['src/left']);
+      const silent = commission(['src/silent']);
+      for (const c of [left, silent]) {
+        at(t + 1);
+        await h.queue.enqueue(c, R);
+        expect((await h.link.claim(w1(), [R]))?.job.id).toBe(c.id);
+        await h.link.park(c.id, w1(), { question: 'q?', options: [], deadline: t + 10 * JOB_LEASE_MS });
+      }
+      for (const c of [left, silent]) await h.queue.answer(c.id, 'a');
+      await h.link.register({ id: `w3-${R}`, repos: [R], host: 'h3' });
+      expect(await h.link.claim(`w3-${R}`, [R])).toBeNull();
+
+      at(t + JOB_LEASE_MS + 1);
+      await h.link.heartbeat(`w3-${R}`);
+      const first = await h.link.claim(`w3-${R}`, [R]);
+      expect(first).toMatchObject({ job: { id: left.id }, resume: { question: 'q?', answer: 'a' } });
+
+      await h.link.heartbeat(w1());
+      await h.link.finish(left.id, `w3-${R}`, 'done');
+      expect(await h.link.claim(`w3-${R}`, [R])).toBeNull();
+      await h.link.deregister(w1());
+      expect((await h.link.claim(`w3-${R}`, [R]))?.job.id).toBe(silent.id);
+    });
+
     it('refuses answers and cancels that do not fit the state', async () => {
       const c = commission(['src/x']);
       expect(await h.queue.answer('missing-job', 'x')).toMatchObject({ ok: false, error: 'not-found' });

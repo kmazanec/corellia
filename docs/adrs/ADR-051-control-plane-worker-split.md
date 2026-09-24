@@ -124,12 +124,21 @@ Where the build settled points the Decision left open, or departed from it:
   answer)` resumes a park the listener never saw, and `handOffParked(id)`
   gives a park to the queue, so the listener's own TTL sweep never bounces it.
   Workers sweep expired parks from the queue instead.
+- **Affinity lapses with its worker.** A parked job's affinity binds only
+  while that worker is registered and seen within the lease period. A worker
+  leaving (SIGTERM deregisters it) or going silent frees its parked jobs for
+  any worker on the repo — otherwise a redeploy, which gives every worker a new
+  id, would strand them. Workers on one host share the target-repo mount, so
+  the worktree stays reachable.
 - **Shutdown records `interrupted`**, rather than letting the lease lapse: the
   worker preserves the worktree (ADR-026 preserve-don't-await) and a re-run on
   another machine would start from nothing, so the operator decides.
 - **Event stamping is a store context.** `PgEventStore.setContext` stamps
   `job_id` / `worker_id` while a worker holds a job; every append notifies
   `corellia_events`. Job-row changes notify `corellia_jobs`.
+- **Deploy (iteration 27):** the `fleet` compose profile runs the control plane
+  (`console/Dockerfile`, published as `corellia-console`) and N worker replicas
+  of the factory image; `scripts/deploy.sh --fleet` ships it (docs/deploy.md §9).
 - **The single-process daemon stays** as the one-box mode (webhook front door,
   in-memory queue); the worker is a separate entrypoint (`npm run worker`).
   The console shows daemon runs from the log alone.

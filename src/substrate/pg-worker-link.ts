@@ -164,13 +164,18 @@ export class PgWorkerLink implements WorkerLink {
       );
       for (const r of exhausted.rows) await notify(c, r.id);
 
+      // Affinity binds only while its worker is registered and recently seen.
       const { rows: candidates } = await c.query<JobRow>(
-        `SELECT * FROM corellia_jobs
-         WHERE repo = ANY($1)
-           AND ((state = 'queued' AND (affinity_worker_id IS NULL OR affinity_worker_id = $2))
-                OR (state = 'running' AND lease_until < $3))
-         ORDER BY created_at, id`,
-        [repos, workerId, now],
+        `SELECT j.* FROM corellia_jobs j
+         WHERE j.repo = ANY($1)
+           AND ((j.state = 'queued'
+                 AND (j.affinity_worker_id IS NULL
+                      OR j.affinity_worker_id = $2
+                      OR NOT EXISTS (SELECT 1 FROM corellia_workers w
+                                     WHERE w.id = j.affinity_worker_id AND w.last_seen_at >= $4)))
+                OR (j.state = 'running' AND j.lease_until < $3))
+         ORDER BY j.created_at, j.id`,
+        [repos, workerId, now, now - JOB_LEASE_MS],
       );
       if (candidates.length === 0) return null;
 

@@ -1,9 +1,9 @@
 ---
 type: reference
 title: Deploying and operating the factory in the cloud
-description: Ops runbook for running the Corellia daemon on a remote host — GHCR image delivery, one-command SSH deploy, state placement and backup/restore, host secrets provisioning, restart/upgrade/rollback, target-repo landing, and observability.
-tags: [reference, deploy, ops, runbook, ghcr, ci, docker, compose, lifecycle, backup, rollback]
-timestamp: 2026-07-06T00:00:00-05:00
+description: Ops runbook for running the Corellia daemon, or the fleet (control plane plus queue workers), on a remote host — GHCR image delivery, one-command SSH deploy, state placement and backup/restore, host secrets provisioning, restart/upgrade/rollback, target-repo landing, and observability.
+tags: [reference, deploy, ops, runbook, ghcr, ci, docker, compose, lifecycle, backup, rollback, fleet, worker, operator-console]
+timestamp: 2026-09-24T00:00:00-05:00
 ---
 
 # Deploying and operating the factory in the cloud
@@ -267,3 +267,65 @@ its worktrees and history are durable.
 Pluggable external tracing is tracked separately
 ([observability-pluggable-tracing](issues/observability-pluggable-tracing.md));
 this covers the basic "is it alive, what is it doing" path.
+
+## 9. The fleet: control plane + queue workers (ADR-051)
+
+The daemon above is the one-box shape: one process takes webhook commissions
+and runs them. The **fleet** splits that: a **control plane** (the operator
+console, its API, and live streams) and **N queue workers**, each running one
+whole job at a time, all on the same Postgres. It rides the `fleet` compose
+profile, so hosts that do not opt in are unchanged.
+
+**Images.** CI publishes two images with the same tags (§1):
+
+| Image | Built from | Runs |
+|---|---|---|
+| `ghcr.io/<owner>/corellia` | `Dockerfile` (`runtime`) | the daemon, and the workers (entrypoint `src/daemon/worker.ts`) |
+| `ghcr.io/<owner>/corellia-console` | `console/Dockerfile` | the control plane, serving the console at `/` |
+
+**Host `.env`** — everything from §4, plus:
+
+- `CORELLIA_WORKER_REPOS` — the repo key(s) the workers serve, as the console
+  will offer them (e.g. `acme/widgets`). Unset, a worker derives the GitHub slug
+  from the mounted repo's `origin` remote.
+- `CORELLIA_WORKERS` (default 2) — how many worker replicas.
+- `CONSOLE_HOST_PORT` (default 8090) — where the console is published.
+- `FRONT_DOOR_TOKEN` is the operator token for the console as well.
+
+**Deploy / upgrade** — the same one command with `--fleet` (or
+`DEPLOY_PROFILE=fleet`). It pins both images to the tag, pulls, recreates, and
+verifies the daemon's `/status` and the control plane's `/api/health`:
+
+```bash
+DEPLOY_HOST=user@host scripts/deploy.sh --fleet sha-<short>
+```
+
+**Scale** without a redeploy (the queue hands each replica its own jobs):
+
+```bash
+ssh user@host 'cd /opt/corellia && CORELLIA_IMAGE=… CORELLIA_CONSOLE_IMAGE=… \
+  docker compose -f compose.deploy.yaml --profile fleet up -d --scale worker=4 worker'
+```
+
+**Shutdown and upgrades** — a worker drains on SIGTERM like the daemon: it
+preserves the tree it is running and records that job `interrupted` (the
+console shows why); it does not hand a half-built tree to another worker.
+Queued and parked jobs stay in Postgres across the recreate. A parked job
+prefers the worker that parked it (its worktree is there), but only while that
+worker is registered and checking in; a recreated worker comes back with a new
+id (`<container hostname>-<pid>`), so after a deploy any worker serving the repo
+resumes the answered job — on one host they all share the target-repo mount.
+
+**Target repo** — every worker mounts the same host checkout at `/workspace`
+(§6) and builds in its own worktree under `.corellia/worktrees/`. Workers and
+the daemon run as uid 1001, so the checkout must be owned by (and writable
+for) that uid — `sudo chown -R 1001:1001 /opt/corellia/target-repo` — or git
+refuses to operate on it.
+
+**Is it alive?** — `curl -s http://127.0.0.1:${CONSOLE_HOST_PORT:-8090}/api/health`
+on the host (unauthenticated, backs the compose healthcheck); the console's
+Fleet panel lists each worker, what it is running, and when it last checked in.
+
+**Locally** the same shape builds from source:
+`docker compose --profile fleet up -d postgres control-plane worker`
+(see [`container.md`](container.md)).

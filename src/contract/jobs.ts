@@ -56,8 +56,11 @@ export interface JobRecord {
   /** The worker holding (or that last held) the job. */
   workerId: string | null;
   /**
-   * The worker a parked job must resume on, because its worktree is on that
-   * worker's disk (ADR-051 § Parked jobs). Null for jobs any worker may take.
+   * The worker a parked job should resume on, because its worktree is on that
+   * worker's disk (ADR-051 § Parked jobs). It binds only while that worker is
+   * registered and seen within {@link JOB_LEASE_MS}; once it has left or gone
+   * silent, any worker serving the repo may take the job. Null for jobs any
+   * worker may take.
    */
   affinityWorkerId: string | null;
   /** Lease expiry while running; a lapsed lease makes the job claimable again. */
@@ -97,7 +100,7 @@ export interface WorkerLink {
   heartbeat(workerId: string): Promise<void>;
   /**
    * Take the oldest claimable job for one of `repos`, or null. Claimable: queued
-   * (and, if it has an affinity, for this worker), or running with a lapsed
+   * (and, if it has a live affinity, for this worker), or running with a lapsed
    * lease. A job whose scope overlaps a job already running on the same repo is
    * skipped, so two workers never edit the same paths at once.
    */

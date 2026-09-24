@@ -114,9 +114,14 @@ export class MemoryJobQueue implements JobQueue, WorkerLink {
     }
 
     const running = [...this.#jobs.values()].filter((j) => j.state === 'running' && !lapsed(j));
+    const heldElsewhere = (j: JobRecord) => {
+      if (j.affinityWorkerId === null || j.affinityWorkerId === workerId) return false;
+      const holder = this.#workers.get(j.affinityWorkerId);
+      return holder !== undefined && holder.lastSeenAt >= now - JOB_LEASE_MS;
+    };
     const candidates = [...this.#jobs.values()]
       .filter((j) => repos.includes(j.repo))
-      .filter((j) => (j.state === 'queued' && (j.affinityWorkerId === null || j.affinityWorkerId === workerId)) || lapsed(j))
+      .filter((j) => (j.state === 'queued' && !heldElsewhere(j)) || lapsed(j))
       .sort((a, b) => a.createdAt - b.createdAt);
 
     const job = candidates.find(
@@ -135,7 +140,10 @@ export class MemoryJobQueue implements JobQueue, WorkerLink {
       answer: null,
     });
     const worker = this.#workers.get(workerId);
-    if (worker) worker.currentJobId = job.id;
+    if (worker) {
+      worker.currentJobId = job.id;
+      worker.lastSeenAt = now;
+    }
     return { job: structuredClone(job), resume };
   }
 

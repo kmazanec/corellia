@@ -69,7 +69,7 @@ status disagrees with its file (rules in `src/library/issue-backlog.ts`).
 | [design-arch-empty-artifact-block](design-arch-empty-artifact-block.md) | bug | fixed-pending-live-proof | engine, brain, design-arch, robustness, partial-delivery |
 | [event-log-conformance-check](event-log-conformance-check.md) | idea | fixed-pending-live-proof | eventlog, constitution, eval, replay, projections |
 | [external-asset-acquisition](external-asset-acquisition.md) | future-work | open | structural, asset, tool |
-| [fleet-compose-deploy](fleet-compose-deploy.md) | future-work | open | deploy, compose, operator-console, worker, adr-045, adr-051 |
+| [fleet-compose-deploy](fleet-compose-deploy.md) | future-work | fixed-pending-live-proof | deploy, compose, operator-console, worker, adr-045, adr-051 |
 | [factory-authors-iterations](factory-authors-iterations.md) | future-work | partially-fixed | factory, iterations, docs, self-hosting |
 | [factory-manages-issues](factory-manages-issues.md) | future-work | partially-fixed | factory, issues, library, engine, self-hosting |
 | [frozen-anchor-criteria-guess-identifiers](frozen-anchor-criteria-guess-identifiers.md) | bug | partially-fixed | engine, acceptance-criteria, milestone-loop, anchors, author-acceptance-criteria, adr-032 |

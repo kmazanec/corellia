@@ -40,13 +40,16 @@ if (!dbUrl) {
   process.exit(1);
 }
 
-const repoRoot = resolve(process.env['CORELLIA_REPO_ROOT'] ?? process.cwd());
-const repos = (process.env['CORELLIA_WORKER_REPOS'] ?? deriveRepoSlug(repoRoot) ?? basename(repoRoot))
+// An empty value counts as unset: compose passes `${VAR:-}` through as "".
+const env = (name: string): string | undefined => process.env[name] || undefined;
+
+const repoRoot = resolve(env('CORELLIA_REPO_ROOT') ?? process.cwd());
+const repos = (env('CORELLIA_WORKER_REPOS') ?? deriveRepoSlug(repoRoot) ?? basename(repoRoot))
   .split(',')
   .map((r) => r.trim())
   .filter(Boolean);
-const workerId = process.env['CORELLIA_WORKER_ID'] ?? `${hostname()}-${process.pid}`;
-const pollMs = Number(process.env['CORELLIA_WORKER_POLL_MS'] ?? 2_000);
+const workerId = env('CORELLIA_WORKER_ID') ?? `${hostname()}-${process.pid}`;
+const pollMs = Number(env('CORELLIA_WORKER_POLL_MS') ?? 2_000);
 
 const { store, close: closeStore, pg } = buildStore({ targetRepoRoot: repoRoot });
 const link = new PgWorkerLink(dbUrl);
