@@ -1,8 +1,8 @@
 ---
 type: issue
 title: "Repo registry and access grants — pick a repo and grant the factory access from the console"
-description: Workers are welded to one mounted checkout and one process-wide GITHUB_TOKEN, so the factory can only work on repos baked into its environment. Add a repo registry in Postgres, per-repo credentials granted from the console UI, and repo-agnostic workers that clone on demand and receive a short-lived token per job.
-tags: [operator-console, worker, control-plane, repo-registry, credentials, github, security, adr-051]
+description: Workers are welded to one mounted checkout, so the factory can only work on repos baked into its environment. Add a repo registry in Postgres, fed by the GitHub App's installations, and repo-agnostic workers that clone on demand and run each job with that repo's short-lived App token. Builds on github-app-identity-and-grants.
+tags: [operator-console, worker, control-plane, repo-registry, github-app, github, security, adr-051]
 timestamp: 2026-09-24
 status: open
 kind: future-work
@@ -37,6 +37,15 @@ Three couplings cause it:
   mechanism to preserve is "token is read at the tool boundary, never in a
   transcript or child env", not the env var itself.
 
+## Depends on
+
+[github-app-identity-and-grants](github-app-identity-and-grants.md). That issue
+supplies who the operator is (GitHub sign-in), which repos have been granted
+(App installations), and the per-job credential
+(`CredentialProvider.tokenFor(repo)` delivered through `WorkerLink.claim`). This
+issue owns *which* granted repos the factory works on and *where* the work runs.
+It is the next iteration after the App, not part of it.
+
 ## Evidence
 
 - `docs/issues/operator-console-ui.md` requirement 8 ("a repo registry beyond
@@ -52,41 +61,30 @@ Three couplings cause it:
 
 ### 1. Registry (control plane, Postgres)
 
+Installing the App grants *access*. Enabling a repo in the registry is the
+separate, deliberate step that says "the factory works here". An org might
+install on fifty repos and enable three.
+
 A `corellia_repos` table the control plane owns: `slug` (`owner/name`, the key
-jobs already use), `default_branch`, `status` (`pending` | `ready` | `error` |
-`disabled`), `grant_id`, `last_synced_at`, `last_error`, an optional per-repo
-spend ceiling, and the detected stack summary. `GET /repos` returns the
-registry joined with worker liveness, so a registered repo with zero live
-workers still shows (and says why it cannot run).
+jobs already use), `installation_id`, `enabled_by` (GitHub user), `default_branch`,
+`status` (`pending` | `ready` | `error` | `disabled` | `revoked`),
+`last_synced_at`, `last_error`, an optional per-repo spend ceiling, and the
+detected stack summary. A repo can only be enabled if a current installation
+covers it and the enabling user can see it (the App issue's authorization rule).
+When the installation drops the repo (uninstall, deselect, suspend), the row
+goes `revoked` and claims stop. `GET /repos` returns the registry joined with
+worker liveness, filtered to what the signed-in user can see.
 
-Console API: `POST /repos` (register by slug), `PATCH /repos/:slug` (ceiling,
-disable), `DELETE /repos/:slug` (disable, purge, drop the grant),
-`POST /repos/:slug/sync`. Commission validates against the registry, not worker
-self-reports.
+Console API: `GET /repos/available` (granted but not enabled, per user),
+`POST /repos` (enable), `PATCH /repos/:slug` (ceiling, disable),
+`DELETE /repos/:slug` (disable and purge the clone), `POST /repos/:slug/sync`.
+Commission validates against the registry, not worker self-reports.
 
-### 2. Grants (credentials)
+### 2. Grants
 
-Two grant mechanisms behind one interface, `CredentialProvider.tokenFor(repo)`
-returning `{ token, expiresAt }`:
-
-- **v1: fine-grained PAT, pasted in the UI.** Works with no public callback URL
-  and from a phone today. Stored in Postgres encrypted with AES-256-GCM under a
-  host-held key (`CORELLIA_SECRET_KEY` in the host `.env`, per ADR-012: the
-  database never holds the key that decrypts it). Never returned by any API,
-  never written to the event log, shown only as `…last4` and its validated
-  scopes. Validation on save: call GitHub with it, confirm access to the repo
-  and that it can push branches and open PRs; reject a token that can also push
-  the default branch if the repo has branch protection that would be bypassed
-  (warn, not block).
-- **Later: GitHub App.** The operator installs the app on chosen repos from the
-  UI (install redirect), the control plane mints per-repo **installation
-  tokens** (about 1 hour) on demand. Needs a public HTTPS control plane, so it
-  waits on TLS and a stable hostname; strictly better (per-repo scope, no
-  long-lived secret, revocation in GitHub) and should be the default once
-  possible.
-
-The registry never stores which mechanism is "better"; a repo's grant is just a
-`grant` row with `kind: 'pat' | 'app-installation'`.
+Owned by [github-app-identity-and-grants](github-app-identity-and-grants.md):
+installations, the user-visible repo set, and per-repo installation tokens.
+This issue only consumes them.
 
 ### 3. Repo-agnostic workers
 
@@ -105,16 +103,13 @@ The registry never stores which mechanism is "better"; a repo's grant is just a
   `CORELLIA_REPO_ROOT`, which collides for `a/widgets` and `b/widgets`. Key by
   the full slug.
 
-### 4. Delivering the token to the engine
+### 4. Credentials per job
 
-Extend `WorkerLink.claim` to return `{ job, credential: { token, expiresAt } }`
-(WorkerLink is a contract; this is a contract change and wants an ADR). The
-worker holds the token in memory for the job and passes it to the PR tools
-through an explicit per-job credential argument rather than `process.env`. Keep
-the existing `GIT_ASKPASS` mechanism and the scrub guarantees; refresh the token
-at tool-call time if it is within a few minutes of expiry (matters for App
-tokens on long jobs). `GITHUB_TOKEN` in the env remains as a deprecated global
-fallback for the single-repo daemon so existing deploys keep working.
+Already delivered by the App issue: `claim` returns a repo-scoped installation
+token, and the PR tools take it per job. The new piece here is that the worker
+also uses that token for its own `git clone` / `git fetch` of the managed clone,
+through the same `GIT_ASKPASS` path, so no long-lived credential sits on the
+worker.
 
 ### 5. Safety rails
 
@@ -124,34 +119,31 @@ fallback for the single-repo daemon so existing deploys keep working.
 - **Never the default branch.** The factory pushes job branches and opens PRs;
   `push_branch` refuses the registered default branch regardless of what the
   token allows.
-- **Disable and revoke are first-class.** Disabling a repo stops claims
-  immediately, lets in-flight jobs preserve their worktrees (ADR-026), and
-  optionally purges the clone and deletes the grant.
-- **Audit events.** `repo-registered`, `repo-grant-rotated`, `repo-disabled`
+- **Disable and revoke are first-class.** Disabling a repo in the console, or
+  the installation losing it on GitHub, stops claims immediately and lets
+  in-flight jobs preserve their worktrees (ADR-026). An in-flight job's token
+  stops refreshing, so it cannot keep pushing past revocation. Purging the clone
+  is optional.
+- **Audit events.** `repo-enabled`, `repo-disabled`, `repo-revoked`
   land in the event log with actor and slug, never a secret. The secret-value
   diff gate ([secret-value-diff-gate](secret-value-diff-gate.md)) stays the
   backstop against a token leaking into a commit.
-- **Auth.** The console's bearer is a single shared `FRONT_DOOR_TOKEN`. That is
-  acceptable for one operator, but it now gates credential entry, so the issue
-  notes it as the next thing to harden (per-operator tokens or login) and does
-  not solve it here.
 
 ### 6. UI
 
 A Repos view in the console (phone-friendly, since that is the motivating use):
-list with status chip, last sync, live workers, spend; "Add repo" (slug +
-token paste, validate and show what the token can do); per-repo detail (rotate
-grant, set ceiling, sync, disable/remove). The commission form's repo field
+list with status chip, last sync, live workers, spend; "Add repo" picks from
+the repos the user's installations grant (with a "Grant more on GitHub" link to
+the App's install page); per-repo detail (set ceiling, sync, disable/remove). The commission form's repo field
 becomes a picker over `ready` repos.
 
-### Slicing (dependency order)
+### Slicing (dependency order, after the App iteration)
 
-(a) registry table + API + commission validated against it, still served by
-today's pinned workers, so nothing breaks; (b) encrypted grant store +
-`CredentialProvider` + PAT validation; (c) WorkerLink `claim` returns the
-credential, PR tools take a per-job credential; (d) repo-agnostic workers with
-managed clones and the slug-keyed event log; (e) the Repos view; (f) GitHub App
-provider behind the same interface.
+(a) registry table + enable/disable API + commission validated against it,
+still served by today's pinned workers, so nothing breaks; (b) revocation sync
+from installation changes; (c) repo-agnostic workers with managed clones,
+token-authenticated fetch, and the slug-keyed event log; (d) the Repos view and
+the commission picker.
 
 ## Non-goals
 
@@ -160,29 +152,27 @@ provider behind the same interface.
 - Non-Node target repos. The image ships Node only and target scripts run inside
   it (`.env.example`, "v1 CONSTRAINT"). Registration should detect the stack and
   show an unsupported-stack warning rather than fail late in a job.
-- Multi-tenant isolation. One operator, one trust domain; per-operator access
-  control is separate follow-on work.
-- Letting a job run against a repo in a different org than its grant.
+- Grant mechanics (installations, tokens, sign-in). The App issue owns them.
+- Isolation between users' jobs on the worker side. Workers are one trust
+  domain. Visibility is per user (GitHub's access); execution is shared.
 
 ## Open questions
 
-1. **PAT first or App first?** Recommend PAT first (works without TLS/public URL,
-   unblocks phone-only setup), App second behind the same interface.
-2. **Clone location for multiple workers on one host.** A shared volume means
+1. **Clone location for multiple workers on one host.** A shared volume means
    concurrent `git fetch` on one clone; recommend a bare mirror per repo with
    per-job worktrees off it and a per-repo fetch lock.
-3. **Does the single-repo daemon (`src/daemon/daemon.ts`) get the registry?**
+2. **Does the single-repo daemon (`src/daemon/daemon.ts`) get the registry?**
    Recommend no: the registry is a fleet/control-plane feature; the daemon keeps
    its env-pinned repo.
-4. **Per-repo secrets for the target's own scripts** (env a repo's tests need).
+3. **Per-repo secrets for the target's own scripts** (env a repo's tests need).
    Out of scope here; likely its own issue once grants exist.
 
 ## Acceptance hint
 
-From a phone browser on a freshly deployed fleet, with no ssh and no `.env` edit
-after the first deploy, an operator can: add `owner/some-repo` and paste a
-fine-grained token in the console; see it go `ready` with the token's validated
-access; commission a job against it; watch a worker clone it and the job open a
-PR on a job branch (never the default branch); then disable the repo and see
-claims stop. At no point does the token appear in any API response, event-log
-row, worker transcript, or child-process environment.
+From a phone browser on a fleet that already has the GitHub App, with no ssh and
+no `.env` edit: a signed-in user installs the App on a new repo, sees it under
+"available", enables it, and commissions a job against it. A worker that has
+never seen the repo clones it with the job's installation token and opens a PR
+on a job branch, never the default branch. Removing the repo from the
+installation on GitHub flips it to `revoked` and claims stop. A second user
+without GitHub access to that repo never sees it in the console.
