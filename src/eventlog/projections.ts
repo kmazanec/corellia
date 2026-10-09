@@ -794,101 +794,10 @@ export function projectKnowledge(events: FactoryEvent[]): KnowledgeView {
 }
 
 // ──────────────────────────────────────────────
-// renderTree
+// renderTree — lives in goal-tree.ts, re-exported for existing importers
 // ──────────────────────────────────────────────
 
-/** Status glyph for a goal's terminal state. */
-function statusGlyph(
-  goalId: string,
-  events: FactoryEvent[],
-): string {
-  // Find the emitted event for this goal
-  const emittedEvent = events.find((e) => e.type === 'emitted' && e.goalId === goalId);
-  if (emittedEvent && emittedEvent.type === 'emitted') {
-    // An emitted report with non-empty blockers is a failure
-    return emittedEvent.report.blockers.length > 0 ? '✗' : '✓';
-  }
-
-  const isBlocked = events.some((e) => e.type === 'blocked' && e.goalId === goalId);
-  if (isBlocked) return '✗';
-
-  return '◌'; // Still in flight.
-}
-
-/**
- * Build an ASCII tree of the run from the event log.
- *
- * Each line: `<indent><glyph> [<type>] <title>`.
- * Stable ordering by the position of the first goal-received event in the log.
- */
-export function renderTree(events: FactoryEvent[]): string {
-  interface Node {
-    goalId: string;
-    goalType: string;
-    title: string;
-    parentId: string | null;
-    order: number; // Index of first-seen goal-received event for stable sort.
-    children: string[];
-  }
-
-  const nodes = new Map<string, Node>();
-
-  for (let i = 0; i < events.length; i++) {
-    const e = events[i];
-    if (!e || e.type !== 'goal-received') continue;
-    if (nodes.has(e.goalId)) continue; // Already seen — keep first-seen order.
-    nodes.set(e.goalId, {
-      goalId: e.goalId,
-      goalType: e.goal.type,
-      title: e.goal.title,
-      parentId: e.goal.parentId,
-      order: i,
-      children: [],
-    });
-  }
-
-  // Wire up parent→child links; collect roots.
-  const roots: Node[] = [];
-  for (const node of nodes.values()) {
-    if (node.parentId !== null && nodes.has(node.parentId)) {
-      nodes.get(node.parentId)!.children.push(node.goalId);
-    } else {
-      roots.push(node);
-    }
-  }
-
-  // Sort children by first-seen order for deterministic output.
-  const sortChildren = (n: Node): void => {
-    n.children.sort((a, b) => {
-      const na = nodes.get(a);
-      const nb = nodes.get(b);
-      return (na?.order ?? 0) - (nb?.order ?? 0);
-    });
-    for (const childId of n.children) {
-      const child = nodes.get(childId);
-      if (child) sortChildren(child);
-    }
-  };
-
-  roots.sort((a, b) => a.order - b.order);
-  for (const root of roots) sortChildren(root);
-
-  const lines: string[] = [];
-
-  const visit = (nodeId: string, indent: string): void => {
-    const node = nodes.get(nodeId);
-    if (!node) return;
-    const glyph = statusGlyph(node.goalId, events);
-    lines.push(`${indent}${glyph} [${node.goalType}] ${node.title}`);
-    for (const childId of node.children) {
-      visit(childId, indent + '  ');
-    }
-  };
-
-  for (const root of roots) visit(root.goalId, '');
-
-  return lines.join('\n');
-}
+export { renderTree } from './goal-tree.js';
 
 // ──────────────────────────────────────────────
 // goldenCandidates

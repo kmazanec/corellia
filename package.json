@@ -12,7 +12,7 @@
     "logs": "tsx scripts/corellia.ts logs",
     "lint": "tsx scripts/lint-library.ts && tsx scripts/lint-docs.ts",
     "test": "npm run lint && npm run typecheck && vitest run --exclude \"**/.corellia/**\"",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p console/server && tsc --noEmit -p console/web",
     "code-shape": "tsx scripts/code-shape.ts .",
     "demo": "tsx examples/greeting.ts",
     "live": "tsx examples/live.ts",
@@ -29,7 +29,12 @@
     "docker:up": "docker compose -f compose.yaml up -d",
     "docker:down": "docker compose -f compose.yaml down",
     "docker:logs": "docker compose -f compose.yaml logs -f",
-    "docker:up:dev-db": "docker compose -f docker-compose.yml up -d postgres"
+    "docker:up:dev-db": "docker compose -f docker-compose.yml up -d postgres",
+    "console:server": "npm run dev -w @corellia/console-server",
+    "console:simulate": "npm run simulate -w @corellia/console-server --",
+    "console:web": "npm run dev -w @corellia/console-web",
+    "console:build": "npm run build -w @corellia/console-web",
+    "worker": "tsx src/daemon/worker.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
@@ -40,5 +45,8 @@
   },
   "dependencies": {
     "pg": "^8.21.0"
-  }
+  },
+  "workspaces": [
+    "console/*"
+  ]
 }

@@ -41,16 +41,18 @@ WORKDIR /app
 # Copy manifests first for layer-cache efficiency.
 COPY package.json package-lock.json ./
 
-# Install ALL dependencies (devDeps needed for tsx + tsc typecheck).
-RUN npm ci
+# Install ALL factory dependencies (devDeps needed for tsx + tsc typecheck).
+# The console/* workspaces are a separate deployable (ADR-050/051) and stay
+# out of the factory image.
+RUN npm ci --workspaces=false
 
 # Copy source and config.
 COPY tsconfig.json ./
 COPY src/ ./src/
 
-# Type-check only (no emit — the project has no tsc build step).
+# Type-check the factory only (no emit — the project has no tsc build step).
 # This gate catches type errors at image-build time.
-RUN npm run typecheck
+RUN npx tsc --noEmit
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM node:22-slim AS runtime

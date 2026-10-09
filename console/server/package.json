@@ -1,0 +1,26 @@
+{
+  "name": "@corellia/console-server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Corellia control plane: the operator console's API, read-model, and live streams (ADR-050, ADR-051).",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "simulate": "tsx src/dev/simulate.ts"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@hono/zod-openapi": "^1.6.3",
+    "drizzle-orm": "^0.45.3",
+    "hono": "^4.13.8",
+    "pg": "^8.23.0",
+    "tsx": "^4.23.15",
+    "zod": "^4.6.5"
+  }
+}

@@ -14,6 +14,8 @@
 #   DEPLOY_HOST=user@host scripts/deploy.sh <tag>
 #   scripts/deploy.sh --host user@host <tag>
 #   scripts/deploy.sh --rollback <previous-tag>      # same flow, prior tag
+#   scripts/deploy.sh --fleet <tag>                  # also the control plane +
+#                                                    # queue workers (ADR-051)
 #
 # Environment:
 #   DEPLOY_HOST         ssh target (user@host). Required unless --host given.
@@ -22,6 +24,12 @@
 #   CORELLIA_OWNER      GHCR owner for the image ref (default: parsed from git
 #                       origin, else required)
 #   DEPLOY_HOST_PORT    host port to probe for /status (default: 8080)
+#   DEPLOY_PROFILE      `fleet` is the same as --fleet: also deploy the
+#                       `fleet` profile — ghcr.io/<owner>/corellia-console:<tag>
+#                       as the control plane, and CORELLIA_WORKERS (host .env,
+#                       default 2) queue workers on the factory image
+#   DEPLOY_CONSOLE_PORT host port to probe for the control plane's
+#                       /api/health under --fleet (default: 8090)
 #
 # The bearer token used to verify /status is read from the REMOTE .env
 # (FRONT_DOOR_TOKEN) — never passed on the command line or printed.
@@ -35,11 +43,14 @@ COMPOSE_FILE="${REPO_ROOT}/compose.deploy.yaml"
 
 DEPLOY_DIR="${DEPLOY_DIR:-/opt/corellia}"
 DEPLOY_HOST_PORT="${DEPLOY_HOST_PORT:-8080}"
+DEPLOY_CONSOLE_PORT="${DEPLOY_CONSOLE_PORT:-8090}"
 
 # ── Parse arguments ──────────────────────────────────────────────────────────
 ROLLBACK=0
 TAG=""
 HOST="${DEPLOY_HOST:-}"
+FLEET=0
+[[ "${DEPLOY_PROFILE:-}" == "fleet" ]] && FLEET=1
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -50,6 +61,10 @@ while [[ $# -gt 0 ]]; do
     --host)
       HOST="${2:-}"
       shift 2
+      ;;
+    --fleet)
+      FLEET=1
+      shift
       ;;
     -h|--help)
       grep '^#' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -93,11 +108,15 @@ if [[ -z "${OWNER}" ]]; then
 fi
 
 IMAGE_REF="ghcr.io/${OWNER}/corellia:${TAG}"
+CONSOLE_IMAGE_REF="ghcr.io/${OWNER}/corellia-console:${TAG}"
 
 if [[ "${ROLLBACK}" -eq 1 ]]; then
   echo "deploy: ROLLBACK to ${IMAGE_REF} on ${HOST}"
 else
   echo "deploy: ${IMAGE_REF} → ${HOST}:${DEPLOY_DIR}"
+fi
+if [[ "${FLEET}" -eq 1 ]]; then
+  echo "deploy: fleet profile — control plane ${CONSOLE_IMAGE_REF} + queue workers"
 fi
 
 # ── Ensure the remote deploy dir exists and holds the compose file ───────────
@@ -118,11 +137,19 @@ fi
 # ── Pull the pinned tag, then recreate (draining the old container's SIGTERM) ─
 # CORELLIA_IMAGE pins the exact tag for this recreate; it is exported inline so
 # it never has to live in the host .env for a one-off deploy.
-remote_compose="cd '${DEPLOY_DIR}' && CORELLIA_IMAGE='${IMAGE_REF}' docker compose -f compose.deploy.yaml"
+# Under --fleet, CORELLIA_CONSOLE_IMAGE pins the control plane to the same tag.
+remote_compose="cd '${DEPLOY_DIR}' && CORELLIA_IMAGE='${IMAGE_REF}'"
+pull_services="daemon"
+if [[ "${FLEET}" -eq 1 ]]; then
+  remote_compose="${remote_compose} CORELLIA_CONSOLE_IMAGE='${CONSOLE_IMAGE_REF}'"
+  pull_services="daemon control-plane worker"
+fi
+remote_compose="${remote_compose} docker compose -f compose.deploy.yaml"
+[[ "${FLEET}" -eq 1 ]] && remote_compose="${remote_compose} --profile fleet"
 
-echo "deploy: pulling ${IMAGE_REF} …"
+echo "deploy: pulling ${pull_services} …"
 # shellcheck disable=SC2029  # remote_compose is intentionally built and expanded locally.
-ssh "${HOST}" "${remote_compose} pull daemon"
+ssh "${HOST}" "${remote_compose} pull ${pull_services}"
 
 echo "deploy: recreating stack (old daemon drains on SIGTERM) …"
 # shellcheck disable=SC2029  # remote_compose is intentionally built and expanded locally.
@@ -153,5 +180,28 @@ exit 1
 REMOTE
 )
 ssh "${HOST}" "bash -s" <<<"${verify_cmd}"
+
+# ── Under --fleet, verify the control plane's unauthenticated health route ────
+if [[ "${FLEET}" -eq 1 ]]; then
+  echo "deploy: verifying the control plane on ${HOST}:${DEPLOY_CONSOLE_PORT} …"
+  console_verify=$(cat <<REMOTE
+set -euo pipefail
+cd '${DEPLOY_DIR}'
+# shellcheck disable=SC1091
+set -a; . ./.env; set +a
+port="\${CONSOLE_HOST_PORT:-${DEPLOY_CONSOLE_PORT}}"
+for attempt in \$(seq 1 30); do
+  if curl -sf -o /dev/null "http://127.0.0.1:\${port}/api/health"; then
+    echo "deploy: control plane OK after \${attempt} attempt(s)"
+    exit 0
+  fi
+  sleep 2
+done
+echo "deploy: control plane /api/health did not answer" >&2
+exit 1
+REMOTE
+)
+  ssh "${HOST}" "bash -s" <<<"${console_verify}"
+fi
 
 echo "deploy: done — ${IMAGE_REF} live on ${HOST}"

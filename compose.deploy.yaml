@@ -46,6 +46,9 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      # The target repo is mounted at /workspace (below); the daemon builds there.
+      CORELLIA_REPO_ROOT: /workspace
     ports:
       - '${HOST_PORT:-8080}:8080'
     volumes:
@@ -69,6 +72,51 @@ services:
       timeout: 5s
       retries: 6
       start_period: 15s
+
+  # ── The fleet (profile: fleet, ADR-051) ─────────────────────────────────────
+  # Mirrors compose.yaml's fleet services with published images. Bring it up
+  # with `--profile fleet`; scripts/deploy.sh does when DEPLOY_PROFILE=fleet.
+  control-plane:
+    profiles: ['fleet']
+    # ghcr.io/<owner>/corellia-console:<tag> — the same tag as the factory image.
+    # Optional so non-fleet deploys need not set it; unset under the fleet
+    # profile, compose refuses with "has neither an image nor a build context".
+    image: ${CORELLIA_CONSOLE_IMAGE:-}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CONSOLE_PORT: '8090'
+    ports:
+      - '${CONSOLE_HOST_PORT:-8090}:8090'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:8090/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  worker:
+    profiles: ['fleet']
+    # The factory image, entered at the queue worker.
+    image: ${CORELLIA_IMAGE:?set CORELLIA_IMAGE to a pinned ghcr.io/<owner>/corellia:<tag>}
+    entrypoint: ['node', 'node_modules/.bin/tsx', 'src/daemon/worker.ts']
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CORELLIA_REPO_ROOT: /workspace
+    volumes:
+      - '${TARGET_REPO_PATH:-./}:/workspace'
+    deploy:
+      replicas: ${CORELLIA_WORKERS:-2}
+    stop_grace_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   corellia-pgdata:

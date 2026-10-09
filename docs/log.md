@@ -14,8 +14,36 @@ the [iteration](iterations/index.md) or [ADR](adrs/index.md) that owns the detai
 This file replaces the former `STATUS.md`. Forward strategy is no longer a
 standalone roadmap — it lives as open issues.
 
+## 2026-09-24
+
+- **Iteration 27 — The fleet in containers** landed (live proof pending). A
+  control plane image, a `fleet` compose profile (control plane plus worker
+  replicas) in both compose files, CI publishing `corellia-console`, and
+  `scripts/deploy.sh --fleet`. Running it in Docker found and fixed two bugs: a
+  parked job's affinity outlived its worker, so a redeploy stranded it; and the
+  containerized daemon never set `CORELLIA_REPO_ROOT` to its mounted repo.
+  Issue `fleet-compose-deploy` → fixed-pending-live-proof.
+  [Detail](iterations/2026-09-24-03-fleet-compose/index.md).
+
 ## 2026-09-23
 
+- **Iteration 26 — Job queue and single-job workers** landed (live proof
+  pending). ADR-051 Phase 2: a Postgres job queue behind a `WorkerLink` /
+  `JobQueue` contract (memory, raw-pg, and Drizzle implementations held to one
+  suite), a `npm run worker` process that runs one whole job at a time through
+  its own Listener, job/worker-stamped events with NOTIFY, and console
+  commands to commission, answer, and cancel jobs, with a fleet view. Filed
+  `improvement-loop-on-the-queue` and `fleet-compose-deploy`.
+  [Detail](iterations/2026-09-23-04-job-queue-and-workers/index.md).
+- **Iteration 25 — Operator console, read side** landed (live proof pending).
+  ADR-050 puts the console in `console/*` workspaces so the factory stays
+  zero-dep; ADR-051 sets the deploy shape: one control plane, many single-job
+  workers over shared Postgres. The goal tree is now a shared data projection
+  (`src/eventlog/goal-tree.ts`). A Hono + Drizzle control plane serves jobs,
+  trees, events, and goal detail over REST + resumable SSE, and a React SPA in
+  the Plate aesthetic shows them live. Issue `operator-console-ui` →
+  partially-fixed.
+  [Detail](iterations/2026-09-23-03-operator-console-read-side/index.md).
 - **Backlog audit + issue lifecycle enforced.** 18 issues had fix notes on main
   but still said `open`; the catalog carried no status. Issue status is now a
   closed lifecycle (`open` → `partially-fixed` → `fixed-pending-live-proof` →

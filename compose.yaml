@@ -14,6 +14,16 @@
 # The healthcheck hits GET /status with the bearer token and expects HTTP 200.
 # The bearer token is read from the daemon container's own FRONT_DOOR_TOKEN
 # env (sourced from .env via env_file) — never hard-coded here.
+#
+# THE FLEET (profile `fleet`, ADR-051): a control plane (the operator console
+# and its API) plus N single-job queue workers on the same Postgres.
+#
+#   docker compose --profile fleet up -d postgres control-plane worker
+#   open http://localhost:8090          (CONSOLE_HOST_PORT overrides)
+#   docker compose --profile fleet up -d --scale worker=4 worker
+#
+# `docker compose --profile fleet up` with no service names also starts the
+# single-process daemon beside the fleet; both are safe on one database.
 # ──────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -38,6 +48,8 @@ services:
     build:
       context: .
       target: runtime
+    # Named so the fleet's workers reuse this exact image (one build, two roles).
+    image: corellia:local
     restart: unless-stopped
     # ALL config — including FRONT_DOOR_TOKEN, DATABASE_URL, GITHUB_TOKEN, and
     # the envelope vars — is supplied via .env (env_file). No `environment:`
@@ -45,6 +57,8 @@ services:
     env_file:
       - .env
     environment:
+      # The target repo is mounted at /workspace (below); the daemon builds there.
+      CORELLIA_REPO_ROOT: /workspace
       # Trace backend, opt-in via `--profile observe`. The default is EMPTY, so a
       # plain `docker compose up` (no profile) leaves the OTLP sink off and
       # default deploys unchanged (config.ts: an empty endpoint builds no sink).
@@ -86,6 +100,63 @@ services:
       timeout: 5s
       retries: 6
       start_period: 15s
+
+  # ── The fleet (profile: fleet, ADR-051) ─────────────────────────────────────
+  # The control plane: the operator console's API, live streams, and SPA. It
+  # reads the shared event log and writes only job rows; it runs no model and
+  # needs no target repo. FRONT_DOOR_TOKEN (from .env) is the operator token.
+  control-plane:
+    profiles: ['fleet']
+    build:
+      context: .
+      dockerfile: console/Dockerfile
+    image: corellia-console:local
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CONSOLE_PORT: '8090'
+    ports:
+      - '${CONSOLE_HOST_PORT:-8090}:8090'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # /api/health is the one unauthenticated route.
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:8090/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  # Queue workers: the factory image, entered at the worker instead of the
+  # daemon. Each replica claims one job at a time from the shared queue and runs
+  # all of it; scale with CORELLIA_WORKERS or `--scale worker=N`. Every replica
+  # mounts the same target repo and keeps its trees in their own worktrees.
+  # CORELLIA_WORKER_REPOS (in .env) names the repo keys they serve; without it a
+  # worker derives one from the mounted repo's origin remote.
+  worker:
+    profiles: ['fleet']
+    build:
+      context: .
+      target: runtime
+    image: corellia:local
+    entrypoint: ['node', 'node_modules/.bin/tsx', 'src/daemon/worker.ts']
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CORELLIA_REPO_ROOT: /workspace
+      CORELLIA_OTLP_ENDPOINT: '${CORELLIA_OTLP_ENDPOINT:-}'
+    volumes:
+      - '${TARGET_REPO_PATH:-./}:/workspace'
+    deploy:
+      replicas: ${CORELLIA_WORKERS:-2}
+    # SIGTERM: the worker preserves its tree and records the job interrupted.
+    stop_grace_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # ── Optional trace backend (profile: observe) ──────────────────────────────
   # Jaeger all-in-one — the cheapest graphical view of a run. It is in the

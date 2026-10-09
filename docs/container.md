@@ -137,3 +137,21 @@ docker compose down -v         # also remove corellia-pgdata (wipes events)
   `scripts/smoke-container.ts`. The vitest suite is **never run inside the
   container** — the runtime stage installs no devDependencies for test
   execution (it carries `tsx` only as the runner).
+
+## The fleet locally (ADR-051)
+
+The `fleet` profile adds the control plane (built from `console/Dockerfile`)
+and queue workers (the factory image, entered at `src/daemon/worker.ts`) on the
+same Postgres:
+
+```bash
+docker compose --profile fleet up -d --build postgres control-plane worker
+open http://localhost:8090                      # the operator console
+docker compose --profile fleet up -d --scale worker=3 worker
+docker compose --profile fleet stop worker      # workers drain on SIGTERM
+```
+
+For a model-free trial set `CORELLIA_ENGINE=simulated` in `.env`: workers play
+sample trees into the log (a commission can ask to park, to exercise
+answering) instead of calling a model. Set `CORELLIA_WORKER_REPOS` to the repo
+key the console should offer. Remote hosts: [`deploy.md` §9](deploy.md).
