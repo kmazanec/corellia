@@ -48,7 +48,7 @@ status disagrees with its file (rules in `src/library/issue-backlog.ts`).
 | [comprehension-region-wallclock-exhaustion](comprehension-region-wallclock-exhaustion.md) | bug | fixed-pending-live-proof | engine, comprehend, wall-clock, recursion, partial-delivery, deliver-intent |
 | [decision-brief-notification-sink](decision-brief-notification-sink.md) | future-work | fixed-pending-live-proof | eventlog, daemon, observability, human-gate, notification |
 | [dive-anchor-hallucination-blocks-region](dive-anchor-hallucination-blocks-region.md) | bug | fixed-pending-live-proof | engine, comprehend, knowledge, dive-anchor, verify-on-read, region-facts, deliver-intent, model-quality |
-| [github-app-identity-and-grants](github-app-identity-and-grants.md) | future-work | open | operator-console, control-plane, github, github-app, identity, auth, credentials, security, caddy, adr-050, adr-051 |
+| [github-app-identity-and-grants](github-app-identity-and-grants.md) | future-work | open | operator-console, control-plane, github, github-app, identity, auth, tenancy, orgs, credentials, security, caddy, adr-050, adr-051 |
 | [golden-outcome-labels](golden-outcome-labels.md) | bug | fixed-pending-live-proof | engine, eventlog, golden, calibration, judge |
 | [greenfield-criteria-grounding](greenfield-criteria-grounding.md) | bug | fixed-pending-live-proof | engine, acceptance-criteria, milestone-loop, greenfield, anchors, explore-economy, deliver-intent |
 | [judge-calibration-replay](judge-calibration-replay.md) | future-work | fixed-pending-live-proof | engine, eval, golden, calibration, judge, replay |

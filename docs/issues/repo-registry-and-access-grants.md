@@ -66,14 +66,15 @@ separate, deliberate step that says "the factory works here". An org might
 install on fifty repos and enable three.
 
 A `corellia_repos` table the control plane owns: `slug` (`owner/name`, the key
-jobs already use), `installation_id`, `enabled_by` (GitHub user), `default_branch`,
+jobs already use), `org_id` (the App issue's org, i.e. the installation), `enabled_by` (GitHub user, an org admin), `default_branch`,
 `status` (`pending` | `ready` | `error` | `disabled` | `revoked`),
 `last_synced_at`, `last_error`, an optional per-repo spend ceiling, and the
-detected stack summary. A repo can only be enabled if a current installation
-covers it and the enabling user can see it (the App issue's authorization rule).
+detected stack summary. A repo can only be enabled by an admin of its org, and
+only if the org's installation currently covers it.
 When the installation drops the repo (uninstall, deselect, suspend), the row
 goes `revoked` and claims stop. `GET /repos` returns the registry joined with
-worker liveness, filtered to what the signed-in user can see.
+worker liveness, scoped to the caller's org and filtered to the repos they can
+access on GitHub.
 
 Console API: `GET /repos/available` (granted but not enabled, per user),
 `POST /repos` (enable), `PATCH /repos/:slug` (ceiling, disable),
