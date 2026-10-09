@@ -2,7 +2,7 @@
 type: issue
 title: "GitHub App — operator sign-in and per-repo grants for the console"
 description: Replace the console's single shared bearer token and the process-wide GITHUB_TOKEN with one GitHub App per factory deployment. Operators sign in with GitHub; anyone allowed can install the App on the repos they choose; the control plane mints short-lived per-repo installation tokens for jobs. This is the identity-and-credential foundation the repo registry builds on.
-tags: [operator-console, control-plane, github, github-app, identity, auth, credentials, security, adr-050, adr-051]
+tags: [operator-console, control-plane, github, github-app, identity, auth, credentials, security, caddy, adr-050, adr-051]
 timestamp: 2026-09-24
 status: open
 kind: future-work
@@ -111,14 +111,31 @@ single-repo daemon.
 
 The OAuth callback and install setup URL are browser redirects. Webhooks must be
 reachable from GitHub. Both need the console at a stable HTTPS origin
-(`CORELLIA_PUBLIC_URL`). The deploy runbook has no TLS today. A Caddy sidecar in
-the `fleet` profile (automatic certificates for a hostname pointed at the box)
-is the small fix, and it belongs in this iteration's first slice, since nothing
-else here works without it.
+(`CORELLIA_PUBLIC_URL`). The deploy runbook has no TLS today.
+
+The target host (Hetzner) already runs Caddy for other apps, so the factory
+does **not** bundle its own proxy. Another Caddy would fight the existing one for
+ports 80/443. Instead:
+
+- `compose.deploy.yaml` publishes the control plane on loopback only
+  (`127.0.0.1:${CONSOLE_HOST_PORT}`), and likewise the daemon, so nothing is
+  exposed except through the host proxy.
+- The host Caddy gets one site block, e.g.
+  `corellia.example.com { reverse_proxy 127.0.0.1:8090 }`, plus a DNS record. The
+  control plane must keep SSE streams working behind it (no response
+  buffering; Caddy's defaults are fine) and trust `X-Forwarded-*` from loopback
+  only, so session cookies are `Secure` and the OAuth redirect URLs are correct.
+- `docs/deploy.md` documents the "existing reverse proxy" shape as the default
+  and a bundled-Caddy profile as an option for bare hosts. The bundled option is
+  not needed for this host.
+
+The existing Caddyfile's location, how Caddy runs on that host (system service
+or container), and which hostname to use are unknown until someone is on the
+box. Record them in the iteration when this slice is built.
 
 ### Slicing
 
-(a) TLS + `CORELLIA_PUBLIC_URL` + encrypted secret store; (b) App creation via
+(a) loopback-only ports, a site block in the host's existing Caddy, `CORELLIA_PUBLIC_URL`, proxy-aware cookies and redirects, and the encrypted secret store; (b) App creation via
 manifest (and the env path); (c) GitHub sign-in, sessions, allowlist, replacing
 human use of the bearer; (d) installations: install link, setup redirect,
 webhooks + on-demand listing; (e) `CredentialProvider` + per-job token through
