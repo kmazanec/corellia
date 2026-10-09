@@ -56,8 +56,11 @@ answer, and finished; workers scaled to three and drained on
 ssh/scp shims against `compose.deploy.yaml`; and a job parked before a worker
 recreate resumed on a new worker after the answer.
 
+CI then built both images unmodified on GitHub (run 35954174993, commit
+2df6eed), covering the factory image's `apt-get install git` step that the
+sandbox's network policy blocked.
+
 Remaining live proof: a real host deploy from published GHCR images with the
-live engine — which also exercises what the sandbox could not: the factory
-image's `apt-get install git` (its network policy denies deb.debian.org),
-Postgres 18 (Docker Hub rate-limited; a relay to Postgres 16 stood in), and
-concurrent worker git worktrees on one shared checkout.
+live engine — which also exercises what the sandbox could not: Postgres 18
+(Docker Hub rate-limited; a relay to Postgres 16 stood in), and concurrent
+worker git worktrees on one shared checkout.
