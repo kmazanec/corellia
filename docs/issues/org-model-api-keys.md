@@ -92,13 +92,14 @@ thing a factory admin approves is use of the house key.
 The factory already measures real spend per tree from provider usage (ADR-017).
 Tag it with `org_id` and `key_source` so the console can show an org its spend,
 and the factory admin can see house-key spend by org. That is reporting only.
-Limits are the budgets iteration.
+Limits come with metered billing.
 
 ## Non-goals
 
 - Billing, metering for invoices, or charging orgs for house-key use:
   [metered-billing-house-key](metered-billing-house-key.md).
-- Spend budgets or caps (deferred, decided 2026-09-24).
+- Spend budgets or caps. They belong to
+  [metered-billing-house-key](metered-billing-house-key.md).
 - Per-user keys. Keys are per org.
 - Custom model catalogs per org. An org's key runs the factory's catalog
   (ADR-044); per-org catalog overrides are a later idea.
@@ -109,9 +110,10 @@ Limits are the budgets iteration.
    is independent of the repo registry. Recommend building it right after the
    App iteration and before the registry: it is small, and it is what makes
    outside orgs safe to admit.
-2. **Should the house key be off by default for new orgs?** Recommend yes. The
-   factory admin's own org is granted it at App creation; everyone else brings a
-   key or asks.
+2. ~~Should the house key be off by default for new orgs?~~ **Decided
+   2026-10-11: off by default.** The factory admin's own org is granted it at App
+   creation; every other org brings a key or is granted the house key
+   explicitly, so nobody can spend the operator's account by accident.
 
 ## Acceptance hint
 

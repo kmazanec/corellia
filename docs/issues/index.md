@@ -102,7 +102,7 @@ status disagrees with its file (rules in `src/library/issue-backlog.ts`).
 | [factory-okf-discipline](factory-okf-discipline.md) | idea | partially-fixed | factory, docs, okf, constitution, self-hosting |
 | [improvement-envelope-dollar-accounting](improvement-envelope-dollar-accounting.md) | bug | fixed-pending-live-proof | listener, budget, improvement-loop, cost |
 | [memory-contradiction-and-consolidation](memory-contradiction-and-consolidation.md) | future-work | open | engine, memory, governance, consolidation |
-| [metered-billing-house-key](metered-billing-house-key.md) | idea | open | operator-console, control-plane, billing, tenancy, orgs, cost |
+| [metered-billing-house-key](metered-billing-house-key.md) | idea | open | operator-console, control-plane, billing, budgets, tenancy, orgs, cost |
 | [repl-wire-or-remove](repl-wire-or-remove.md) | idea | fixed-pending-live-proof | daemon, repl, front-door, dead-code |
 | [ride-along-items](ride-along-items.md) | future-work | partially-fixed | ride-along, future-work, roadmap |
 | [roadmap-non-goals](roadmap-non-goals.md) | idea | open | roadmap, non-goals, deferred |

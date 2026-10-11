@@ -194,8 +194,8 @@ push with App tokens, and the repo registry can build on it.
 - Factory-side roles beyond admin / member, or any ACL granted inside the
   factory. GitHub access is the authorization.
 - Hosts other than github.com (GHES later, same App model).
-- Spend budgets of any kind (per org, per user). Deferred to a later iteration
-  (decided 2026-09-24).
+- Spend budgets of any kind (per org, per user). Deferred, and folded into
+  [metered-billing-house-key](metered-billing-house-key.md) (decided 2026-10-11).
 - Model API keys. Orgs bring their own key in
   [org-model-api-keys](org-model-api-keys.md), which also replaces the
   activation gate below for orgs that supply one. Metered billing on the
