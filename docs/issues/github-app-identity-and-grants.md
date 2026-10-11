@@ -104,11 +104,17 @@ re-verified**, never granted inside the factory.
   - *admin*: the user is an owner of the GitHub org (or is the personal account).
     Admins enable and disable repos for the org (registry issue) and approve
     things on the org's behalf.
-- **Repo-level rule (the one that gates action):** a user can see a repo's
-  jobs and commission or answer against it only if the org's installation covers
-  the repo **and** the user can access that repo on GitHub
-  (`GET /user/installations/{id}/repositories`). Org membership groups and
-  scopes the console. The repo check is the authorization.
+- **Repo-level rule (the one that gates action).** The org's installation must
+  cover the repo, and then the user's own GitHub permission on that repo decides
+  what they can do (`GET /user/installations/{id}/repositories` returns each
+  repo's `permissions` for the user):
+  - **read**: see the repo's jobs, trees, logs, and results;
+  - **write** (`push`, or `maintain` / `admin`): commission jobs, answer parked
+    jobs, cancel. Anything that spends model budget needs write (decided
+    2026-10-11). Read-only collaborators can watch but not start or steer work.
+
+  Org membership groups and scopes the console. The repo check is the
+  authorization.
 - **Jobs belong to an org.** Jobs gain `org_id` and `commissioned_by`. Every
   list, stream, and SSE channel is filtered by the caller's verified access, so
   one org never sees another's jobs, trees, or logs.
@@ -189,16 +195,21 @@ push with App tokens, and the repo registry can build on it.
   factory. GitHub access is the authorization.
 - Hosts other than github.com (GHES later, same App model).
 - Spend budgets of any kind (per org, per user). Deferred to a later iteration
-  (decided 2026-09-24). See the activation gate under Open questions for the
-  interim exposure.
+  (decided 2026-09-24).
+- Model API keys. Orgs bring their own key in
+  [org-model-api-keys](org-model-api-keys.md), which also replaces the
+  activation gate below for orgs that supply one. Metered billing on the
+  factory's own key is [metered-billing-house-key](metered-billing-house-key.md).
 
 ## Open questions
 
 1. **Interim exposure with no budgets.** A public App means any GitHub account
-   can install it and commission jobs that spend this factory's model key.
-   Recommend a minimal gate until budgets land: a new org starts `pending`, and
-   a factory admin (the App's creator) flips it `active` before its jobs can be
-   claimed. One switch, not a budget. Drop it if that exposure is acceptable.
+   can install it. Until [org-model-api-keys](org-model-api-keys.md) lands, every
+   job spends the factory's own model key. Recommend a minimal gate: a new org
+   starts `pending`, and a factory admin (the App's creator) flips it `active`
+   before its jobs can be claimed. Once org keys exist, the gate narrows to
+   "may this org use the house key", and an org with its own key needs no
+   approval.
 2. **Who owns the App:** your personal account or an org? Org ownership survives
    any one person leaving. Recommend an org.
 3. **Webhooks required or optional?** Recommend optional, with on-demand

@@ -53,6 +53,7 @@ status disagrees with its file (rules in `src/library/issue-backlog.ts`).
 | [greenfield-criteria-grounding](greenfield-criteria-grounding.md) | bug | fixed-pending-live-proof | engine, acceptance-criteria, milestone-loop, greenfield, anchors, explore-economy, deliver-intent |
 | [judge-calibration-replay](judge-calibration-replay.md) | future-work | fixed-pending-live-proof | engine, eval, golden, calibration, judge, replay |
 | [milestone-loop-step-7-prove-live](milestone-loop-step-7-prove-live.md) | future-work | open | milestone-loop, engine, live-proof |
+| [org-model-api-keys](org-model-api-keys.md) | future-work | open | operator-console, control-plane, worker, brain, provider, credentials, security, tenancy, orgs |
 | [operator-console-ui](operator-console-ui.md) | future-work | partially-fixed | ui, operator-console, observability, read-model, daemon, eventlog, harness, front-door |
 | [out-of-scope-edit-enforcement](out-of-scope-edit-enforcement.md) | bug | fixed-pending-live-proof | scope-safety, engine, broker |
 | [repo-registry-and-access-grants](repo-registry-and-access-grants.md) | future-work | open | operator-console, worker, control-plane, repo-registry, github-app, github, security, adr-051 |
@@ -101,6 +102,7 @@ status disagrees with its file (rules in `src/library/issue-backlog.ts`).
 | [factory-okf-discipline](factory-okf-discipline.md) | idea | partially-fixed | factory, docs, okf, constitution, self-hosting |
 | [improvement-envelope-dollar-accounting](improvement-envelope-dollar-accounting.md) | bug | fixed-pending-live-proof | listener, budget, improvement-loop, cost |
 | [memory-contradiction-and-consolidation](memory-contradiction-and-consolidation.md) | future-work | open | engine, memory, governance, consolidation |
+| [metered-billing-house-key](metered-billing-house-key.md) | idea | open | operator-console, control-plane, billing, tenancy, orgs, cost |
 | [repl-wire-or-remove](repl-wire-or-remove.md) | idea | fixed-pending-live-proof | daemon, repl, front-door, dead-code |
 | [ride-along-items](ride-along-items.md) | future-work | partially-fixed | ride-along, future-work, roadmap |
 | [roadmap-non-goals](roadmap-non-goals.md) | idea | open | roadmap, non-goals, deferred |
