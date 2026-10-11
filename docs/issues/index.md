@@ -56,7 +56,7 @@ status disagrees with its file (rules in `src/library/issue-backlog.ts`).
 | [org-model-api-keys](org-model-api-keys.md) | future-work | open | operator-console, control-plane, worker, brain, provider, credentials, security, tenancy, orgs |
 | [operator-console-ui](operator-console-ui.md) | future-work | partially-fixed | ui, operator-console, observability, read-model, daemon, eventlog, harness, front-door |
 | [out-of-scope-edit-enforcement](out-of-scope-edit-enforcement.md) | bug | fixed-pending-live-proof | scope-safety, engine, broker |
-| [repo-registry-and-access-grants](repo-registry-and-access-grants.md) | future-work | open | operator-console, worker, control-plane, repo-registry, github-app, github, security, adr-051 |
+| [repo-selection-and-on-demand-workers](repo-selection-and-on-demand-workers.md) | future-work | open | operator-console, worker, control-plane, repo-selection, repo-registry, github-app, github, security, adr-051 |
 | [web-fetch-tool](web-fetch-tool.md) | bug | fixed-pending-live-proof | engine, broker, tool, research, web |
 | [worktree-work-invisible-to-artifact-judges](worktree-work-invisible-to-artifact-judges.md) | bug | fixed-pending-live-proof | engine, artifact, worktree, salvage, judge, acceptance, milestone-loop, integrate-merge |
 

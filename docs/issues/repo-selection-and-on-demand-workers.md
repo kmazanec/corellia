@@ -1,15 +1,15 @@
 ---
 type: issue
-title: "Repo registry and access grants — pick a repo and grant the factory access from the console"
-description: Workers are welded to one mounted checkout, so the factory can only work on repos baked into its environment. Add a repo registry in Postgres, fed by the GitHub App's installations, and repo-agnostic workers that clone on demand and run each job with that repo's short-lived App token. Builds on github-app-identity-and-grants.
-tags: [operator-console, worker, control-plane, repo-registry, github-app, github, security, adr-051]
+title: "Repo selection and on-demand workers — pick any granted repo in the console and run jobs on it"
+description: Workers are welded to one mounted checkout, so the factory can only work on repos baked into its environment. Let an org pick, in the console, which of the repos its GitHub App installation grants the factory works on (a registry in Postgres), and repo-agnostic workers that clone on demand and run each job with that repo's short-lived App token. Builds on github-app-identity-and-grants and org-model-api-keys.
+tags: [operator-console, worker, control-plane, repo-selection, repo-registry, github-app, github, security, adr-051]
 timestamp: 2026-09-24
 status: open
 kind: future-work
 severity: high
 ---
 
-# Repo registry and access grants — pick a repo and grant the factory access from the console
+# Repo selection and on-demand workers — pick any granted repo in the console and run jobs on it
 
 ## Problem
 
@@ -39,7 +39,12 @@ Three couplings cause it:
 
 ## Depends on
 
-[github-app-identity-and-grants](github-app-identity-and-grants.md). That issue
+[github-app-identity-and-grants](github-app-identity-and-grants.md), and
+[org-model-api-keys](org-model-api-keys.md) for which model key a job runs on.
+Build order (decided 2026-10-11): App and orgs, then org keys, then this, then
+[metered billing](metered-billing-house-key.md).
+
+The App issue
 supplies who the operator is (GitHub sign-in), which repos have been granted
 (App installations), and the per-job credential
 (`CredentialProvider.tokenFor(repo)` delivered through `WorkerLink.claim`). This

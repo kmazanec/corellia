@@ -34,7 +34,7 @@ to one person and leave long-lived secrets in its database.
 
 - `console/server/src/api/auth.ts` (single bearer, the planned identity seam).
 - `src/engine/pr-tools.ts` (`process.env['GITHUB_TOKEN']` at execute time).
-- [repo-registry-and-access-grants](repo-registry-and-access-grants.md) needs a
+- [repo-selection-and-on-demand-workers](repo-selection-and-on-demand-workers.md) needs a
   per-repo credential and a notion of "who granted this". It depends on this issue.
 
 ## Proposed direction
