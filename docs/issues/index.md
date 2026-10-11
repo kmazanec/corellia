@@ -48,12 +48,15 @@ status disagrees with its file (rules in `src/library/issue-backlog.ts`).
 | [comprehension-region-wallclock-exhaustion](comprehension-region-wallclock-exhaustion.md) | bug | fixed-pending-live-proof | engine, comprehend, wall-clock, recursion, partial-delivery, deliver-intent |
 | [decision-brief-notification-sink](decision-brief-notification-sink.md) | future-work | fixed-pending-live-proof | eventlog, daemon, observability, human-gate, notification |
 | [dive-anchor-hallucination-blocks-region](dive-anchor-hallucination-blocks-region.md) | bug | fixed-pending-live-proof | engine, comprehend, knowledge, dive-anchor, verify-on-read, region-facts, deliver-intent, model-quality |
+| [github-app-identity-and-grants](github-app-identity-and-grants.md) | future-work | open | operator-console, control-plane, github, github-app, identity, auth, tenancy, orgs, credentials, security, caddy, adr-050, adr-051 |
 | [golden-outcome-labels](golden-outcome-labels.md) | bug | fixed-pending-live-proof | engine, eventlog, golden, calibration, judge |
 | [greenfield-criteria-grounding](greenfield-criteria-grounding.md) | bug | fixed-pending-live-proof | engine, acceptance-criteria, milestone-loop, greenfield, anchors, explore-economy, deliver-intent |
 | [judge-calibration-replay](judge-calibration-replay.md) | future-work | fixed-pending-live-proof | engine, eval, golden, calibration, judge, replay |
 | [milestone-loop-step-7-prove-live](milestone-loop-step-7-prove-live.md) | future-work | open | milestone-loop, engine, live-proof |
+| [org-model-api-keys](org-model-api-keys.md) | future-work | open | operator-console, control-plane, worker, brain, provider, credentials, security, tenancy, orgs |
 | [operator-console-ui](operator-console-ui.md) | future-work | partially-fixed | ui, operator-console, observability, read-model, daemon, eventlog, harness, front-door |
 | [out-of-scope-edit-enforcement](out-of-scope-edit-enforcement.md) | bug | fixed-pending-live-proof | scope-safety, engine, broker |
+| [repo-selection-and-on-demand-workers](repo-selection-and-on-demand-workers.md) | future-work | open | operator-console, worker, control-plane, repo-selection, repo-registry, github-app, github, security, adr-051 |
 | [web-fetch-tool](web-fetch-tool.md) | bug | fixed-pending-live-proof | engine, broker, tool, research, web |
 | [worktree-work-invisible-to-artifact-judges](worktree-work-invisible-to-artifact-judges.md) | bug | fixed-pending-live-proof | engine, artifact, worktree, salvage, judge, acceptance, milestone-loop, integrate-merge |
 
@@ -99,6 +102,7 @@ status disagrees with its file (rules in `src/library/issue-backlog.ts`).
 | [factory-okf-discipline](factory-okf-discipline.md) | idea | partially-fixed | factory, docs, okf, constitution, self-hosting |
 | [improvement-envelope-dollar-accounting](improvement-envelope-dollar-accounting.md) | bug | fixed-pending-live-proof | listener, budget, improvement-loop, cost |
 | [memory-contradiction-and-consolidation](memory-contradiction-and-consolidation.md) | future-work | open | engine, memory, governance, consolidation |
+| [metered-billing-house-key](metered-billing-house-key.md) | idea | open | operator-console, control-plane, billing, budgets, tenancy, orgs, cost |
 | [repl-wire-or-remove](repl-wire-or-remove.md) | idea | fixed-pending-live-proof | daemon, repl, front-door, dead-code |
 | [ride-along-items](ride-along-items.md) | future-work | partially-fixed | ride-along, future-work, roadmap |
 | [roadmap-non-goals](roadmap-non-goals.md) | idea | open | roadmap, non-goals, deferred |
